@@ -10,6 +10,7 @@ pub mod gltf_import;
 pub mod pmd;
 pub mod quant;
 pub mod samples;
+pub mod scene;
 pub mod tim;
 
 /// 4.12 fixed-point one (GTE convention: 4096 = 1.0).

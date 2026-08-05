@@ -5,7 +5,8 @@ CLI `psxpipe` : conversion des assets sources vers les formats console PS1.
 ```
 psxpipe gltf2pmd <in.gltf> [-o out.pmd] [--size 128] [--flat] [--untextured] [--tex-w 256] [--tex-h 256]
 psxpipe png2tim  <in.png>  [-o out.tim] [--bpp 4|8|16] [--org-x 320] [--org-y 0] [--clut-x 320] [--clut-y 256]
-psxpipe info     <file.pmd|file.tim>
+psxpipe scene    <in.json> [-o out.psc]
+psxpipe info     <file.pmd|file.tim|file.psc>
 ```
 
 - `gltf2pmd` : glTF/GLB → **PMD** (spec : `docs/PMD-FORMAT.md`). Quantization
@@ -14,6 +15,10 @@ psxpipe info     <file.pmd|file.tim>
 - `png2tim` : PNG → **TIM**. Quantization median-cut (16 ou 256 couleurs),
   CLUT, transparence (alpha < 128 → texel 0x0000), placement VRAM avec
   détection de collision framebuffer.
+- `scene` : scène JSON éditable → **PSC** packé (spec : `docs/SCENE-FORMAT.md`).
+  Blobs PMD/TIM embarqués pour une lecture CD contiguë, tri topologique de la
+  hiérarchie, validation des collisions VRAM. Scènes de démo :
+  `cargo run --example gen_scenes -- samples ../runtime/player/assets`.
 - `samples/` : assets de démonstration régénérables via
   `cargo run --example gen_samples -- samples` : cube + damier, et une
   **maison low-poly** (`house.gltf` + `house.png`, 16 tris, porte/fenêtre,

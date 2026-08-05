@@ -10,7 +10,8 @@ project(
 	DESCRIPTION  "PSX Studio Phase 1 - PMD model viewer (orbital camera, GTE lighting)"
 )
 
-psn00bsdk_add_executable(poc GPREL main.c pmd.c)
+psn00bsdk_add_executable(poc GPREL main.c ${PROJECT_SOURCE_DIR}/../engine/pmd.c)
+target_include_directories(poc PRIVATE ${PROJECT_SOURCE_DIR}/../engine)
 
 # Assets produced by the Rust pipeline (pipeline/psxpipe), committed so the
 # runtime builds without Rust installed. To regenerate:

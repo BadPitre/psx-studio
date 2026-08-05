@@ -355,6 +355,133 @@ pub fn write_all(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Demo scene "village": textured ground slab, three houses, a chimney
+/// parented to the first house (exercises hierarchy + per-axis scale).
+pub fn scene_village_json() -> &'static str {
+    r#"{
+  "name": "village",
+  "settings": {
+    "background":  [24, 32, 56],
+    "ambient":     [72, 72, 80],
+    "light_dir":   [0.5, 1.0, 0.35],
+    "light_color": [255, 245, 225]
+  },
+  "assets": {
+    "textures": [
+      { "id": "checker_tex", "tim": "checker.tim" },
+      { "id": "house_tex",   "tim": "house.tim" }
+    ],
+    "models": [
+      { "id": "cube",  "pmd": "cube.pmd",  "texture": "checker_tex" },
+      { "id": "house", "pmd": "house.pmd", "texture": "house_tex" }
+    ]
+  },
+  "entities": [
+    { "name": "sol",     "position": [0, 7, 150],    "scale": [4.0, 0.05, 4.0], "model": "cube" },
+    { "name": "maison1", "position": [-160, 0, 120], "rotation": [0, 35, 0],  "model": "house" },
+    { "name": "cheminee", "parent": "maison1", "position": [40, -105, 25], "scale": [0.14, 0.3, 0.14], "model": "cube" },
+    { "name": "maison2", "position": [170, 0, 190],  "rotation": [0, -30, 0], "model": "house" },
+    { "name": "maison3", "position": [10, 0, 330],   "rotation": [0, 180, 0], "scale": [1.3, 1.3, 1.3], "model": "house" }
+  ]
+}
+"#
+}
+
+/// Demo scene "champ de cubes": a grid of spinningly-arranged cubes on a
+/// dark slab. Different lighting/background to make the switch obvious.
+pub fn scene_field_json() -> &'static str {
+    r#"{
+  "name": "champ-de-cubes",
+  "settings": {
+    "background":  [8, 8, 20],
+    "ambient":     [40, 40, 64],
+    "light_dir":   [-0.6, 1.0, 0.2],
+    "light_color": [200, 210, 255]
+  },
+  "assets": {
+    "textures": [
+      { "id": "checker_tex", "tim": "checker.tim" },
+      { "id": "house_tex",   "tim": "house.tim" }
+    ],
+    "models": [
+      { "id": "cube",  "pmd": "cube.pmd",  "texture": "checker_tex" },
+      { "id": "house", "pmd": "house.pmd", "texture": "house_tex" }
+    ]
+  },
+  "entities": [
+    { "name": "sol",    "position": [0, 7, 200],     "scale": [4.5, 0.05, 4.5], "model": "cube" },
+    { "name": "cube11", "position": [-200, -40, 80],  "rotation": [0, 15, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "cube12", "position": [0, -40, 80],     "rotation": [0, 30, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "cube13", "position": [200, -40, 80],   "rotation": [0, 45, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "cube21", "position": [-200, -40, 280], "rotation": [0, 60, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "phare",  "position": [0, 0, 280],      "rotation": [0, 90, 0], "scale": [0.8, 1.6, 0.8], "model": "house" },
+    { "name": "cube23", "position": [200, -40, 280],  "rotation": [0, 75, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "cube31", "position": [-200, -40, 480], "rotation": [0, 10, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "cube32", "position": [0, -40, 480],    "rotation": [0, 25, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "cube33", "position": [200, -40, 480],  "rotation": [0, 40, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" }
+  ]
+}
+"#
+}
+
+/// Convert the sample sources into console assets (PMD + TIM) inside `dir`,
+/// with a VRAM layout where both textures coexist:
+/// checker at (320,0) CLUT (320,256), house at (448,0) CLUT (320,257).
+pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
+    use crate::{gltf_import, tim};
+
+    write_all(dir)?;
+
+    for (gltf_name, pmd_name) in [("cube.gltf", "cube.pmd"), ("house.gltf", "house.pmd")] {
+        let (pmd, _) = gltf_import::import(&dir.join(gltf_name), &Default::default())?;
+        std::fs::write(dir.join(pmd_name), pmd.write()?).map_err(|e| e.to_string())?;
+    }
+
+    let layouts = [
+        ("checker.png", "checker.tim", 320u16, 0u16, 320u16, 256u16),
+        ("house.png", "house.tim", 448, 0, 320, 257),
+    ];
+    for (png, tim_name, org_x, org_y, clut_x, clut_y) in layouts {
+        let img = image::open(dir.join(png))
+            .map_err(|e| format!("{png}: {e}"))?
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        let opts = tim::TimOptions {
+            bpp: tim::Bpp::Eight,
+            org_x,
+            org_y,
+            clut_x,
+            clut_y,
+        };
+        let (timg, _) = tim::encode(img.as_raw(), w, h, &opts)?;
+        std::fs::write(dir.join(tim_name), timg.write()).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Build the two demo .psc scenes into `out_dir`, using (and generating)
+/// assets in `samples_dir`. Returns the scene reports.
+pub fn build_demo_scenes(
+    samples_dir: &Path,
+    out_dir: &Path,
+) -> Result<Vec<crate::scene::SceneReport>, String> {
+    build_demo_assets(samples_dir)?;
+    std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
+
+    let mut reports = Vec::new();
+    for (json, json_name, psc_name) in [
+        (scene_village_json(), "scene0.json", "scene0.psc"),
+        (scene_field_json(), "scene1.json", "scene1.psc"),
+    ] {
+        let json_path = samples_dir.join(json_name);
+        std::fs::write(&json_path, json).map_err(|e| e.to_string())?;
+        let (bytes, report) = crate::scene::build_file(&json_path)?;
+        std::fs::write(out_dir.join(psc_name), &bytes).map_err(|e| e.to_string())?;
+        reports.push(report);
+    }
+    Ok(reports)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

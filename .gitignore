@@ -10,6 +10,13 @@ Build/
 # ... mais les buffers glTF d'exemple ne sont pas des builds
 !pipeline/samples/*.bin
 
+# Assets console intermediaires regeneres par gen_scenes (les .psc finaux
+# sont commites dans runtime/player/assets/)
+pipeline/samples/*.pmd
+pipeline/samples/*.tim
+pipeline/*.png
+!pipeline/samples/*.png
+
 # Rust
 target/
 

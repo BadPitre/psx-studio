@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use psxpipe::{gltf_import, pmd, tim};
+use psxpipe::{gltf_import, pmd, scene, tim};
 
 #[derive(Parser)]
 #[command(name = "psxpipe", version, about = "PSX Studio asset pipeline: glTF/PNG -> PS1 formats")]
@@ -62,7 +62,15 @@ enum Cmd {
         #[arg(long, default_value_t = 256)]
         clut_y: u16,
     },
-    /// Print header information of a .pmd or .tim file
+    /// Build a packed .psc scene from an editable scene JSON
+    Scene {
+        /// Input .scene.json file (asset paths resolved relative to it)
+        input: PathBuf,
+        /// Output .psc file (default: input with .psc extension)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Print header information of a .pmd, .tim or .psc file
     Info {
         input: PathBuf,
     },
@@ -188,10 +196,40 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
+        Cmd::Scene { input, output } => {
+            let (bytes, report) = scene::build_file(&input)?;
+            let out = output.unwrap_or_else(|| input.with_extension("psc"));
+            std::fs::write(&out, &bytes).map_err(|e| format!("cannot write {}: {e}", out.display()))?;
+            println!(
+                "{} -> {} ({} bytes)",
+                input.display(),
+                out.display(),
+                report.total_size
+            );
+            println!(
+                "  scene '{}': {} entities, {} models, {} textures",
+                report.name, report.entities, report.models, report.textures
+            );
+            for w in &report.warnings {
+                println!("  warning: {w}");
+            }
+            Ok(())
+        }
         Cmd::Info { input } => {
             let data =
                 std::fs::read(&input).map_err(|e| format!("cannot read {}: {e}", input.display()))?;
-            if data.starts_with(pmd::MAGIC) {
+            if data.starts_with(scene::MAGIC) {
+                let h = scene::parse_header(&data)?;
+                println!("PSC v{} ({} bytes)", h.version, data.len());
+                println!(
+                    "  models: {}   textures: {}   entities: {}",
+                    h.model_count, h.texture_count, h.entity_count
+                );
+                println!(
+                    "  bg: {:?}   ambient: {:?}   light color: {:?}   toward light: {:?}",
+                    h.background, h.ambient, h.light_color, h.light_toward
+                );
+            } else if data.starts_with(pmd::MAGIC) {
                 let h = pmd::parse_header(&data)?;
                 println!("PMD v{} ({} bytes)", h.version, data.len());
                 println!(
