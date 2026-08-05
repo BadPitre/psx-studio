@@ -217,7 +217,11 @@ int Scene_TriangleCount(const Scene* scene)
 uint8_t* Scene_Draw(const Scene* scene, const MATRIX* view, uint32_t* ot,
 	int ot_length, uint8_t* packet, uint8_t* packet_limit)
 {
-	for (int i = 0; i < scene->entity_count; i++)
+	/* Reverse order: within an equal OT bucket, primitives added LAST are
+	 * drawn FIRST (addPrim prepends). Iterating in reverse means entities
+	 * listed first in the scene (typically the ground) end up underneath
+	 * when average-Z ties occur. */
+	for (int i = scene->entity_count - 1; i >= 0; i--)
 	{
 		const SceneEntity* ent = &scene->entities[i];
 		if (ent->model < 0)

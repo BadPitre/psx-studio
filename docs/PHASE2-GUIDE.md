@@ -103,6 +103,9 @@ mapping affine). `--cam X,Y,Z`, `--yaw`, `--pitch` pour déplacer la caméra
 | Textures très étirées sur de grandes surfaces | 256 texels max par poly + mapping affine | grille avec une répétition de texture par cellule (même fix) |
 | Un grand poly coupe/recouvre les objets posés dessus | tri OT par Z **moyen** : un poly géant a une seule profondeur | même fix — des cellules petites se trient localement |
 | Sol qui « nage » en mouvement | warping affine — authentique PS1, atténué par la grille | subdivision dynamique prévue Phase 6 |
+| Sol/mur qui passe devant un objet proche | granularité du tri OT (buckets de profondeur) | corrigé : buckets de 4 unités (`avsz3` direct) + ordre de dessin inversé — lister le sol en premier dans le JSON |
+| Arêtes qui « cassent » en zoom extrême | rasterisation PS1 : coordonnées écran entières + affine | authentique — les jeux d'époque limitaient la proximité caméra ; subdivision Phase 6 |
+| Trou dans le sol en bas de l'écran de très près | near-clipping : un triangle passant derrière la caméra est jeté entier | cellules plus petites = trou plus petit ; clipping géométrique prévu Phase 6 |
 | Géométrie qui clignote en traversant un objet | pas de near-clipping (v1) | prévu avec la subdivision ; éviter de rentrer dans les meshes |
 | Modèle assombri par l'échelle | — corrigé : l'éclairage utilise la rotation non-échelléé | (référence si régression) |
 

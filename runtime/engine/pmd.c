@@ -92,10 +92,12 @@ static inline int TransformTri(const SVECTOR* v0, const SVECTOR* v1,
 	if (nclip <= 0)
 		return -1;
 
-	/* Average Z, pre-divided by 4 by the GTE (ZSF3). */
+	/* Average Z, pre-divided by 4 by the GTE (ZSF3). Used directly as the
+	 * OT index: 4-unit depth buckets, so close-range sorting between
+	 * walls and ground cells stays correct. View range = ot_length * 4
+	 * world units; anything further is culled. */
 	gte_avsz3();
 	gte_stotz(&otz);
-	otz >>= 2;
 	if (otz <= 0 || otz >= ot_length)
 		return -1;
 

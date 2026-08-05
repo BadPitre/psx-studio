@@ -88,9 +88,9 @@ fn ground_plane_imports_as_grid() {
     let (_, report) =
         gltf_import::import(&dir.path().join("ground.gltf"), &gltf_import::ImportOptions::default())
             .unwrap();
-    // 8x8 cells, 2 triangles each; corners dedup to a 9x9 vertex grid.
-    assert_eq!(report.counts, [0, 0, 0, 128]);
-    assert_eq!(report.vertex_count, 81);
+    // 12x12 cells, 2 triangles each; corners dedup to a 13x13 vertex grid.
+    assert_eq!(report.counts, [0, 0, 0, 288]);
+    assert_eq!(report.vertex_count, 169);
     assert_eq!(report.normal_count, 1);
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 }

@@ -346,7 +346,7 @@ pub fn write_all(dir: &Path) -> Result<(), String> {
     std::fs::write(dir.join("house.gltf"), house.to_gltf("House", "house.bin"))
         .map_err(|e| e.to_string())?;
 
-    let ground = plane_mesh(8);
+    let ground = plane_mesh(12);
     std::fs::write(dir.join("ground.bin"), ground.to_bin()).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("ground.gltf"), ground.to_gltf("Ground", "ground.bin"))
         .map_err(|e| e.to_string())?;
