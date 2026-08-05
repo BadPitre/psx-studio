@@ -44,9 +44,18 @@ restent en place. Le sol de la démo utilisait déjà une grille modélisée
   distance dans `Scene_Draw`.
 - **Streaming CD** : précharger `SCENE<n+1>.PSC` pendant le jeu (lecture
   CD asynchrone, l'arène sait déjà tout charger d'un bloc).
-- **Dithering Bayer + sortie 15 bits** dans le shader du viewport (le
-  dernier écart visuel avec la console).
-- **Toggle culling console** dans le viewport (l'éditeur rend
-  double-face pour l'ergonomie).
-- **Subdiv à l'import éditeur** : exposer le champ dans l'UI de drop.
-- Voir la liste complète dans `CONTRIBUTING.md`.
+- Voir la liste à jour dans `CONTRIBUTING.md`.
+
+## 4. Second lot livré
+
+- **Réglage de subdivision dans l'inspecteur** (menu à presets :
+  désactivée/légère/moyenne/forte) — écrit `project.json` et reconvertit
+  le modèle immédiatement pour le viewport.
+- **Dithering console dans le viewport** : matrice Bayer 4×4 exacte du
+  GPU (calculée arithmétiquement dans le fragment shader) + quantization
+  RGB555 — le rendu 320×240 natif fait de `gl_FragCoord` le pixel
+  console. Toggle ▦ en haut à droite du viewport (défaut : activé).
+- **Toggle culling console** ◪ : cache les faces arrière comme le nclip
+  GTE (la racine du graphe porte un miroir Y, la face avant console
+  correspond à `BackSide` en GL). Défaut : double face, plus ergonomique
+  pour éditer.

@@ -112,6 +112,9 @@ body {
 }
 .gizmo-bar button:hover { background: #262a35; color: var(--text); }
 .gizmo-bar button.active { background: var(--select); color: var(--text); }
+
+/* Options de rendu, à droite du viewport. */
+.view-bar { left: auto; right: 10px; transform: none; }
 .viewport-stack {
   position: relative;
   width: 100%;

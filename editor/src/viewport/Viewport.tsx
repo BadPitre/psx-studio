@@ -35,6 +35,10 @@ export interface ViewportProps {
   onTransform?: (index: number, t: Transform) => void;
   /** Début/fin d'un drag de gizmo (permet de différer les rebuilds). */
   onGizmoDragging?: (dragging: boolean) => void;
+  /** Dithering Bayer + sortie 15 bits, comme la console (défaut : on). */
+  dither?: boolean;
+  /** Back-face culling console (défaut : off = double face, ergonomique). */
+  culling?: boolean;
 }
 
 const MOVE_SPEED = 420; // unités monde / seconde
@@ -48,6 +52,8 @@ export function Viewport({
   gizmoMode = "translate",
   onTransform,
   onGizmoDragging,
+  dither = true,
+  culling = false,
 }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -302,6 +308,19 @@ export function Viewport({
   useEffect(() => {
     stateRef.current?.gizmo.setMode(gizmoMode);
   }, [gizmoMode]);
+
+  /* Options de rendu (dithering console, culling). Le graphe est
+   * reconstruit à chaque scène : re-appliquer aussi dans ce cas. */
+  useEffect(() => {
+    const s = stateRef.current;
+    if (!s?.graph) return;
+    for (const m of s.graph.materials) {
+      m.uniforms.uDither.value = dither;
+      // La racine porte scale.y = -1 (monde PS1 -> three) : le winding vu
+      // par GL est inversé, la face avant console correspond à BackSide.
+      m.side = culling ? THREE.BackSide : THREE.DoubleSide;
+    }
+  }, [scene, dither, culling]);
 
   /* (Re)construction du graphe quand la scène change. */
   useEffect(() => {

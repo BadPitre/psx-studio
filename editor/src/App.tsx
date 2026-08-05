@@ -353,6 +353,8 @@ export default function App() {
   const [notice, setNotice] = useState<string>("");
   const [viewMode, setViewMode] = useState<"scene" | "vram">("scene");
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  const [dither, setDither] = useState(true);
+  const [culling, setCulling] = useState(false);
 
   /* Mode projet (Tauri). */
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -1002,6 +1004,22 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                <div className="gizmo-bar view-bar">
+                  <button
+                    className={dither ? "active" : ""}
+                    title="Dithering console : matrice Bayer 4x4 + sortie 15 bits, comme le GPU PS1"
+                    onClick={() => setDither(!dither)}
+                  >
+                    ▦
+                  </button>
+                  <button
+                    className={culling ? "active" : ""}
+                    title="Culling console : cache les faces arrière comme le nclip GTE (off = double face, plus ergonomique)"
+                    onClick={() => setCulling(!culling)}
+                  >
+                    ◪
+                  </button>
+                </div>
                 <Viewport
                   scene={scene}
                   overrides={overrides}
@@ -1010,6 +1028,8 @@ export default function App() {
                   gizmoMode={gizmoMode}
                   onTransform={editTransform}
                   onGizmoDragging={onGizmoDragging}
+                  dither={dither}
+                  culling={culling}
                 />
               </div>
             )}

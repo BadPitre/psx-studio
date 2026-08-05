@@ -47,8 +47,14 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   uniform sampler2D uMap;
   uniform bool uTextured;
+  uniform bool uDither;
   varying vec3 vColor;
   varying vec3 vUvW;
+
+  // Bayer 2x2 : [0 2 / 3 1] = (2x + 3y) mod 4.
+  float bayer2(vec2 p) {
+    return mod(2.0 * p.x + 3.0 * p.y, 4.0);
+  }
 
   void main() {
     vec3 color = vColor;
@@ -60,7 +66,19 @@ const fragmentShader = /* glsl */ `
     } else {
       color *= 0.5; // base non texturée : 0-255 directs (pas de modulation)
     }
-    gl_FragColor = vec4(min(color, 1.0), 1.0);
+    color = min(color, 1.0);
+
+    if (uDither) {
+      // Dithering console : le GPU ajoute la matrice 4x4 (-4..+3) au 24
+      // bits avant de tronquer en 15 bits (5 bits par canal). On rend en
+      // 320x240 natif : gl_FragCoord EST le pixel console.
+      vec2 p = floor(mod(gl_FragCoord.xy, 4.0));
+      float bayer4 = 4.0 * bayer2(mod(p, 2.0)) + bayer2(floor(p * 0.5));
+      float offset = floor(bayer4 * 0.5) - 4.0;  // la matrice exacte PS1
+      vec3 c8 = color * 255.0 + offset;
+      color = floor(clamp(c8, 0.0, 255.0) / 8.0) / 31.0;
+    }
+    gl_FragColor = vec4(color, 1.0);
   }
 `;
 
@@ -75,6 +93,7 @@ export function makePs1Material(
       uResolution: { value: PS1_RESOLUTION.clone() },
       uMap: { value: texture },
       uTextured: { value: texture !== null },
+      uDither: { value: true },
       uLightViewDir: { value: new THREE.Vector3() },
       uLightColor: {
         value: new THREE.Vector3(...lighting.color.map((c) => c / 255)),

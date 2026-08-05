@@ -58,32 +58,27 @@ tests des trois côtés.
 Chacune est autonome et bien délimitée — parfaites pour découvrir le
 projet. Ouvre une issue GitHub pour dire que tu la prends.
 
-1. **Dithering Bayer dans le viewport** — le shader
-   (`editor/src/viewport/ps1material.ts`) sort des couleurs lisses ; la
-   console dithère en motif 4×4 avant le 15 bits. Ajouter le motif + une
-   quantization RGB555 au fragment shader.
-2. **Toggle « culling console »** — l'éditeur rend en `DoubleSide` pour
-   l'ergonomie ; ajouter un bouton pour afficher le back-face culling
-   réel (ce que le nclip GTE éliminera).
-3. **Champ subdiv à l'import éditeur** — l'import par drag & drop
-   convertit sans subdivision ; proposer le seuil dans une petite boîte
-   de dialogue et le stocker dans `project.json` (le pipeline le gère
-   déjà).
-4. **Grille au sol dans le viewport** — une grille repère à Y=0 (dans le
+1. **Grille au sol dans le viewport** — une grille repère à Y=0 (dans le
    calque net, voir `viewport-overlay`).
-5. **Sélecteur de piste musique** — `Music_Play(track)` existe côté
+2. **Sélecteur de piste musique** — `Music_Play(track)` existe côté
    runtime ; exposer la piste CD-DA à jouer par scène dans le JSON +
    l'éditeur.
-6. **Undo/redo en mode visionneuse** — l'historique ne couvre que le
+3. **Undo/redo en mode visionneuse** — l'historique ne couvre que le
    mode projet ; en faire autant pour les overrides locaux.
-7. **LOD par distance** — table de niveaux dans le PMD (format : via
+4. **LOD par distance** — table de niveaux dans le PMD (format : via
    octets réservés), choix dans `Scene_Draw` selon l'avg-Z.
-8. **Préchargement de scène (streaming CD)** — `CdRead` asynchrone de la
+5. **Préchargement de scène (streaming CD)** — `CdRead` asynchrone de la
    scène suivante dans une seconde arène pendant le jeu.
-9. **Icônes de la barre de gizmos** — remplacer ✥/⟳/⤢ par de vraies
+6. **Icônes de la barre de gizmos** — remplacer ✥/⟳/⤢ par de vraies
    icônes SVG cohérentes avec le thème.
-10. **`psxpipe info` pour les .vag** — la commande décode PMD/TIM/PSC
-    mais pas les VAG (en-tête, durée, taille SPU).
+7. **`psxpipe info` pour les .vag** — la commande décode PMD/TIM/PSC
+   mais pas les VAG (en-tête, durée, taille SPU).
+8. **Presets de subdivision à l'import** — proposer le niveau
+   anti-warping directement au drop d'un glTF (le réglage existe dans
+   l'inspecteur et le pipeline).
+
+(Déjà réalisés depuis la première liste : dithering Bayer + 15 bits,
+toggle culling console, réglage subdiv dans l'inspecteur.)
 
 ## Licence
 
