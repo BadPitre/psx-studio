@@ -8,6 +8,62 @@ import type { PscScene } from "./formats/psc";
 
 const OUTLINES = ["#ff9f43", "#54d68a", "#c58aff", "#5ac8e8", "#ffd32a", "#ff7f7f"];
 
+function formatKb(bytes: number): string {
+  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} Ko` : `${bytes} o`;
+}
+
+// Statistiques d'occupation : la VRAM fait 1024×512 mots de 16 bits (1 Mo).
+// Le "trou libre" est estimé en pages de texture entières (64×256 mots),
+// la granularité réelle à laquelle le packer place les textures.
+function computeStats(scene: PscScene) {
+  const TOTAL_WORDS = 1024 * 512;
+  // Zones réservées : double framebuffer 320×240 + police de debug.
+  const reserved = 2 * 320 * 240 + 64 * 64;
+  let texWords = 0;
+  for (const tex of scene.textures) {
+    texWords += tex.wordsPerRow * tex.height + tex.clutEntries;
+  }
+
+  // Grille de pages 16×2 : une page est "libre" si rien ne la touche.
+  const pageUsed: boolean[][] = Array.from({ length: 2 }, () => Array(16).fill(false));
+  const mark = (x: number, y: number, w: number, h: number) => {
+    for (let py = Math.floor(y / 256); py <= Math.floor((y + h - 1) / 256); py++) {
+      for (let px = Math.floor(x / 64); px <= Math.floor((x + w - 1) / 64); px++) {
+        if (py >= 0 && py < 2 && px >= 0 && px < 16) pageUsed[py][px] = true;
+      }
+    }
+  };
+  mark(0, 0, 320, 480);
+  mark(960, 0, 64, 64);
+  for (const tex of scene.textures) {
+    mark(tex.vramX, tex.vramY, tex.wordsPerRow, tex.height);
+    if (tex.clutEntries > 0) mark(tex.clutX, tex.clutY, tex.clutEntries, 1);
+  }
+
+  let freePages = 0;
+  let largestRun = 0;
+  for (let py = 0; py < 2; py++) {
+    let run = 0;
+    for (let px = 0; px < 16; px++) {
+      if (pageUsed[py][px]) {
+        run = 0;
+      } else {
+        freePages++;
+        run++;
+        if (run > largestRun) largestRun = run;
+      }
+    }
+  }
+
+  const usedWords = reserved + texWords;
+  return {
+    usedPercent: (usedWords / TOTAL_WORDS) * 100,
+    texBytes: texWords * 2,
+    freePages,
+    largestRun,
+  };
+}
+
 export function VramPanel({ scene }: { scene: PscScene }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -70,9 +126,25 @@ export function VramPanel({ scene }: { scene: PscScene }) {
     });
   }, [scene]);
 
+  const stats = computeStats(scene);
+
   return (
     <div className="vram-panel">
       <canvas ref={canvasRef} width={1024} height={512} className="vram-canvas" />
+      <div className="vram-stats">
+        <span>
+          occupation <strong>{stats.usedPercent.toFixed(1)} %</strong>
+        </span>
+        <span>
+          textures <strong>{formatKb(stats.texBytes)}</strong>
+        </span>
+        <span>
+          pages libres <strong>{stats.freePages}/32</strong>
+        </span>
+        <span>
+          plus grand bloc libre <strong>{stats.largestRun} page{stats.largestRun > 1 ? "s" : ""}</strong>
+        </span>
+      </div>
       <div className="vram-legend">
         <span>
           <i className="swatch" style={{ background: "#28406e" }} /> framebuffers (0–320)
@@ -80,7 +152,9 @@ export function VramPanel({ scene }: { scene: PscScene }) {
         {scene.textures.map((tex, i) => (
           <span key={i}>
             <i className="swatch" style={{ background: OUTLINES[i % OUTLINES.length] }} />
-            texture {i} — {tex.width}×{tex.height} {tex.bpp}bpp à ({tex.vramX}, {tex.vramY})
+            texture {i} — {tex.width}×{tex.height} {tex.bpp}bpp,{" "}
+            {formatKb((tex.wordsPerRow * tex.height + tex.clutEntries) * 2)} à ({tex.vramX},{" "}
+            {tex.vramY})
             {tex.clutEntries > 0 && `, CLUT (${tex.clutX}, ${tex.clutY})`}
           </span>
         ))}

@@ -697,7 +697,7 @@ pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
             .to_rgba8();
         let (w, h) = img.dimensions();
         let opts = tim::TimOptions {
-            bpp: tim::Bpp::Eight,
+            bpp: tim::auto_bpp(img.as_raw()),
             org_x,
             org_y,
             clut_x,

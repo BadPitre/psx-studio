@@ -22,9 +22,9 @@ fn setup_project(dir: &std::path::Path) {
             { "gltf": "assets/guy.gltf",    "out": "guy.pmd", "tex_w": 64, "tex_h": 64 }
           ],
           "textures": [
-            { "png": "assets/checker.png", "out": "checker.tim", "bpp": 8 },
-            { "png": "assets/house.png",   "out": "house.tim",   "bpp": 8 },
-            { "png": "assets/guy.png",     "out": "guy.tim",     "bpp": 8 }
+            { "png": "assets/checker.png", "out": "checker.tim" },
+            { "png": "assets/house.png",   "out": "house.tim" },
+            { "png": "assets/guy.png",     "out": "guy.tim" }
           ],
           "scenes": ["scenes/scene0.json", "scenes/scene1.json"],
           "sfx": [{ "wav": "audio/sfx.wav", "out": "BLIP.VAG" }],

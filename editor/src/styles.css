@@ -298,6 +298,18 @@ body {
   justify-content: center;
   font-size: 12px;
 }
+.vram-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-dim, #9aa0ae);
+}
+.vram-stats strong {
+  color: var(--text, #e8eaf0);
+  font-weight: 600;
+}
 .vram-legend .swatch {
   display: inline-block;
   width: 10px;

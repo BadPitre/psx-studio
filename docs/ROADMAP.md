@@ -50,10 +50,15 @@ au gizmo, s'anime par script, se règle en live tweaking.
 
 Par rapport gain/effort :
 
-1. **Auto-4bpp** : si la quantization tombe à ≤16 couleurs, émettre du
-   4bpp automatiquement (moitié de la place, zéro effort utilisateur)
-2. **Stats dans le VRAM Viewer** : % d'occupation, plus gros trou
-   libre, poids par texture
+1. ~~**Auto-4bpp**~~ — **livré** : sans `"bpp"` explicite dans
+   `project.json`, le pipeline compte les couleurs et émet du 4bpp dès
+   que l'image tient en 16 couleurs (transparence comprise) — moitié de
+   la place, zéro effort. Partout : build projet, import PNG/glTF,
+   `psxpipe png2tim`, assets de démo (les 3 textures de la démo passent
+   en 4bpp, scènes −44 % sans un pixel de différence au rendu)
+2. ~~**Stats dans le VRAM Viewer**~~ — **livré** : % d'occupation,
+   poids des textures (et par texture dans la légende), pages libres
+   et plus grand bloc contigu de pages de 64×256 mots
 3. **Palettes partagées** : quantization conjointe de textures aux
    couleurs proches → une CLUT pour N textures (+ ouvre les palette
    swaps)
@@ -61,6 +66,22 @@ Par rapport gain/effort :
 5. **Texture window** (répétition hardware d'une tuile) : le plus gros
    gain pour les décors répétitifs — touche au format (UV + mode de
    répétition par modèle), à faire en dernier
+
+## Lot D — Panneau « Project » façon Unity
+
+Demandé : un panneau en bas de l'éditeur montrant l'arborescence du
+projet (scènes, modèles 3D, textures, scripts, sons) comme la vue
+Project/Assets d'Unity — navigation par dossiers, vignettes, et à
+terme drag & drop vers la hiérarchie/le viewport.
+
+1. **Explorateur** : lister `assets/` + `scenes/` du projet ouvert
+   (Tauri fs), arbre de dossiers à gauche, grille de vignettes à droite
+2. **Vignettes** : icône par type (.gltf/.glb, .png, .vag, .json de
+   scène) puis aperçus rendus pour les modèles/textures
+3. **Actions** : double-clic = ouvrir la scène / importer l'asset,
+   menu contextuel (réimporter, subdivision, supprimer)
+4. **Drag & drop** vers la hiérarchie (instancier un modèle comme
+   entité) — dépend du 1
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 

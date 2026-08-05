@@ -57,12 +57,10 @@ pub struct ModelSrc {
 pub struct TextureSrc {
     pub png: String,
     pub out: String,
-    #[serde(default = "default_bpp")]
-    pub bpp: u32,
-}
-
-fn default_bpp() -> u32 {
-    8
+    /// 4, 8 ou 16 bpp ; absent = automatique (4 bpp si l'image tient en
+    /// 16 couleurs — moitié de VRAM gagnée sans perte, sinon 8 bpp).
+    #[serde(default)]
+    pub bpp: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -224,20 +222,27 @@ pub fn build(project_dir: &Path, force: bool) -> Result<BuildReport, String> {
     for texture in &project.textures {
         let src = project_dir.join(&texture.png);
         let out = library.join(&texture.out);
-        let hash = format!("{}:{}", hash_file(&src)?, texture.bpp);
+        let hash = format!(
+            "{}:{}",
+            hash_file(&src)?,
+            texture.bpp.map_or("auto".into(), |b| b.to_string())
+        );
         if !force && cache.is_fresh(&texture.png, &hash, &out) {
             report.cached += 1;
             continue;
         }
-        let bpp = match texture.bpp {
-            4 => tim::Bpp::Four,
-            8 => tim::Bpp::Eight,
-            16 => tim::Bpp::Sixteen,
-            other => return Err(format!("{}: unsupported bpp {other}", texture.png)),
-        };
         let img = image::open(&src)
             .map_err(|e| format!("{}: {e}", texture.png))?
             .to_rgba8();
+        let bpp = match texture.bpp {
+            Some(4) => tim::Bpp::Four,
+            Some(8) => tim::Bpp::Eight,
+            Some(16) => tim::Bpp::Sixteen,
+            None => tim::auto_bpp(img.as_raw()),
+            Some(other) => {
+                return Err(format!("{}: unsupported bpp {other}", texture.png))
+            }
+        };
         let (w, h) = img.dimensions();
         let opts = tim::TimOptions {
             bpp,
@@ -483,8 +488,12 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
                 img.save(assets_dir.join(format!("{id}.png")))
                     .map_err(|e| e.to_string())?;
                 let tim_out = format!("{id}.tim");
+                let tim_opts = tim::TimOptions {
+                    bpp: tim::auto_bpp(img.as_raw()),
+                    ..Default::default()
+                };
                 let (timg, tim_report) =
-                    tim::encode(img.as_raw(), tex_dims.0, tex_dims.1, &tim::TimOptions::default())?;
+                    tim::encode(img.as_raw(), tex_dims.0, tex_dims.1, &tim_opts)?;
                 std::fs::write(library.join(&tim_out), timg.write()).map_err(|e| e.to_string())?;
                 warnings.extend(
                     tim_report
@@ -494,7 +503,7 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
                 );
                 register(
                     &mut project["textures"],
-                    serde_json::json!({ "png": format!("assets/{id}.png"), "out": tim_out, "bpp": 8 }),
+                    serde_json::json!({ "png": format!("assets/{id}.png"), "out": tim_out }),
                     &tim_out,
                 );
                 texture_out = Some(tim_out);
@@ -543,11 +552,13 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
             if w > 256 || h > 256 {
                 return Err(format!("{w}x{h} : les textures sont limitées à 256x256"));
             }
-            let (timg, report) = tim::encode(img.as_raw(), w, h, &tim::TimOptions::default())?;
+            let bpp = tim::auto_bpp(img.as_raw());
+            let opts = tim::TimOptions { bpp, ..Default::default() };
+            let (timg, report) = tim::encode(img.as_raw(), w, h, &opts)?;
             std::fs::write(library.join(&out), timg.write()).map_err(|e| e.to_string())?;
             register(
                 &mut project["textures"],
-                serde_json::json!({ "png": format!("assets/{file_name}"), "out": out, "bpp": 8 }),
+                serde_json::json!({ "png": format!("assets/{file_name}"), "out": out }),
                 &out,
             );
             ImportedAsset {
@@ -556,8 +567,11 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
                 out,
                 texture_out: None,
                 summary: format!(
-                    "{w}x{h}, {} couleurs -> {} en palette 8bpp",
-                    report.source_colors, report.palette_colors
+                    "{w}x{h}, {} couleurs -> {} en palette {}bpp{}",
+                    report.source_colors,
+                    report.palette_colors,
+                    if bpp == tim::Bpp::Four { 4 } else { 8 },
+                    if bpp == tim::Bpp::Four { " (moitié de VRAM)" } else { "" },
                 ),
                 warnings: report
                     .warnings

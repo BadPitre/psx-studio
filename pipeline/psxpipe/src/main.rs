@@ -50,9 +50,10 @@ enum Cmd {
         /// Output .tim file (default: input with .tim extension)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Bits per pixel: 4 (16 colors), 8 (256 colors) or 16 (direct)
-        #[arg(long, default_value_t = 8)]
-        bpp: u32,
+        /// Bits per pixel: 4 (16 colors), 8 (256 colors) or 16 (direct).
+        /// Default: auto (4bpp when the image fits in 16 colors, else 8bpp)
+        #[arg(long)]
+        bpp: Option<u32>,
         /// VRAM X of the pixel data (in 16-bit words)
         #[arg(long, default_value_t = 320)]
         org_x: u16,
@@ -184,16 +185,19 @@ fn run(cli: Cli) -> Result<(), String> {
             clut_x,
             clut_y,
         } => {
-            let bpp = match bpp {
-                4 => tim::Bpp::Four,
-                8 => tim::Bpp::Eight,
-                16 => tim::Bpp::Sixteen,
-                other => return Err(format!("unsupported bpp {other} (use 4, 8 or 16)")),
-            };
             let img = image::open(&input)
                 .map_err(|e| format!("cannot open {}: {e}", input.display()))?
                 .to_rgba8();
             let (w, h) = img.dimensions();
+            let bpp = match bpp {
+                Some(4) => tim::Bpp::Four,
+                Some(8) => tim::Bpp::Eight,
+                Some(16) => tim::Bpp::Sixteen,
+                Some(other) => {
+                    return Err(format!("unsupported bpp {other} (use 4, 8 or 16)"))
+                }
+                None => tim::auto_bpp(img.as_raw()),
+            };
             if w > 256 || h > 256 {
                 return Err(format!(
                     "image is {w}x{h}: textures are limited to 256x256 (one texture page)"

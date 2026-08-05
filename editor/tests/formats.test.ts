@@ -52,12 +52,14 @@ describe("parsePsc sur scene0.psc (village)", () => {
     expect(cube!.prims[0].uv).not.toBeNull();
   });
 
-  it("décode les textures TIM (8bpp + CLUT)", () => {
+  it("décode les textures TIM (4bpp auto + CLUT)", () => {
     // checker + house en 256x256, l'atlas du perso (guy) en 64x64.
     const sizes = scene.textures.map((t) => t.width).sort((a, b) => a - b);
     expect(sizes).toEqual([64, 256, 256]);
     for (const tex of scene.textures) {
-      expect(tex.bpp).toBe(8);
+      // Les textures de démo tiennent en 16 couleurs : l'auto-4bpp
+      // du pipeline les émet en mode 0 (moitié de la place en VRAM).
+      expect(tex.bpp).toBe(4);
       expect(tex.height).toBe(tex.width);
       expect(tex.rgba.length).toBe(tex.width * tex.height * 4);
     }

@@ -54,7 +54,7 @@ Un projet est un dossier avec un `project.json` :
   "name": "monjeu",
   "exe": "../../runtime/game/build/game.exe",
   "models":   [ { "gltf": "assets/heros.gltf", "out": "heros.pmd", "tex_w": 128, "tex_h": 128 } ],
-  "textures": [ { "png": "assets/heros.png", "out": "heros.tim", "bpp": 8 } ],
+  "textures": [ { "png": "assets/heros.png", "out": "heros.tim" } ],
   "scenes":   [ "scenes/scene0.json" ],
   "sfx":      [ { "wav": "audio/blip.wav", "out": "BLIP.VAG" } ],
   "music":    [ "audio/theme.wav" ]
@@ -63,6 +63,10 @@ Un projet est un dossier avec un `project.json` :
 
 - `exe` : l'exécutable console (commence par copier `runtime/game/`,
   c'est ta base de code jeu).
+- `textures` : sans `"bpp"`, le pipeline choisit tout seul — **4bpp**
+  (16 couleurs, moitié de VRAM) si l'image y tient, **8bpp** (256
+  couleurs) sinon. Force `"bpp": 4/8/16` seulement si tu veux imposer
+  un mode.
 - `scenes` : la première scène listée est `SCENE0.PSC`, chargée au boot.
 - `sfx` : WAV → SPU-ADPCM (joués par le moteur) ; `music` : pistes CD-DA.
 - Le plus simple reste de **copier `examples/demo`** et de le modifier.
@@ -82,9 +86,9 @@ Ensuite tout se passe dans l'éditeur : scènes, entités, import d'assets.
    à l'écran. Des transitions douces vieillissent beaucoup mieux.
 3. Exporte en **glTF** (.glb ou .gltf+.bin, embarque la texture).
 4. **Glisse le fichier dans la fenêtre de l'éditeur** : la texture est
-   extraite et quantifiée en 256 couleurs, le modèle converti, les deux
-   enregistrés dans le projet. Choisis le modèle dans l'inspecteur d'une
-   entité.
+   extraite et quantifiée (16 couleurs → 4bpp automatique, sinon 256
+   couleurs en 8bpp), le modèle converti, les deux enregistrés dans le
+   projet. Choisis le modèle dans l'inspecteur d'une entité.
 
 ### Anti-warping (textures qui « nagent »)
 
