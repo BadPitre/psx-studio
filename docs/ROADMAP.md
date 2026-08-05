@@ -85,8 +85,12 @@ terme drag & drop vers la hiérarchie/le viewport.
    présent, pas enregistré) et « manquant » (enregistré, disparu).
    Onglet **Console** à côté : journal horodaté des imports, builds et
    erreurs (⚠ sur l'onglet si erreur), bouton Effacer
-2. **Vignettes** : icône par type pour l'instant ; aperçus rendus des
-   modèles/textures à venir (rendu offscreen avec le shader PS1)
+2. ~~**Vignettes**~~ — **livré** : aperçus rendus depuis les fichiers
+   convertis de Library/ (les octets que la console verra) — modèles en
+   rendu three.js offscreen cadré sur la sphère englobante, texture
+   appariée par nom de sortie (guy.pmd → guy.tim), textures = TIM
+   décodé (palette quantifiée réelle) en nearest ; cache par
+   (chemin, taille), repli sur l'icône par type
 3. ~~**Actions**~~ — **livré** : double-clic = ouvrir la scène /
    importer un asset non enregistré ; menu contextuel Ouvrir /
    (Ré)importer / Rafraîchir. Restent : subdivision et retrait
@@ -94,8 +98,11 @@ terme drag & drop vers la hiérarchie/le viewport.
    comme Unity : Scène (nom → `scenes/<slug>.json` enregistré et
    ouvert), sous-menu pensé extensible (prefabs, bases de données,
    etc. viendront s'y ajouter)
-5. **Drag & drop** vers la hiérarchie (instancier un modèle comme
-   entité) — dépend du 2
+5. ~~**Drag & drop** vers la scène~~ — **livré** : glisser une tuile de
+   modèle vers le viewport instancie une entité à l'endroit visé au sol
+   (raycast sur le plan y=0), vers la hiérarchie = à l'origine. Le
+   modèle (et sa texture appariée) est ajouté aux assets de la scène si
+   besoin, l'entité est nommée et sélectionnée, annulable au Ctrl+Z
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 

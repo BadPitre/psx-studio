@@ -231,6 +231,17 @@ fn move_entry(project_dir: String, from: String, to_dir: String) -> Result<Strin
     psxpipe::project::move_entry(&PathBuf::from(project_dir), &from, &to_dir)
 }
 
+/// Lit un fichier converti de Library/ (vignettes du panneau Project).
+/// `name` est un nom de fichier simple, pas un chemin.
+#[tauri::command(async)]
+fn read_library_file(project_dir: String, name: String) -> Result<Vec<u8>, String> {
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(format!("nom invalide : {name}"));
+    }
+    let path = PathBuf::from(project_dir).join("Library").join(&name);
+    std::fs::read(&path).map_err(|e| format!("{} : {e}", path.display()))
+}
+
 /* ---------------------------------------------------------- play mode -- */
 
 #[tauri::command(async)]
@@ -358,6 +369,7 @@ pub fn run() {
             create_scene,
             create_folder,
             move_entry,
+            read_library_file,
             get_model_subdiv,
             set_model_subdiv,
             play,

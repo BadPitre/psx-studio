@@ -45,6 +45,9 @@ export interface ViewportProps {
   dither?: boolean;
   /** Back-face culling console (défaut : off = double face, ergonomique). */
   culling?: boolean;
+  /** Drop d'un modèle du panneau Project : instancier à la position visée
+   * (coordonnées monde PS1, posée sur le plan du sol y=0). */
+  onModelDrop?: (out: string, pos: [number, number, number]) => void;
 }
 
 const MOVE_SPEED = 420; // unités monde / seconde
@@ -65,6 +68,7 @@ export function Viewport({
   onGizmoDragging,
   dither = true,
   culling = false,
+  onModelDrop,
 }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -562,6 +566,30 @@ export function Viewport({
         ref={overlayRef}
         className="viewport-overlay"
         title="Gizmo : 1 déplacer · 2 rotation · 3 échelle · Ctrl = snap — Clic gauche : orbite/sélection · Clic droit tenu : caméra FPS (ZQSD, E/Espace ↑, Q ↓, Shift rapide) · Molette : avancer · Clic milieu : pan"
+        onDragOver={(e) => {
+          if (onModelDrop) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          const st = stateRef.current;
+          const out = e.dataTransfer.getData("text/psx-model");
+          if (!onModelDrop || !st || !out) return;
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const ndc = new THREE.Vector2(
+            ((e.clientX - rect.left) / rect.width) * 2 - 1,
+            -((e.clientY - rect.top) / rect.height) * 2 + 1,
+          );
+          const ray = new THREE.Raycaster();
+          ray.setFromCamera(ndc, st.camera);
+          // Sol du monde PS1 : plan y=0 (le miroir racine n'y change rien
+          // — x et z passent tels quels).
+          const hit = new THREE.Vector3();
+          if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) {
+            onModelDrop(out, [Math.round(hit.x), 0, Math.round(hit.z)]);
+          } else {
+            onModelDrop(out, [0, 0, 0]);
+          }
+        }}
       />
       <canvas
         ref={pipRef}

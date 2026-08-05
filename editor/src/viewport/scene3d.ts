@@ -42,7 +42,7 @@ function timToTexture(scene: PscScene, index: number): THREE.DataTexture | null 
   return tex;
 }
 
-function modelToGeometry(model: PmdModel, texWidth: number, texHeight: number) {
+export function modelToGeometry(model: PmdModel, texWidth: number, texHeight: number) {
   const triCount = model.prims.length;
   const positions = new Float32Array(triCount * 9);
   const normals = new Float32Array(triCount * 9);

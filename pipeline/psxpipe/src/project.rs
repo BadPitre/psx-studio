@@ -760,6 +760,10 @@ pub struct ProjectFile {
     pub registered: bool,
     /// Faux : entrée de project.json dont le fichier a disparu du disque.
     pub exists: bool,
+    /// Sortie convertie dans Library/ (ex. "guy.pmd") pour un fichier
+    /// enregistré comme modèle ou texture — sert aux vignettes de
+    /// l'éditeur et à l'instanciation par drag & drop.
+    pub out: Option<String>,
 }
 
 fn kind_for(section: &str, ext: &str) -> &'static str {
@@ -782,8 +786,9 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
     let project: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
 
-    // Chemins sources enregistrés (normalisés en '/').
-    let mut registered: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Chemins sources enregistrés (normalisés en '/') -> sortie Library/.
+    let mut registered: std::collections::BTreeMap<String, Option<String>> =
+        std::collections::BTreeMap::new();
     let mut collect = |value: &serde_json::Value, key: Option<&str>| {
         for entry in value.as_array().into_iter().flatten() {
             let path = match key {
@@ -791,7 +796,8 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
                 None => entry.as_str(),
             };
             if let Some(p) = path {
-                registered.insert(p.replace('\\', "/"));
+                let out = entry["out"].as_str().map(String::from);
+                registered.insert(p.replace('\\', "/"), out);
             }
         }
     };
@@ -807,7 +813,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
         dir: &Path,
         prefix: &str,
         section: &str,
-        registered: &std::collections::BTreeSet<String>,
+        registered: &std::collections::BTreeMap<String, Option<String>>,
         files: &mut Vec<ProjectFile>,
         seen: &mut std::collections::BTreeSet<String>,
     ) {
@@ -838,6 +844,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
                     size: 0,
                     registered: true,
                     exists: true,
+                    out: None,
                 });
                 walk(&child, &rel, section, registered, files, seen);
                 continue;
@@ -855,10 +862,11 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
                 kind: kind.into(),
                 size,
                 // Les compagnons/inconnus ne sont pas importables : pas de badge.
-                registered: registered.contains(&rel)
+                registered: registered.contains_key(&rel)
                     || kind == "buffer"
                     || kind == "other",
                 exists: true,
+                out: registered.get(&rel).cloned().flatten(),
                 path: rel,
             });
         }
@@ -879,11 +887,12 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
 
     // Entrées de project.json dont le fichier a disparu (ex. asset supprimé
     // à la main) : montrées avec le badge « manquant ».
-    for rel in &registered {
+    for (rel, out) in &registered {
         if seen.contains(rel) || project_dir.join(rel).exists() {
             continue;
         }
-        let (section, name) = rel.split_once('/').unwrap_or(("", rel.as_str()));
+        let section = rel.split('/').next().unwrap_or("");
+        let name = rel.rsplit('/').next().unwrap_or(rel.as_str());
         let ext = std::path::Path::new(name)
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
@@ -896,6 +905,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
             size: 0,
             registered: true,
             exists: false,
+            out: out.clone(),
         });
     }
 

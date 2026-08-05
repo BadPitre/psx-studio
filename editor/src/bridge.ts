@@ -66,6 +66,8 @@ export interface ProjectFile {
   size: number;
   registered: boolean;
   exists: boolean;
+  /** Sortie convertie dans Library/ (vignettes, instanciation). */
+  out: string | null;
 }
 
 export const api = {
@@ -81,6 +83,9 @@ export const api = {
   /** Déplace un fichier vers un dossier et met à jour project.json. */
   moveEntry: (projectDir: string, from: string, toDir: string) =>
     tauriInvoke<string>("move_entry", { projectDir, from, toDir }),
+  /** Lit un fichier converti de Library/ (pour les vignettes). */
+  readLibraryFile: (projectDir: string, name: string) =>
+    tauriInvoke<number[]>("read_library_file", { projectDir, name }),
   getModelSubdiv: (projectDir: string, pmdOut: string) =>
     tauriInvoke<number | null>("get_model_subdiv", { projectDir, pmdOut }),
   /** Écrit project.json et reconvertit le modèle ; retourne un résumé. */

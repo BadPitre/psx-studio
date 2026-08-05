@@ -478,6 +478,13 @@ body {
 .project-tile.current { border-color: var(--accent); }
 .project-tile.missing { opacity: 0.55; }
 .tile-icon { font-size: 26px; line-height: 1.2; }
+.tile-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
 .tile-name {
   font-size: 11px;
   max-width: 100%;

@@ -9,9 +9,35 @@
 // Clic droit : menu « Créer ▸ » (Scène, Dossier — extensible : prefabs,
 // bases de données… viendront s'y ajouter).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectFile } from "./bridge";
 import { ContextMenu, type MenuAction } from "./ContextMenu";
+
+/** Vignette asynchrone (aperçu rendu) avec repli sur l'icône. */
+const Thumb = memo(function Thumb({
+  file,
+  icon,
+  getThumb,
+}: {
+  file: ProjectFile;
+  icon: string;
+  getThumb?: (f: ProjectFile) => Promise<string | null>;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setUrl(null);
+    getThumb?.(file).then((u) => alive && setUrl(u));
+    return () => {
+      alive = false;
+    };
+  }, [file.path, file.size, file.out, getThumb]); // eslint-disable-line react-hooks/exhaustive-deps
+  return url ? (
+    <img className="tile-thumb" src={url} alt="" draggable={false} />
+  ) : (
+    <span className="tile-icon">{icon}</span>
+  );
+});
 
 export interface LogEntry {
   time: string;
@@ -56,6 +82,7 @@ export function ProjectPanel({
   onMove,
   onRefresh,
   onClearLogs,
+  getThumb,
 }: {
   files: ProjectFile[];
   logs: LogEntry[];
@@ -70,6 +97,8 @@ export function ProjectPanel({
   onMove: (from: string, toDir: string) => void;
   onRefresh: () => void;
   onClearLogs: () => void;
+  /** Aperçu rendu d'une tuile (null : icône). */
+  getThumb?: (f: ProjectFile) => Promise<string | null>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [tab, setTab] = useState<"project" | "console">("project");
@@ -286,6 +315,7 @@ export function ProjectPanel({
                 size: 0,
                 registered: true,
                 exists: true,
+                out: null,
               };
               return renderDir({ ...node, name: root.label }, 0);
             })}
@@ -306,7 +336,14 @@ export function ProjectPanel({
                 } ${dropTarget === f.path ? "drop" : ""}`}
                 title={`${f.path}${f.exists ? (f.kind === "dir" ? "" : ` — ${formatSize(f.size)}`) : " — fichier manquant"}`}
                 draggable={f.kind !== "dir" && f.exists}
-                onDragStart={(e) => e.dataTransfer.setData("text/psx-path", f.path)}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/psx-path", f.path);
+                  // Un modèle converti se glisse aussi vers le viewport ou
+                  // la hiérarchie pour être instancié en entité.
+                  if (f.kind === "model" && f.registered && f.out) {
+                    e.dataTransfer.setData("text/psx-model", f.out);
+                  }
+                }}
                 onDoubleClick={() => activate(f)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -315,7 +352,7 @@ export function ProjectPanel({
                 }}
                 {...(f.kind === "dir" ? dropProps(f.path) : {})}
               >
-                <span className="tile-icon">{ICONS[f.kind]}</span>
+                <Thumb file={f} icon={ICONS[f.kind]} getThumb={getThumb} />
                 <span className="tile-name">{f.name}</span>
                 {!f.exists && <span className="tile-badge danger">manquant</span>}
                 {f.exists && !f.registered && f.kind !== "dir" && (

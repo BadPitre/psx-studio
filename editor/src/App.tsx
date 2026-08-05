@@ -19,6 +19,7 @@ import { PlayBar, PLAY_PORT } from "./PlayBar";
 import { VramPanel } from "./VramPanel";
 import { ProjectPanel, type LogEntry } from "./ProjectPanel";
 import { ContextMenu } from "./ContextMenu";
+import { thumbFor } from "./thumbs";
 
 type Transform = {
   pos: [number, number, number];
@@ -45,6 +46,7 @@ function Hierarchy({
   onSelect,
   onAdd,
   onContextMenu,
+  onModelDrop,
 }: {
   scene: PscScene;
   names: string[];
@@ -53,6 +55,8 @@ function Hierarchy({
   /** Ouvre le menu « ajouter » (GameObject / Lumière / Caméra). */
   onAdd?: (x: number, y: number) => void;
   onContextMenu?: (i: number, x: number, y: number) => void;
+  /** Drop d'un modèle du panneau Project : instancier (à l'origine). */
+  onModelDrop?: (out: string) => void;
 }) {
   const depths = useMemo(() => {
     const d: number[] = [];
@@ -63,7 +67,19 @@ function Hierarchy({
   }, [scene]);
 
   return (
-    <div className="panel">
+    <div
+      className="panel"
+      onDragOver={(e) => {
+        if (onModelDrop) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const out = e.dataTransfer.getData("text/psx-model");
+        if (onModelDrop && out) {
+          e.preventDefault();
+          onModelDrop(out);
+        }
+      }}
+    >
       <div className="panel-title">Hiérarchie</div>
       {onAdd && (
         <div className="hierarchy-tools">
@@ -762,6 +778,13 @@ export default function App() {
     }
   }, []);
 
+  /* Vignettes du panneau : rendues depuis Library/ (cache en module). */
+  const getThumb = useCallback(
+    (f: ProjectFile) =>
+      project ? thumbFor(project.dir, f, projectFiles) : Promise.resolve<string | null>(null),
+    [project, projectFiles],
+  );
+
   const openProject = useCallback(async () => {
     const dir = await pickProjectDir();
     if (!dir) return;
@@ -968,6 +991,42 @@ export default function App() {
       doc.entities!.push(clone);
     }, name);
   }, [mutateDoc, uniqueName, selected, entityNames]);
+
+  /* Instanciation d'un modèle du panneau Project (drop viewport = à la
+     position visée au sol, drop hiérarchie = à l'origine). Le modèle est
+     ajouté aux assets de la scène s'il n'y est pas, avec sa texture
+     appariée par nom de sortie (guy.pmd -> guy.tim). */
+  const addModelEntity = useCallback(
+    (out: string, pos: [number, number, number]) => {
+      if (!sceneDoc) return;
+      const stem = out.replace(/\.pmd$/i, "");
+      const timOut = `${stem}.tim`;
+      const hasTim = projectFiles.some((f) => f.out === timOut);
+      const name = uniqueName(stem);
+      mutateDoc((doc) => {
+        doc.assets = doc.assets ?? {};
+        doc.assets.models = doc.assets.models ?? [];
+        doc.assets.textures = doc.assets.textures ?? [];
+        let model = doc.assets.models.find((m) => m.pmd === out);
+        if (!model) {
+          const texId = `${stem}_tex`;
+          if (hasTim && !doc.assets.textures.some((t) => t.tim === timOut)) {
+            doc.assets.textures.push({ id: texId, tim: timOut });
+          }
+          const texture = doc.assets.textures.find((t) => t.tim === timOut);
+          let id = stem;
+          let n = 2;
+          while (doc.assets.models.some((m) => m.id === id)) id = `${stem}_${n++}`;
+          model = { id, pmd: out, ...(texture ? { texture: texture.id } : {}) };
+          doc.assets.models.push(model);
+        }
+        doc.entities = doc.entities ?? [];
+        doc.entities.push({ name, position: pos, model: model.id });
+      }, name);
+      setNotice(`${name} instancié depuis ${out}`);
+    },
+    [sceneDoc, projectFiles, uniqueName, mutateDoc],
+  );
 
   const deleteEntity = useCallback(() => {
     if (selected < 0) return;
@@ -1432,6 +1491,9 @@ export default function App() {
               onContextMenu={
                 isTauri && sceneDoc ? (_, x, y) => setMenu({ x, y }) : undefined
               }
+              onModelDrop={
+                isTauri && sceneDoc ? (out) => addModelEntity(out, [0, 0, 0]) : undefined
+              }
             />
             {addMenu && (
               <ContextMenu
@@ -1516,6 +1578,7 @@ export default function App() {
                   onGizmoDragging={onGizmoDragging}
                   dither={dither}
                   culling={culling}
+                  onModelDrop={isTauri && sceneDoc ? addModelEntity : undefined}
                 />
               </div>
             )}
@@ -1609,6 +1672,7 @@ export default function App() {
           onMove={moveFromPanel}
           onRefresh={() => refreshFiles(project.dir)}
           onClearLogs={() => setLogs([])}
+          getThumb={getThumb}
         />
       )}
     </div>

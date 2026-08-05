@@ -129,8 +129,12 @@ de triangles — surveille l'avertissement de budget.)
   `project.json` suit tout seul). Double-clic pour ouvrir une scène ou
   importer un fichier marqué « non importé » ; **Créer ▸ Scène** pour
   démarrer une scène vide. Le badge « manquant » signale une entrée de
-  `project.json` dont le fichier a disparu. L'onglet **Console** à
-  côté garde le journal des imports, builds et erreurs.
+  `project.json` dont le fichier a disparu. Les modèles et textures
+  importés montrent un **aperçu rendu** (depuis les fichiers convertis,
+  donc fidèle à la console), et **glisser un modèle dans le viewport
+  l'instancie** comme entité à l'endroit visé (dans la hiérarchie : à
+  l'origine). L'onglet **Console** à côté garde le journal des imports,
+  builds et erreurs.
 - **▶ Play** : build incrémental + PCSX-Redux. Pendant que le jeu tourne,
   déplacer une entité (gizmo ou inspecteur) **l'écrit dans la RAM
   console** : le décor bouge dans le jeu, sans rebuild.
