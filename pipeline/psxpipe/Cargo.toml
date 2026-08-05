@@ -1,0 +1,14 @@
+[package]
+name = "psxpipe"
+version = "0.1.0"
+edition = "2021"
+description = "PSX Studio asset pipeline: glTF/PNG to PS1 console formats (PMD/TIM)"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+gltf = { version = "1", features = ["import", "utils"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+tempfile = "3"

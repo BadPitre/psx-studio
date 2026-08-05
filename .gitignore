@@ -7,6 +7,9 @@ Build/
 *.cue
 *.map
 
+# ... mais les buffers glTF d'exemple ne sont pas des builds
+!pipeline/samples/*.bin
+
 # Rust
 target/
 
