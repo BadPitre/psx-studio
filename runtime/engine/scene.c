@@ -169,7 +169,11 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 			LoadImage(tim.crect, tim.caddr);
 			clut[i] = getClut(tim.crect->x, tim.crect->y);
 		}
-		tpage[i] = getTPage(tim.mode & 0x3, 0, tim.prect->x, tim.prect->y);
+		/* Bit 9 = dithering : le tpage d'un polygone texture remplace
+		 * l'etat du DRAWENV, sans ce bit chaque prim texturee
+		 * redesactiverait le dithering demande par dtd=1. */
+		tpage[i] = getTPage(tim.mode & 0x3, 0, tim.prect->x, tim.prect->y)
+			| (1 << 9);
 	}
 	DrawSync(0);
 
