@@ -356,6 +356,151 @@ pub fn build(project_dir: &Path, force: bool) -> Result<BuildReport, String> {
     Ok(report)
 }
 
+/* --------------------------------------------------------- import UI -- */
+
+#[derive(Debug, serde::Serialize, PartialEq, Eq)]
+pub enum AssetKind {
+    Model,
+    Texture,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ImportedAsset {
+    pub kind: AssetKind,
+    /// Identifiant dérivé du nom de fichier (minuscules, alphanumérique).
+    pub id: String,
+    /// Nom de sortie dans Library/ (ex. "house.pmd").
+    pub out: String,
+    pub summary: String,
+    pub warnings: Vec<String>,
+}
+
+fn sanitize_id(stem: &str) -> String {
+    let id: String = stem
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if id.is_empty() { "asset".into() } else { id }
+}
+
+/// Importe un fichier source (glTF/GLB/PNG) dans un projet : copie dans
+/// assets/, enregistrement dans project.json (idempotent), conversion
+/// immédiate dans Library/. Utilisé par le drag & drop de l'éditeur.
+pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, String> {
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .ok_or("nom de fichier invalide")?;
+    let id = sanitize_id(&stem);
+
+    let assets_dir = project_dir.join("assets");
+    std::fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
+    let library = project_dir.join("Library");
+    std::fs::create_dir_all(&library).map_err(|e| e.to_string())?;
+
+    let json_path = project_dir.join("project.json");
+    let text = std::fs::read_to_string(&json_path)
+        .map_err(|e| format!("{} : {e}", json_path.display()))?;
+    let mut project: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+
+    let register = |list: &mut serde_json::Value, entry: serde_json::Value, out_key: &str| {
+        if !list.is_array() {
+            *list = serde_json::Value::Array(Vec::new());
+        }
+        let arr = list.as_array_mut().unwrap();
+        if !arr.iter().any(|e| e["out"] == entry["out"]) {
+            arr.push(entry);
+        } else {
+            // Déjà enregistré : la reconversion suffira.
+            let _ = out_key;
+        }
+    };
+
+    let result = match ext.as_str() {
+        "gltf" | "glb" => {
+            let file_name = format!("{id}.{ext}");
+            let dst = assets_dir.join(&file_name);
+            std::fs::copy(src, &dst).map_err(|e| format!("copie : {e}"))?;
+            // Buffer externe d'un .gltf : copié sous son nom D'ORIGINE (le
+            // JSON du glTF le référence par ce nom exact dans son URI).
+            if ext == "gltf" {
+                let bin = src.with_file_name(format!("{stem}.bin"));
+                if bin.exists() {
+                    std::fs::copy(&bin, assets_dir.join(format!("{stem}.bin")))
+                        .map_err(|e| format!("copie du .bin : {e}"))?;
+                }
+            }
+            let out = format!("{id}.pmd");
+            let (pmd, report) = gltf_import::import(&dst, &Default::default())?;
+            std::fs::write(library.join(&out), pmd.write()?).map_err(|e| e.to_string())?;
+            register(
+                &mut project["models"],
+                serde_json::json!({ "gltf": format!("assets/{file_name}"), "out": out }),
+                &out,
+            );
+            ImportedAsset {
+                kind: AssetKind::Model,
+                id,
+                out,
+                summary: format!(
+                    "{} triangles, {} sommets, {} normales",
+                    report.triangles_in - report.degenerate_dropped,
+                    report.vertex_count,
+                    report.normal_count
+                ),
+                warnings: report.warnings,
+            }
+        }
+        "png" => {
+            let file_name = format!("{id}.png");
+            let dst = assets_dir.join(&file_name);
+            std::fs::copy(src, &dst).map_err(|e| format!("copie : {e}"))?;
+            let out = format!("{id}.tim");
+            let img = image::open(&dst).map_err(|e| e.to_string())?.to_rgba8();
+            let (w, h) = img.dimensions();
+            if w > 256 || h > 256 {
+                return Err(format!("{w}x{h} : les textures sont limitées à 256x256"));
+            }
+            let (timg, report) = tim::encode(img.as_raw(), w, h, &tim::TimOptions::default())?;
+            std::fs::write(library.join(&out), timg.write()).map_err(|e| e.to_string())?;
+            register(
+                &mut project["textures"],
+                serde_json::json!({ "png": format!("assets/{file_name}"), "out": out, "bpp": 8 }),
+                &out,
+            );
+            ImportedAsset {
+                kind: AssetKind::Texture,
+                id,
+                out,
+                summary: format!(
+                    "{w}x{h}, {} couleurs -> {} en palette 8bpp",
+                    report.source_colors, report.palette_colors
+                ),
+                warnings: report
+                    .warnings
+                    .into_iter()
+                    .filter(|w| !w.contains("framebuffer"))
+                    .collect(),
+            }
+        }
+        other => return Err(format!("extension .{other} non supportée (gltf, glb, png)")),
+    };
+
+    std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&project).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(result)
+}
+
 /// Best-effort relative path from `from` dir to `to` (falls back to
 /// absolute), for the generated iso.xml.
 fn pathdiff_simple(from: &Path, to: &Path) -> String {

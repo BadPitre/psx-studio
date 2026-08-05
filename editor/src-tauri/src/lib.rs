@@ -80,12 +80,25 @@ fn save_scene(project_dir: String, scene_path: String, contents: String) -> Resu
 /* -------------------------------------------------------------- build -- */
 
 #[derive(Serialize)]
+pub struct VramEntry {
+    pub label: String,
+    pub x: u16,
+    pub y: u16,
+    pub words: u16,
+    pub height: u16,
+    pub clut_x: u16,
+    pub clut_y: u16,
+    pub clut_entries: u16,
+}
+
+#[derive(Serialize)]
 pub struct BuiltScene {
     /// Le .psc packé, prêt pour les parsers du viewport.
     pub psc: Vec<u8>,
     /// Noms d'entités dans l'ordre du fichier (tri topologique) : fait le
     /// lien entre les indices du viewport et les entités du JSON.
     pub entity_names: Vec<String>,
+    pub vram: Vec<VramEntry>,
     pub warnings: Vec<String>,
 }
 
@@ -115,6 +128,20 @@ fn build_scene(
     Ok(BuiltScene {
         psc,
         entity_names: report.entity_names,
+        vram: report
+            .vram
+            .iter()
+            .map(|(req, p)| VramEntry {
+                label: req.label.clone(),
+                x: p.x,
+                y: p.y,
+                words: req.words,
+                height: req.height,
+                clut_x: p.clut_x,
+                clut_y: p.clut_y,
+                clut_entries: req.clut_entries,
+            })
+            .collect(),
         warnings: report.warnings,
     })
 }
@@ -148,6 +175,15 @@ fn build_project(project_dir: String) -> Result<BuildSummary, String> {
         mkpsxiso_ran: report.mkpsxiso_ran,
         warnings: report.warnings,
     })
+}
+
+/// Import d'un asset source (glTF/GLB/PNG) déposé dans l'éditeur.
+#[tauri::command]
+fn import_asset(
+    project_dir: String,
+    src_path: String,
+) -> Result<psxpipe::project::ImportedAsset, String> {
+    psxpipe::project::import_asset(&PathBuf::from(project_dir), &PathBuf::from(src_path))
 }
 
 /* ---------------------------------------------------------- play mode -- */
@@ -221,6 +257,7 @@ pub fn run() {
             save_scene,
             build_scene,
             build_project,
+            import_asset,
             play,
             redux_status,
             redux_pause,

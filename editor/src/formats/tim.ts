@@ -8,6 +8,14 @@ export interface TimTexture {
   bpp: 4 | 8 | 16;
   /** RGBA 8 bits par canal ; le texel 0x0000 devient alpha 0. */
   rgba: Uint8ClampedArray<ArrayBuffer>;
+  /** Placement VRAM des pixels (x en mots 16 bits). */
+  vramX: number;
+  vramY: number;
+  wordsPerRow: number;
+  /** Placement de la CLUT (0 entrées = pas de CLUT). */
+  clutX: number;
+  clutY: number;
+  clutEntries: number;
 }
 
 function ps1ToRgba(c: number, out: Uint8ClampedArray, o: number) {
@@ -29,12 +37,18 @@ export function parseTim(data: DataView): TimTexture {
 
   let off = 8;
   const clut: number[] = [];
+  let clutX = 0;
+  let clutY = 0;
   if (flags & 8) {
     const len = data.getUint32(off, true);
+    clutX = data.getUint16(off + 4, true);
+    clutY = data.getUint16(off + 6, true);
     const count = (len - 12) / 2;
     for (let i = 0; i < count; i++) clut.push(data.getUint16(off + 12 + i * 2, true));
     off += len;
   }
+  const vramX = data.getUint16(off + 4, true);
+  const vramY = data.getUint16(off + 6, true);
   const wordsPerRow = data.getUint16(off + 8, true);
   const height = data.getUint16(off + 10, true);
   const pixelBase = off + 12;
@@ -55,5 +69,16 @@ export function parseTim(data: DataView): TimTexture {
       }
     }
   }
-  return { width, height, bpp, rgba };
+  return {
+    width,
+    height,
+    bpp,
+    rgba,
+    vramX,
+    vramY,
+    wordsPerRow,
+    clutX,
+    clutY,
+    clutEntries: clut.length,
+  };
 }

@@ -48,13 +48,33 @@ Lancer : voir `editor/README.md` (`npm install && npm run dev`).
   c'est la porte d'entrée du live tweaking à venir.
 - Le mode navigateur (visionneuse .psc) reste fonctionnel sans Tauri.
 
-## Reste pour clore la Phase 4
+## Part 3 — livrée : création de scène complète dans l'UI
 
-1. Import d'assets par drag & drop (rapports psxpipe dans l'UI).
-2. **VRAM Viewer** interactif (la carte de la Phase 3 en panneau).
-3. Création/suppression d'entités et de scènes depuis l'UI (aujourd'hui :
-   édition des transforms ; la structure s'édite encore dans le JSON).
-4. Live tweaking en Play Mode (écriture RAM sur la table d'entités).
+- **Création / duplication / suppression d'entités** (boutons de la
+  hiérarchie), **renommage** et **choix du modèle** dans l'inspecteur —
+  toutes les éditions passent par le `scene.json`, la suppression refuse
+  d'orpheliner des enfants, les noms restent uniques.
+- **Import d'assets par drag & drop** : glisser des `.gltf`/`.glb`/`.png`
+  dans la fenêtre → copie dans `assets/`, enregistrement dans
+  `project.json`, conversion immédiate dans `Library/`, rapport dans la
+  barre. Un modèle et une texture du même nom sont appairés
+  automatiquement, et l'asset est enregistré dans la scène courante —
+  il ne reste qu'à créer une entité et lui assigner le modèle.
+- **VRAM Viewer** (bouton « VRAM ») : la carte 1024×512 en panneau, avec
+  le **contenu réel** des textures à leur place (largeur en mots 16 bits),
+  framebuffers, CLUTs, police et grille des pages. Fonctionne aussi en
+  mode navigateur (placements lus dans le .psc).
+
+→ **Critère de sortie atteint** : une scène se crée entièrement dans
+l'éditeur (import glTF → entité → transform → Enregistrer → ▶ Play),
+sans toucher au JSON.
+
+## Reste (bonus de fin de phase)
+
+1. Live tweaking en Play Mode (écriture RAM sur la table d'entités —
+   l'API `write_ram` est déjà encapsulée côté client).
+2. Édition des réglages de scène (fond/ambiante/lumière) dans l'UI.
+3. Packaging de l'app (`cargo tauri build`, icônes complètes).
 
 ## Critères de sortie de la Part 1
 

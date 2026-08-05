@@ -39,7 +39,25 @@ export async function pickProjectDir(): Promise<string | null> {
   return typeof dir === "string" ? dir : null;
 }
 
+export interface ImportedAsset {
+  kind: "Model" | "Texture";
+  id: string;
+  out: string;
+  summary: string;
+  warnings: string[];
+}
+
+/** Abonnement au drag & drop natif Tauri (chemins de fichiers). */
+export async function onFileDrop(cb: (paths: string[]) => void): Promise<() => void> {
+  const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+  return getCurrentWebview().onDragDropEvent((event) => {
+    if (event.payload.type === "drop") cb(event.payload.paths);
+  });
+}
+
 export const api = {
+  importAsset: (projectDir: string, srcPath: string) =>
+    tauriInvoke<ImportedAsset>("import_asset", { projectDir, srcPath }),
   openProject: (path: string) => tauriInvoke<ProjectInfo>("open_project", { path }),
   loadScene: (projectDir: string, scenePath: string) =>
     tauriInvoke<string>("load_scene", { projectDir, scenePath }),

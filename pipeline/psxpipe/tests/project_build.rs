@@ -83,3 +83,37 @@ fn missing_exe_is_a_clear_error() {
     let err = project::build(dir.path(), false).unwrap_err();
     assert!(err.contains("build the runtime"), "unexpected: {err}");
 }
+
+#[test]
+fn import_asset_registers_and_converts() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_project(dir.path());
+
+    // Nouveau modèle + texture déposés depuis un dossier externe.
+    let ext = tempfile::tempdir().unwrap();
+    samples::write_all(ext.path()).unwrap();
+    std::fs::rename(ext.path().join("house.gltf"), ext.path().join("Tour Eiffel.gltf")).unwrap();
+    std::fs::rename(ext.path().join("house.bin"), ext.path().join("Tour Eiffel.bin")).unwrap();
+
+    let imported = project::import_asset(dir.path(), &ext.path().join("Tour Eiffel.gltf")).unwrap();
+    assert_eq!(imported.id, "tour_eiffel");
+    assert_eq!(imported.out, "tour_eiffel.pmd");
+    assert!(dir.path().join("Library/tour_eiffel.pmd").exists());
+    assert!(dir.path().join("assets/tour_eiffel.gltf").exists());
+    // Le buffer garde son nom d'origine (référencé tel quel par le glTF).
+    assert!(dir.path().join("assets/Tour Eiffel.bin").exists());
+
+    let tex = project::import_asset(dir.path(), &ext.path().join("checker.png"));
+    assert!(tex.is_ok());
+
+    // project.json mis à jour et toujours buildable (idempotent).
+    let text = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
+    assert!(text.contains("tour_eiffel.pmd"));
+    project::import_asset(dir.path(), &ext.path().join("Tour Eiffel.gltf")).unwrap();
+    let text2 = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
+    assert_eq!(
+        text2.matches("tour_eiffel.pmd").count(),
+        text.matches("tour_eiffel.pmd").count()
+    );
+    project::build(dir.path(), false).unwrap();
+}

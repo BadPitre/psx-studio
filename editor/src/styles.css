@@ -157,3 +157,49 @@ body {
   font: inherit;
 }
 .muted { color: var(--muted); }
+
+.vram-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  overflow: auto;
+  min-width: 0;
+}
+.vram-canvas {
+  width: 100%;
+  max-width: 1024px;
+  image-rendering: pixelated;
+  outline: 1px solid var(--panel-border);
+  align-self: center;
+}
+.vram-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  justify-content: center;
+  font-size: 12px;
+}
+.vram-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 5px;
+}
+.hierarchy-tools {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+.hierarchy-tools .button { padding: 2px 8px; font-size: 12px; }
+.name-input {
+  width: 100%;
+  background: #14151b;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 3px 6px;
+  font: inherit;
+}
+.model-select { width: 100%; }
