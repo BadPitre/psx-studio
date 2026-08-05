@@ -50,10 +50,13 @@ export function Viewport({
   onGizmoDragging,
 }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
     camera: THREE.PerspectiveCamera;
     three: THREE.Scene;
+    /** Calque pleine résolution au-dessus du 320x240 : gizmo, surlignage. */
+    overlayScene: THREE.Scene;
     graph: SceneGraph | null;
     highlight: THREE.BoxHelper | null;
     gizmo: TransformControls;
@@ -68,6 +71,7 @@ export function Viewport({
   /* Init renderer + boucle + contrôles caméra (une seule fois). */
   useEffect(() => {
     const canvas = canvasRef.current!;
+    const overlay = overlayRef.current!;
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
     renderer.setSize(PS1_RESOLUTION.x, PS1_RESOLUTION.y, false);
     // Sortie linéaire : couleurs brutes comme sur console (pas de courbe sRGB).
@@ -75,12 +79,31 @@ export function Viewport({
     const camera = new THREE.PerspectiveCamera(53, 320 / 240, 10, 8192);
     const three = new THREE.Scene();
 
+    /* Calque d'édition pleine résolution : la scène reste rendue en
+     * 320x240 pixelisé, mais gizmo et surlignage sont dessinés nets
+     * au-dessus, avec la même caméra. L'overlay reçoit la souris. */
+    const overlayRenderer = new THREE.WebGLRenderer({
+      canvas: overlay,
+      antialias: true,
+      alpha: true,
+    });
+    overlayRenderer.setPixelRatio(window.devicePixelRatio);
+    overlayRenderer.setClearColor(0x000000, 0);
+    const overlayScene = new THREE.Scene();
+    const resize = () => {
+      const r = overlay.getBoundingClientRect();
+      if (r.width > 0) overlayRenderer.setSize(r.width, r.height, false);
+    };
+    resize();
+    const resizeObs = new ResizeObserver(resize);
+    resizeObs.observe(overlay);
+
     /* Gizmo de manipulation (position/rotation/échelle). Les entités
      * portent leur transform locale PS1 directement sur leur groupe :
      * on la relit telle quelle après manipulation. */
-    const gizmo = new TransformControls(camera, canvas);
+    const gizmo = new TransformControls(camera, overlay);
     gizmo.setSize(0.85);
-    three.add(gizmo.getHelper());
+    overlayScene.add(gizmo.getHelper());
     gizmo.addEventListener("dragging-changed", (e) => {
       liveRef.current.onGizmoDragging?.(Boolean((e as { value: unknown }).value));
     });
@@ -111,7 +134,15 @@ export function Viewport({
     window.addEventListener("keydown", onSnapKey);
     window.addEventListener("keyup", onSnapKey);
 
-    stateRef.current = { renderer, camera, three, graph: null, highlight: null, gizmo };
+    stateRef.current = {
+      renderer,
+      camera,
+      three,
+      overlayScene,
+      graph: null,
+      highlight: null,
+      gizmo,
+    };
 
     /* État caméra : position + regard (yaw/pitch), pivot d'orbite à
      * distance `dist` devant la caméra. */
@@ -138,24 +169,24 @@ export function Viewport({
     };
     applyCamera();
 
-    /* Souris. */
+    /* Souris (sur l'overlay, qui couvre le canvas 320x240). */
     let dragButton = -1;
     let moved = false;
     const keys = new Set<string>();
-    canvas.tabIndex = 0; // focus clavier
-    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-    canvas.addEventListener("pointerdown", (e) => {
+    overlay.tabIndex = 0; // focus clavier
+    overlay.addEventListener("contextmenu", (e) => e.preventDefault());
+    overlay.addEventListener("pointerdown", (e) => {
       // Le gizmo a priorité : survol d'un axe ou drag en cours.
       if (gizmo.dragging || gizmo.axis) {
-        canvas.focus();
+        overlay.focus();
         return;
       }
       dragButton = e.button;
       moved = false;
-      canvas.setPointerCapture(e.pointerId);
-      canvas.focus();
+      overlay.setPointerCapture(e.pointerId);
+      overlay.focus();
     });
-    canvas.addEventListener("pointermove", (e) => {
+    overlay.addEventListener("pointermove", (e) => {
       if (dragButton < 0) return;
       if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) moved = true;
       if (dragButton === 0) {
@@ -185,12 +216,12 @@ export function Viewport({
       }
       applyCamera();
     });
-    canvas.addEventListener("pointerup", (e) => {
+    overlay.addEventListener("pointerup", (e) => {
       const was = dragButton;
       dragButton = -1;
-      canvas.releasePointerCapture(e.pointerId);
+      overlay.releasePointerCapture(e.pointerId);
       if (was === 0 && !moved && stateRef.current?.graph) {
-        const rect = canvas.getBoundingClientRect();
+        const rect = overlay.getBoundingClientRect();
         const ndc = new THREE.Vector2(
           ((e.clientX - rect.left) / rect.width) * 2 - 1,
           -((e.clientY - rect.top) / rect.height) * 2 + 1,
@@ -202,7 +233,7 @@ export function Viewport({
         if (hit) onSelect(hit.object.userData.entityIndex as number);
       }
     });
-    canvas.addEventListener("wheel", (e) => {
+    overlay.addEventListener("wheel", (e) => {
       e.preventDefault();
       const step = cam.dist * (e.deltaY > 0 ? 0.1 : -0.1);
       cam.pos.addScaledVector(forward(), -step);
@@ -211,7 +242,7 @@ export function Viewport({
     });
 
     /* Clavier (codes physiques : ZQSD azerty = WASD qwerty). */
-    canvas.addEventListener("keydown", (e) => {
+    overlay.addEventListener("keydown", (e) => {
       keys.add(e.code);
       if (
         ["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "Space"].includes(e.code)
@@ -219,8 +250,8 @@ export function Viewport({
         e.preventDefault();
       }
     });
-    canvas.addEventListener("keyup", (e) => keys.delete(e.code));
-    canvas.addEventListener("blur", () => keys.clear());
+    overlay.addEventListener("keyup", (e) => keys.delete(e.code));
+    overlay.addEventListener("blur", () => keys.clear());
 
     /* Boucle : déplacement continu + rendu. */
     let raf = 0;
@@ -251,13 +282,16 @@ export function Viewport({
       }
       s.highlight?.update();
       s.renderer.render(s.three, s.camera);
+      overlayRenderer.render(s.overlayScene, s.camera);
     };
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("keydown", onSnapKey);
       window.removeEventListener("keyup", onSnapKey);
+      resizeObs.disconnect();
       gizmo.dispose();
+      overlayRenderer.dispose();
       renderer.dispose();
       stateRef.current = null;
     };
@@ -275,7 +309,7 @@ export function Viewport({
     if (!s) return;
     s.gizmo.detach();
     s.three.clear();
-    s.three.add(s.gizmo.getHelper()); // clear() l'a retiré
+    if (s.highlight) s.overlayScene.remove(s.highlight);
     s.graph = null;
     s.highlight = null;
     if (!scene) return;
@@ -303,12 +337,12 @@ export function Viewport({
       );
     });
     if (s.highlight) {
-      s.three.remove(s.highlight);
+      s.overlayScene.remove(s.highlight);
       s.highlight = null;
     }
     if (selected >= 0 && selected < s.graph.entityGroups.length) {
       const helper = new THREE.BoxHelper(s.graph.entityGroups[selected], 0xffcc00);
-      s.three.add(helper);
+      s.overlayScene.add(helper);
       s.highlight = helper;
       // Attacher le gizmo (sans churn pendant un drag : même groupe = no-op).
       if (s.gizmo.object !== s.graph.entityGroups[selected]) {
@@ -320,12 +354,18 @@ export function Viewport({
   }, [scene, overrides, selected]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="viewport-canvas"
-      width={PS1_RESOLUTION.x}
-      height={PS1_RESOLUTION.y}
-      title="Gizmo : 1 déplacer · 2 rotation · 3 échelle · Ctrl = snap — Clic gauche : orbite/sélection · Clic droit tenu : caméra FPS (ZQSD, E/Espace ↑, Q ↓, Shift rapide) · Molette : avancer · Clic milieu : pan"
-    />
+    <div className="viewport-stack">
+      <canvas
+        ref={canvasRef}
+        className="viewport-canvas"
+        width={PS1_RESOLUTION.x}
+        height={PS1_RESOLUTION.y}
+      />
+      <canvas
+        ref={overlayRef}
+        className="viewport-overlay"
+        title="Gizmo : 1 déplacer · 2 rotation · 3 échelle · Ctrl = snap — Clic gauche : orbite/sélection · Clic droit tenu : caméra FPS (ZQSD, E/Espace ↑, Q ↓, Shift rapide) · Molette : avancer · Clic milieu : pan"
+      />
+    </div>
   );
 }

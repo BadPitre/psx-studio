@@ -62,7 +62,7 @@ function Hierarchy({
           </button>
           <span
             className="muted"
-            title="Ctrl+C copier · Ctrl+V coller · Ctrl+D dupliquer · Suppr supprimer · F2 renommer · clic droit : menu"
+            title="Ctrl+Z annuler · Ctrl+Y rétablir · Ctrl+C copier · Ctrl+V coller · Ctrl+D dupliquer · Suppr supprimer · F2 renommer · clic droit : menu"
           >
             raccourcis ⓘ
           </span>
@@ -351,6 +351,25 @@ export default function App() {
   const gizmoDraggingRef = useRef(false);
   const pendingRebuildRef = useRef<SceneDoc | null>(null);
 
+  /* Historique Ctrl+Z / Ctrl+Y : snapshots du scene.json avant chaque
+     mutation. Les éditions continues (drag de gizmo, saisie) portant la
+     même clé dans une fenêtre glissante fusionnent en une seule étape. */
+  const undoStack = useRef<SceneDoc[]>([]);
+  const redoStack = useRef<SceneDoc[]>([]);
+  const histMark = useRef({ key: "", time: 0 });
+  const pushHistory = useCallback((doc: SceneDoc | null, key = "") => {
+    if (!doc) return;
+    const now = performance.now();
+    if (key && histMark.current.key === key && now - histMark.current.time < 1200) {
+      histMark.current.time = now;
+      return;
+    }
+    histMark.current = { key, time: now };
+    undoStack.current.push(structuredClone(doc));
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    redoStack.current = [];
+  }, []);
+
   const loadBuffer = useCallback((name: string, buffer: ArrayBuffer) => {
     try {
       setScene(parsePsc(buffer));
@@ -387,14 +406,42 @@ export default function App() {
   const mutateDoc = useCallback(
     (mutator: (doc: SceneDoc) => void, selectName?: string) => {
       if (!sceneDoc || !project) return;
+      pushHistory(sceneDoc);
       const doc = structuredClone(sceneDoc);
       mutator(doc);
       setSceneDoc(doc);
       setDirty(true);
       rebuild(doc, scenePath, project.dir, selectName);
     },
-    [sceneDoc, project, scenePath, rebuild],
+    [sceneDoc, project, scenePath, rebuild, pushHistory],
   );
+
+  /* Annuler / rétablir : restaure un snapshot du scene.json. */
+  const restoreDoc = useCallback(
+    (doc: SceneDoc) => {
+      if (!project) return;
+      setSceneDoc(doc);
+      setDirty(true);
+      setSelected(-1);
+      histMark.current = { key: "", time: 0 };
+      rebuild(doc, scenePath, project.dir);
+    },
+    [project, scenePath, rebuild],
+  );
+
+  const undo = useCallback(() => {
+    const doc = undoStack.current.pop();
+    if (!doc || !sceneDoc) return;
+    redoStack.current.push(structuredClone(sceneDoc));
+    restoreDoc(doc);
+  }, [sceneDoc, restoreDoc]);
+
+  const redo = useCallback(() => {
+    const doc = redoStack.current.pop();
+    if (!doc || !sceneDoc) return;
+    undoStack.current.push(structuredClone(sceneDoc));
+    restoreDoc(doc);
+  }, [sceneDoc, restoreDoc]);
 
   const selectScene = useCallback(
     async (proj: ProjectInfo, path: string) => {
@@ -406,6 +453,9 @@ export default function App() {
         setSelected(-1);
         setDirty(false);
         setFileName(path);
+        undoStack.current = [];
+        redoStack.current = [];
+        histMark.current = { key: "", time: 0 };
         await rebuild(doc, path, proj.dir);
       } catch (e) {
         setError(String(e));
@@ -454,6 +504,7 @@ export default function App() {
       }
 
       const name = entityNames[index];
+      pushHistory(sceneDoc, `transform:${name}`);
       const doc = structuredClone(sceneDoc);
       const entity = doc.entities?.find((e) => e.name === name);
       if (!entity) return;
@@ -473,7 +524,7 @@ export default function App() {
         );
       }
     },
-    [overrides, sceneDoc, project, entityNames, scenePath, rebuild],
+    [overrides, sceneDoc, project, entityNames, scenePath, rebuild, pushHistory],
   );
 
   const onGizmoDragging = useCallback(
@@ -625,7 +676,16 @@ export default function App() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (!sceneDoc) return;
-      if (e.ctrlKey && e.code === "KeyC") {
+      // Undo/redo : touche gravée (e.key), pas le code physique — sur
+      // AZERTY le Z n'est pas à la position QWERTY.
+      if (e.ctrlKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (e.ctrlKey && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+      } else if (e.ctrlKey && e.code === "KeyC") {
         copyEntity();
       } else if (e.ctrlKey && e.code === "KeyV") {
         pasteEntity();
@@ -641,7 +701,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sceneDoc, selected, copyEntity, pasteEntity, duplicateEntity, deleteEntity]);
+  }, [sceneDoc, selected, copyEntity, pasteEntity, duplicateEntity, deleteEntity, undo, redo]);
 
   const saveScene = useCallback(async () => {
     if (!project || !sceneDoc) return;
