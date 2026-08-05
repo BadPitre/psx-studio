@@ -278,13 +278,22 @@ mod tests {
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 seen.push(line.trim().to_string());
-                // Consommer les en-têtes.
+                // Consommer les en-têtes PUIS le corps (répondre sans lire
+                // le corps provoque un RST côté client -> test flaky).
+                let mut content_length = 0usize;
                 loop {
                     let mut h = String::new();
                     reader.read_line(&mut h).unwrap();
                     if h == "\r\n" || h.is_empty() {
                         break;
                     }
+                    if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+                        content_length = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                if content_length > 0 {
+                    let mut body = vec![0u8; content_length];
+                    std::io::Read::read_exact(&mut reader, &mut body).unwrap();
                 }
                 let mut stream = reader.into_inner();
                 if line.starts_with("GET /api/v1/execution-flow") {

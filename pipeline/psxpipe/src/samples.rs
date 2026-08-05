@@ -107,9 +107,15 @@ pub fn checker_rgba(size: u32) -> Vec<u8> {
             let cx = x / cell;
             let cy = y / cell;
             let mut c = colors[((cx + cy * 3) % 4) as usize];
-            // Darkened cell borders make the affine warping readable.
+            // Bordures légèrement assombries : lisibles de près, sans
+            // créer de lignes noires d'aliasing au loin (pas de mipmaps
+            // sur PS1, le nearest-sampling ressort les rangées sombres).
             if x % cell < 2 || y % cell < 2 {
-                c = [c[0] / 2, c[1] / 2, c[2] / 2];
+                c = [
+                    c[0] - c[0] / 4,
+                    c[1] - c[1] / 4,
+                    c[2] - c[2] / 4,
+                ];
             }
             out.extend_from_slice(&[c[0], c[1], c[2], 255]);
         }

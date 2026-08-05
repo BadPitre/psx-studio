@@ -75,7 +75,11 @@ Ensuite tout se passe dans l'éditeur : scènes, entités, import d'assets.
    50 à 300 triangles est dans l'esprit console).
 2. Texture **une seule image** par modèle (max **256×256**, la taille
    d'une page VRAM), assignée en *Base Color* du matériau. UV dans
-   [0, 1] — le tiling n'existe pas sur une page.
+   [0, 1] — le tiling n'existe pas sur une page. **Évite les lignes
+   fines très contrastées** (grilles, joints noirs) sur les sols et
+   grandes surfaces : la PS1 n'a pas de mipmaps, et au loin
+   l'échantillonnage « nearest » les transforme en rayures d'aliasing
+   à l'écran. Des transitions douces vieillissent beaucoup mieux.
 3. Exporte en **glTF** (.glb ou .gltf+.bin, embarque la texture).
 4. **Glisse le fichier dans la fenêtre de l'éditeur** : la texture est
    extraite et quantifiée en 256 couleurs, le modèle converti, les deux
