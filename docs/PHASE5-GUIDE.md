@@ -64,8 +64,11 @@ Build (même toolchain que le player) :
 ```
 cd runtime/game
 cmake --preset default && cmake --build build
+# les sources du projet démo (assets/, audio/) ne sont pas dans git :
+# les régénérer après chaque pull qui change les samples (nouveau modèle guy !)
+cd ../../pipeline/psxpipe && cargo run --example gen_project -- ../../examples/demo
 # puis build du projet démo (examples/demo/project.json pointe sur game.exe)
-cd ../../pipeline/psxpipe && cargo run -- build ../../examples/demo
+cargo run -- build ../../examples/demo
 ```
 
 Boucle frame : `Input_Update → Scene_UpdateScripts → Scene_UpdateWorld →
