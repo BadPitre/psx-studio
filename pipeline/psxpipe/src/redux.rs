@@ -50,9 +50,26 @@ impl ReduxClient {
         }
     }
 
+    /// Timeout personnalisé (connexion + lecture + écriture). Utile pour
+    /// les polls de statut, qui doivent échouer vite quand l'émulateur
+    /// est fermé.
+    pub fn with_timeout(mut self, timeout: Duration) -> ReduxClient {
+        self.timeout = timeout;
+        self
+    }
+
     fn request(&self, method: &str, path: &str, body: &[u8]) -> Result<(u16, Vec<u8>), String> {
+        use std::net::ToSocketAddrs;
         let addr = format!("{}:{}", self.host, self.port);
-        let mut stream = TcpStream::connect(&addr)
+        let sock_addr = addr
+            .to_socket_addrs()
+            .map_err(|e| format!("adresse invalide {addr}: {e}"))?
+            .next()
+            .ok_or_else(|| format!("adresse invalide {addr}"))?;
+        // connect_timeout : sans lui, une connexion qui ne répond pas peut
+        // bloquer plusieurs secondes (défaut OS), bien au-delà du timeout
+        // de lecture réglé ensuite.
+        let mut stream = TcpStream::connect_timeout(&sock_addr, self.timeout)
             .map_err(|e| format!("PCSX-Redux injoignable sur {addr}: {e}"))?;
         stream.set_read_timeout(Some(self.timeout)).ok();
         stream.set_write_timeout(Some(self.timeout)).ok();

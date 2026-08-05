@@ -33,14 +33,36 @@ export function PlayBar({
     onRunningChange?.(state === "launched" && running === true);
   }, [state, running, onRunningChange]);
 
-  /* Poll du statut quand l'émulateur est lancé. */
+  /* Poll du statut quand l'émulateur est lancé. Deux garde-fous :
+     - jamais deux requêtes en vol (pas d'empilement si l'API est lente) ;
+     - une fois l'API vue au moins une fois, quelques échecs consécutifs
+       = émulateur fermé -> on repasse en idle et on ARRÊTE de poller
+       (sinon l'éditeur interroge un port mort pour toujours). */
   useEffect(() => {
-    if (state !== "launched") return;
+    if (state !== "launched") {
+      setRunning(null);
+      return;
+    }
+    let inFlight = false;
+    let everSeen = false;
+    let failures = 0;
     const tick = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         setRunning(await api.reduxStatus(PORT));
+        everSeen = true;
+        failures = 0;
       } catch {
         setRunning(null); // API pas (encore) joignable
+        failures++;
+        if (everSeen && failures >= 3) {
+          api.reduxClearBeacon().catch(() => {});
+          setState("idle");
+          setMessage("émulateur fermé");
+        }
+      } finally {
+        inFlight = false;
       }
     };
     tick();

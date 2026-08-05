@@ -24,7 +24,7 @@ pub struct ProjectInfo {
     pub exe_present: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_project(path: String) -> Result<ProjectInfo, String> {
     let dir = PathBuf::from(&path);
     let json_path = dir.join("project.json");
@@ -61,13 +61,13 @@ fn open_project(path: String) -> Result<ProjectInfo, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn load_scene(project_dir: String, scene_path: String) -> Result<String, String> {
     let path = PathBuf::from(project_dir).join(scene_path);
     std::fs::read_to_string(&path).map_err(|e| format!("{} : {e}", path.display()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_scene(project_dir: String, scene_path: String, contents: String) -> Result<(), String> {
     // Validation avant écriture : un JSON invalide ne doit jamais écraser
     // la scène sur disque.
@@ -105,7 +105,7 @@ pub struct BuiltScene {
 /// Construit une scène depuis son JSON (contenu fourni, pas le fichier :
 /// permet la préview des éditions non sauvegardées). Les assets sont
 /// résolus dans Library/ puis dans le dossier de la scène.
-#[tauri::command]
+#[tauri::command(async)]
 fn build_scene(
     project_dir: String,
     scene_path: String,
@@ -155,7 +155,7 @@ pub struct BuildSummary {
     pub warnings: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn build_project(project_dir: String) -> Result<BuildSummary, String> {
     let dir = PathBuf::from(&project_dir);
     let report = psxpipe::project::build(&dir, false)?;
@@ -178,7 +178,7 @@ fn build_project(project_dir: String) -> Result<BuildSummary, String> {
 }
 
 /// Import d'un asset source (glTF/GLB/PNG) déposé dans l'éditeur.
-#[tauri::command]
+#[tauri::command(async)]
 fn import_asset(
     project_dir: String,
     src_path: String,
@@ -188,7 +188,7 @@ fn import_asset(
 
 /* ---------------------------------------------------------- play mode -- */
 
-#[tauri::command]
+#[tauri::command(async)]
 fn play(
     project_dir: String,
     emulator_path: Option<String>,
@@ -229,23 +229,26 @@ fn play(
     Ok(summary)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn redux_status(port: Option<u16>) -> Result<bool, String> {
-    let client = psxpipe::redux::ReduxClient::new(port.unwrap_or(psxpipe::redux::DEFAULT_PORT));
+    // Timeout court : ce poll tourne toutes les 1,5 s, il doit échouer
+    // vite quand l'émulateur a été fermé.
+    let client = psxpipe::redux::ReduxClient::new(port.unwrap_or(psxpipe::redux::DEFAULT_PORT))
+        .with_timeout(std::time::Duration::from_millis(800));
     Ok(client.status()?.running)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn redux_pause(port: Option<u16>) -> Result<(), String> {
     psxpipe::redux::ReduxClient::new(port.unwrap_or(psxpipe::redux::DEFAULT_PORT)).pause()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn redux_resume(port: Option<u16>) -> Result<(), String> {
     psxpipe::redux::ReduxClient::new(port.unwrap_or(psxpipe::redux::DEFAULT_PORT)).resume()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn redux_reset(port: Option<u16>) -> Result<(), String> {
     psxpipe::redux::ReduxClient::new(port.unwrap_or(psxpipe::redux::DEFAULT_PORT)).reset()
 }
@@ -258,7 +261,7 @@ static BEACON: std::sync::Mutex<Option<psxpipe::redux::Beacon>> = std::sync::Mut
 
 /// À appeler quand la cible change (nouveau Play, reset, autre scène) :
 /// la balise sera relocalisée au prochain sync.
-#[tauri::command]
+#[tauri::command(async)]
 fn redux_clear_beacon() {
     *BEACON.lock().unwrap() = None;
 }
@@ -266,7 +269,7 @@ fn redux_clear_beacon() {
 /// Écrit la transform d'une entité dans la RAM console pendant que le jeu
 /// tourne. `index` est l'indice dans l'ordre du fichier .psc (entity_names).
 /// Rotation en unités PS1 (4096 = tour), échelle en 4.12.
-#[tauri::command]
+#[tauri::command(async)]
 fn redux_sync_entity(
     port: Option<u16>,
     index: u16,
