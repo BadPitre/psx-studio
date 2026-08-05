@@ -111,6 +111,51 @@ fn to_ps1(p: [f32; 3]) -> [f32; 3] {
     [p[0], -p[1], p[2]]
 }
 
+/// Extrait la première texture baseColor du fichier (embarquée dans un
+/// .glb ou référencée par un .gltf) en RGBA8. None si le modèle n'a pas
+/// de texture.
+pub fn extract_base_color_rgba(path: &Path) -> Result<Option<(Vec<u8>, u32, u32)>, String> {
+    let (doc, _buffers, images) =
+        gltf::import(path).map_err(|e| format!("glTF import failed: {e}"))?;
+
+    let Some(image_index) = doc.materials().find_map(|m| {
+        m.pbr_metallic_roughness()
+            .base_color_texture()
+            .map(|t| t.texture().source().index())
+    }) else {
+        return Ok(None);
+    };
+    let img = images
+        .get(image_index)
+        .ok_or("glTF: indice d'image invalide")?;
+
+    use gltf::image::Format;
+    let px = (img.width * img.height) as usize;
+    let rgba = match img.format {
+        Format::R8G8B8A8 => img.pixels.clone(),
+        Format::R8G8B8 => {
+            let mut out = Vec::with_capacity(px * 4);
+            for c in img.pixels.chunks_exact(3) {
+                out.extend_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+            out
+        }
+        Format::R8 => {
+            let mut out = Vec::with_capacity(px * 4);
+            for &g in &img.pixels {
+                out.extend_from_slice(&[g, g, g, 255]);
+            }
+            out
+        }
+        other => {
+            return Err(format!(
+                "format de texture glTF non supporté : {other:?} (utilise du PNG 8 bits)"
+            ))
+        }
+    };
+    Ok(Some((rgba, img.width, img.height)))
+}
+
 pub fn import(path: &Path, opts: &ImportOptions) -> Result<(Pmd, ImportReport), String> {
     let (doc, buffers, _images) =
         gltf::import(path).map_err(|e| format!("glTF import failed: {e}"))?;

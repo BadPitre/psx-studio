@@ -43,6 +43,8 @@ export interface ImportedAsset {
   kind: "Model" | "Texture";
   id: string;
   out: string;
+  /** Texture extraite d'un glTF/GLB et convertie avec le modèle. */
+  texture_out: string | null;
   summary: string;
   warnings: string[];
 }

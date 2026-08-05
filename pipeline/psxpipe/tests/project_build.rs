@@ -117,3 +117,33 @@ fn import_asset_registers_and_converts() {
     );
     project::build(dir.path(), false).unwrap();
 }
+
+#[test]
+fn import_gltf_with_texture_extracts_and_pairs() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_project(dir.path());
+
+    // Un glTF "façon Blender" avec texture baseColor référencée.
+    let ext = tempfile::tempdir().unwrap();
+    samples::write_all(ext.path()).unwrap();
+    let house = samples::house_mesh();
+    std::fs::write(
+        ext.path().join("batiment.gltf"),
+        house.to_gltf_textured("Batiment", "batiment.bin", "house.png"),
+    )
+    .unwrap();
+    std::fs::write(ext.path().join("batiment.bin"), house.to_bin()).unwrap();
+
+    let imported = project::import_asset(dir.path(), &ext.path().join("batiment.gltf")).unwrap();
+    assert_eq!(imported.texture_out.as_deref(), Some("batiment.tim"));
+    assert!(imported.summary.contains("texture extraite 256x256"), "{}", imported.summary);
+    assert!(dir.path().join("Library/batiment.tim").exists());
+    assert!(dir.path().join("Library/batiment.pmd").exists());
+    assert!(dir.path().join("assets/batiment.png").exists());
+
+    // project.json référence les deux, et le projet rebuilde.
+    let text = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
+    assert!(text.contains("batiment.tim"));
+    assert!(text.contains("batiment.pmd"));
+    project::build(dir.path(), false).unwrap();
+}

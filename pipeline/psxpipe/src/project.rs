@@ -371,6 +371,9 @@ pub struct ImportedAsset {
     pub id: String,
     /// Nom de sortie dans Library/ (ex. "house.pmd").
     pub out: String,
+    /// Texture extraite du glTF/GLB et convertie avec le modèle
+    /// (ex. "house.tim"), à appairer par l'éditeur.
+    pub texture_out: Option<String>,
     pub summary: String,
     pub warnings: Vec<String>,
 }
@@ -436,25 +439,79 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
                         .map_err(|e| format!("copie du .bin : {e}"))?;
                 }
             }
+            let mut warnings = Vec::new();
+
+            /* Texture baseColor embarquée (.glb) ou référencée (.gltf) :
+             * extraite, réduite à 256 max, convertie en TIM et
+             * enregistrée avec le modèle. */
+            let mut texture_out = None;
+            let mut tex_dims = (256u32, 256u32);
+            if let Some((rgba, w, h)) = gltf_import::extract_base_color_rgba(&dst)? {
+                let mut img: image::RgbaImage = image::ImageBuffer::from_raw(w, h, rgba)
+                    .ok_or("texture glTF : buffer invalide")?;
+                if w > 256 || h > 256 {
+                    let scale = 256.0 / w.max(h) as f32;
+                    let (nw, nh) = (
+                        ((w as f32 * scale) as u32).max(1),
+                        ((h as f32 * scale) as u32).max(1),
+                    );
+                    warnings.push(format!(
+                        "texture {w}x{h} réduite à {nw}x{nh} (une page = 256x256 max)"
+                    ));
+                    img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3);
+                }
+                tex_dims = img.dimensions();
+                img.save(assets_dir.join(format!("{id}.png")))
+                    .map_err(|e| e.to_string())?;
+                let tim_out = format!("{id}.tim");
+                let (timg, tim_report) =
+                    tim::encode(img.as_raw(), tex_dims.0, tex_dims.1, &tim::TimOptions::default())?;
+                std::fs::write(library.join(&tim_out), timg.write()).map_err(|e| e.to_string())?;
+                warnings.extend(
+                    tim_report
+                        .warnings
+                        .into_iter()
+                        .filter(|w| !w.contains("framebuffer")),
+                );
+                register(
+                    &mut project["textures"],
+                    serde_json::json!({ "png": format!("assets/{id}.png"), "out": tim_out, "bpp": 8 }),
+                    &tim_out,
+                );
+                texture_out = Some(tim_out);
+            }
+
             let out = format!("{id}.pmd");
-            let (pmd, report) = gltf_import::import(&dst, &Default::default())?;
+            let opts = gltf_import::ImportOptions {
+                tex_w: tex_dims.0,
+                tex_h: tex_dims.1,
+                ..Default::default()
+            };
+            let (pmd, report) = gltf_import::import(&dst, &opts)?;
             std::fs::write(library.join(&out), pmd.write()?).map_err(|e| e.to_string())?;
+            warnings.extend(report.warnings);
             register(
                 &mut project["models"],
                 serde_json::json!({ "gltf": format!("assets/{file_name}"), "out": out }),
                 &out,
             );
+            let summary = format!(
+                "{} triangles, {} sommets{}",
+                report.triangles_in - report.degenerate_dropped,
+                report.vertex_count,
+                if texture_out.is_some() {
+                    format!(", texture extraite {}x{}", tex_dims.0, tex_dims.1)
+                } else {
+                    String::new()
+                }
+            );
             ImportedAsset {
                 kind: AssetKind::Model,
                 id,
                 out,
-                summary: format!(
-                    "{} triangles, {} sommets, {} normales",
-                    report.triangles_in - report.degenerate_dropped,
-                    report.vertex_count,
-                    report.normal_count
-                ),
-                warnings: report.warnings,
+                texture_out,
+                summary,
+                warnings,
             }
         }
         "png" => {
@@ -478,6 +535,7 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
                 kind: AssetKind::Texture,
                 id,
                 out,
+                texture_out: None,
                 summary: format!(
                     "{w}x{h}, {} couleurs -> {} en palette 8bpp",
                     report.source_colors, report.palette_colors

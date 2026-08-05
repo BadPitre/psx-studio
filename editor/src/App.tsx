@@ -471,9 +471,16 @@ export default function App() {
                 doc.assets.textures.push({ id: `${imported.id}_tex`, tim: imported.out });
               }
             } else {
-              const texture = doc.assets.textures.find(
-                (t) => t.id === `${imported.id}_tex`,
-              );
+              // Texture extraite du glTF/GLB (texture_out), sinon appairage
+              // par nom avec une texture importée séparément.
+              const texId = `${imported.id}_tex`;
+              if (
+                imported.texture_out &&
+                !doc.assets.textures.some((t) => t.tim === imported.texture_out)
+              ) {
+                doc.assets.textures.push({ id: texId, tim: imported.texture_out });
+              }
+              const texture = doc.assets.textures.find((t) => t.id === texId);
               if (!doc.assets.models.some((m) => m.pmd === imported.out)) {
                 doc.assets.models.push({
                   id: imported.id,

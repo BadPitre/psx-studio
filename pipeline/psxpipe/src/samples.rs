@@ -167,6 +167,24 @@ impl MeshData {
         bin
     }
 
+    /// glTF document referencing `bin_name`, with a baseColor texture
+    /// pointing at `image_uri` (like a Blender export with texture).
+    pub fn to_gltf_textured(&self, name: &str, bin_name: &str, image_uri: &str) -> String {
+        let base = self.to_gltf(name, bin_name);
+        // Injecte image/sampler/texture et référence la texture dans le
+        // matériau (le JSON généré par to_gltf est stable).
+        base.replace(
+            "\"pbrMetallicRoughness\": { \"baseColorFactor\": [1.0, 1.0, 1.0, 1.0] }",
+            "\"pbrMetallicRoughness\": { \"baseColorTexture\": { \"index\": 0 } }",
+        )
+        .replace(
+            "\"buffers\":",
+            &format!(
+                "\"images\": [ {{ \"uri\": \"{image_uri}\" }} ],\n  \"samplers\": [ {{}} ],\n  \"textures\": [ {{ \"source\": 0, \"sampler\": 0 }} ],\n  \"buffers\":"
+            ),
+        )
+    }
+
     /// glTF document referencing `bin_name` as an external buffer.
     pub fn to_gltf(&self, name: &str, bin_name: &str) -> String {
         let vcount = self.positions.len();
