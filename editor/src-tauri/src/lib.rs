@@ -177,6 +177,23 @@ fn build_project(project_dir: String) -> Result<BuildSummary, String> {
     })
 }
 
+/// Seuil de subdivision anti-warping d'un modèle (par nom de .pmd).
+#[tauri::command(async)]
+fn get_model_subdiv(project_dir: String, pmd_out: String) -> Result<Option<f32>, String> {
+    psxpipe::project::model_subdiv(&PathBuf::from(project_dir), &pmd_out)
+}
+
+/// Change le seuil (None = off) : écrit project.json et reconvertit le
+/// modèle dans Library/ pour que le viewport voie le résultat.
+#[tauri::command(async)]
+fn set_model_subdiv(
+    project_dir: String,
+    pmd_out: String,
+    subdiv: Option<f32>,
+) -> Result<String, String> {
+    psxpipe::project::set_model_subdiv(&PathBuf::from(project_dir), &pmd_out, subdiv)
+}
+
 /// Import d'un asset source (glTF/GLB/PNG) déposé dans l'éditeur.
 #[tauri::command(async)]
 fn import_asset(
@@ -309,6 +326,8 @@ pub fn run() {
             build_scene,
             build_project,
             import_asset,
+            get_model_subdiv,
+            set_model_subdiv,
             play,
             redux_status,
             redux_pause,

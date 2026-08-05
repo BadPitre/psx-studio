@@ -60,6 +60,11 @@ export async function onFileDrop(cb: (paths: string[]) => void): Promise<() => v
 export const api = {
   importAsset: (projectDir: string, srcPath: string) =>
     tauriInvoke<ImportedAsset>("import_asset", { projectDir, srcPath }),
+  getModelSubdiv: (projectDir: string, pmdOut: string) =>
+    tauriInvoke<number | null>("get_model_subdiv", { projectDir, pmdOut }),
+  /** Écrit project.json et reconvertit le modèle ; retourne un résumé. */
+  setModelSubdiv: (projectDir: string, pmdOut: string, subdiv: number | null) =>
+    tauriInvoke<string>("set_model_subdiv", { projectDir, pmdOut, subdiv }),
   openProject: (path: string) => tauriInvoke<ProjectInfo>("open_project", { path }),
   loadScene: (projectDir: string, scenePath: string) =>
     tauriInvoke<string>("load_scene", { projectDir, scenePath }),

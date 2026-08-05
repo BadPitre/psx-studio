@@ -182,6 +182,8 @@ function Inspector({
   onModelChange,
   script,
   onScriptChange,
+  subdiv,
+  onSubdivChange,
   focusNameSignal,
 }: {
   scene: PscScene;
@@ -195,6 +197,8 @@ function Inspector({
   onModelChange?: (id: string | null) => void;
   script?: string | null;
   onScriptChange?: (script: string | null) => void;
+  subdiv?: number | null;
+  onSubdivChange?: (subdiv: number | null) => void;
   focusNameSignal?: number;
 }) {
   const entity = scene.entities[selected];
@@ -205,6 +209,8 @@ function Inspector({
   useEffect(() => setDraftName(name), [name]);
   const [draftScript, setDraftScript] = useState(script ?? "");
   useEffect(() => setDraftScript(script ?? ""), [script, selected]);
+  const [draftSubdiv, setDraftSubdiv] = useState(subdiv == null ? "" : String(subdiv));
+  useEffect(() => setDraftSubdiv(subdiv == null ? "" : String(subdiv)), [subdiv, selected]);
   /* F2 / menu « Renommer » : focus + sélection du champ nom. */
   useEffect(() => {
     if (focusNameSignal) {
@@ -280,6 +286,26 @@ function Inspector({
         )}
         {entity.parent >= 0 && (
           <div className="field-readonly">parent : entité {entity.parent}</div>
+        )}
+        {onSubdivChange && entity.model >= 0 && (
+          <div className="field">
+            <label>Subdivision anti-warping (arête max, vide = off)</label>
+            <input
+              type="number"
+              min={1}
+              max={32767}
+              step={8}
+              value={draftSubdiv}
+              placeholder="off"
+              onChange={(e) => setDraftSubdiv(e.target.value)}
+              onBlur={() => {
+                const v = draftSubdiv.trim() === "" ? null : Number(draftSubdiv);
+                if (v !== (subdiv ?? null) && (v === null || v > 0)) onSubdivChange(v);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+              title="Coupe les grands triangles du modèle pour limiter la déformation affine des textures (32-64 conseillé pour sols et murs). Reconvertit le modèle immédiatement."
+            />
+          </div>
         )}
       </div>
       {onScriptChange && (
@@ -803,6 +829,43 @@ export default function App() {
       : undefined;
   const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
   const currentScript = (selectedJsonEntity?.script as string | undefined) ?? null;
+  const currentModelPmd =
+    (currentModelId &&
+      sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||
+    null;
+
+  /* Seuil de subdivision du modèle sélectionné (lu dans project.json). */
+  const [modelSubdiv, setModelSubdiv] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isTauri || !project || !currentModelPmd) {
+      setModelSubdiv(null);
+      return;
+    }
+    let stale = false;
+    api
+      .getModelSubdiv(project.dir, currentModelPmd)
+      .then((v) => !stale && setModelSubdiv(v))
+      .catch(() => !stale && setModelSubdiv(null));
+    return () => {
+      stale = true;
+    };
+  }, [project, currentModelPmd]);
+
+  const applyModelSubdiv = useCallback(
+    async (value: number | null) => {
+      if (!project || !currentModelPmd || !sceneDoc) return;
+      try {
+        const summary = await api.setModelSubdiv(project.dir, currentModelPmd, value);
+        setModelSubdiv(value);
+        setNotice(`subdivision : ${summary}`);
+        // Le .pmd de Library a changé : re-packer la scène pour le viewport.
+        await rebuild(sceneDoc, scenePath, project.dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, currentModelPmd, sceneDoc, scenePath, rebuild],
+  );
 
   const currentTransform: Transform | null =
     scene && selected >= 0
@@ -961,6 +1024,10 @@ export default function App() {
                 onModelChange={isTauri && sceneDoc ? setEntityModel : undefined}
                 script={currentScript}
                 onScriptChange={isTauri && sceneDoc ? setEntityScript : undefined}
+                subdiv={modelSubdiv}
+                onSubdivChange={
+                  isTauri && sceneDoc && currentModelPmd ? applyModelSubdiv : undefined
+                }
                 focusNameSignal={renameFocus}
               />
             ) : (

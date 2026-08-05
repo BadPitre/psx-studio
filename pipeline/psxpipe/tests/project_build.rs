@@ -78,6 +78,36 @@ fn full_project_build_and_cache() {
 }
 
 #[test]
+fn set_model_subdiv_updates_json_and_reconverts() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_project(dir.path());
+    project::build(dir.path(), false).unwrap();
+    let plain_len = std::fs::metadata(dir.path().join("Library/house.pmd")).unwrap().len();
+
+    // Activer : le JSON gagne le champ, le .pmd grossit (plus de tris).
+    let summary = project::set_model_subdiv(dir.path(), "house.pmd", Some(48.0)).unwrap();
+    assert!(summary.contains("par subdivision"), "{summary}");
+    assert_eq!(project::model_subdiv(dir.path(), "house.pmd").unwrap(), Some(48.0));
+    let text = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
+    assert!(text.contains("\"subdiv\": 48"), "{text}");
+    let sub_len = std::fs::metadata(dir.path().join("Library/house.pmd")).unwrap().len();
+    assert!(sub_len > plain_len);
+
+    // Le cache est à jour : le build suivant ne reconvertit rien.
+    let report = project::build(dir.path(), false).unwrap();
+    assert_eq!(report.converted, 0);
+
+    // Désactiver : champ retiré, retour au modèle d'origine.
+    project::set_model_subdiv(dir.path(), "house.pmd", None).unwrap();
+    assert_eq!(project::model_subdiv(dir.path(), "house.pmd").unwrap(), None);
+    let back = std::fs::metadata(dir.path().join("Library/house.pmd")).unwrap().len();
+    assert_eq!(back, plain_len);
+
+    // Modèle inconnu : erreur claire.
+    assert!(project::set_model_subdiv(dir.path(), "nope.pmd", Some(32.0)).is_err());
+}
+
+#[test]
 fn missing_exe_is_a_clear_error() {
     let dir = tempfile::tempdir().unwrap();
     setup_project(dir.path());

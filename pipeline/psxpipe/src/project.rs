@@ -578,6 +578,113 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
     Ok(result)
 }
 
+/* ------------------------------------------------- réglages de modèle -- */
+
+/// Lit le seuil de subdivision d'un modèle, par son nom de sortie .pmd.
+pub fn model_subdiv(project_dir: &Path, pmd_out: &str) -> Result<Option<f32>, String> {
+    let json_path = project_dir.join("project.json");
+    let text = std::fs::read_to_string(&json_path)
+        .map_err(|e| format!("{} : {e}", json_path.display()))?;
+    let project: ProjectJson =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+    let model = project
+        .models
+        .iter()
+        .find(|m| m.out == pmd_out)
+        .ok_or_else(|| format!("modèle {pmd_out} introuvable dans project.json"))?;
+    Ok(model.subdiv)
+}
+
+/// Écrit le seuil de subdivision d'un modèle dans project.json (None ou 0
+/// = désactivée) puis le reconvertit immédiatement dans Library/ pour que
+/// l'éditeur voie le résultat sans attendre un Play. Retourne un résumé.
+pub fn set_model_subdiv(
+    project_dir: &Path,
+    pmd_out: &str,
+    subdiv: Option<f32>,
+) -> Result<String, String> {
+    let json_path = project_dir.join("project.json");
+    let text = std::fs::read_to_string(&json_path)
+        .map_err(|e| format!("{} : {e}", json_path.display()))?;
+    // Édition en Value : ne réécrit que le champ visé, préserve le reste.
+    let mut project: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+    let model = project["models"]
+        .as_array_mut()
+        .ok_or("project.json : pas de liste models")?
+        .iter_mut()
+        .find(|m| m["out"] == pmd_out)
+        .ok_or_else(|| format!("modèle {pmd_out} introuvable dans project.json"))?;
+    match subdiv {
+        Some(s) if s > 0.0 => {
+            if !(1.0..=32767.0).contains(&s) {
+                return Err("subdiv doit être entre 1 et 32767 (unités PMD)".into());
+            }
+            model["subdiv"] = serde_json::json!(s);
+        }
+        _ => {
+            model.as_object_mut().unwrap().remove("subdiv");
+        }
+    }
+    std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&project).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+
+    reconvert_model(project_dir, pmd_out)
+}
+
+/// Reconvertit un seul modèle du projet dans Library/ (avec ses options
+/// actuelles) et met le cache à jour pour que le prochain build le saute.
+pub fn reconvert_model(project_dir: &Path, pmd_out: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(project_dir.join("project.json"))
+        .map_err(|e| e.to_string())?;
+    let project: ProjectJson =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+    let model = project
+        .models
+        .iter()
+        .find(|m| m.out == pmd_out)
+        .ok_or_else(|| format!("modèle {pmd_out} introuvable dans project.json"))?;
+
+    let library = project_dir.join("Library");
+    std::fs::create_dir_all(&library).map_err(|e| e.to_string())?;
+    let src = project_dir.join(&model.gltf);
+    let opts = gltf_import::ImportOptions {
+        target_size: model.size.unwrap_or(128),
+        tex_w: model.tex_w.unwrap_or(256),
+        tex_h: model.tex_h.unwrap_or(256),
+        subdiv: model.subdiv,
+        ..Default::default()
+    };
+    let (pmd, report) = gltf_import::import(&src, &opts)?;
+    std::fs::write(library.join(&model.out), pmd.write()?).map_err(|e| e.to_string())?;
+
+    let mut cache = Cache::load(&library);
+    let hash = format!(
+        "{}:{}:{}x{}:s{}",
+        hash_gltf(&src)?,
+        model.size.unwrap_or(128),
+        model.tex_w.unwrap_or(256),
+        model.tex_h.unwrap_or(256),
+        model.subdiv.unwrap_or(0.0)
+    );
+    cache.record(model.gltf.clone(), hash);
+    cache.save()?;
+
+    let total: usize = report.counts.iter().sum();
+    Ok(format!(
+        "{} : {total} triangles{}",
+        model.out,
+        if report.triangles_subdivided > 0 {
+            format!(" (dont +{} par subdivision)", report.triangles_subdivided)
+        } else {
+            String::new()
+        }
+    ))
+}
+
 /// Best-effort relative path from `from` dir to `to` (falls back to
 /// absolute), for the generated iso.xml.
 fn pathdiff_simple(from: &Path, to: &Path) -> String {
