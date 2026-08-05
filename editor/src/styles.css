@@ -203,3 +203,25 @@ body {
   font: inherit;
 }
 .model-select { width: 100%; }
+
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 180px;
+  background: #23252e;
+  border: 1px solid #3a3d4a;
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.context-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.context-item:hover { background: var(--select); }
+.context-item.danger:hover { background: #6e2d2d; }
+.context-shortcut { color: var(--muted); font-size: 11px; }

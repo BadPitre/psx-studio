@@ -47,8 +47,16 @@ reproduit la console :
 - sortie couleur linéaire (pas de courbe sRGB) et textures TIM décodées
   CLUT → NearestFilter.
 
-Contrôles : glisser = orbite, clic droit = pan, molette = zoom,
-clic = sélection d'entité.
+### Contrôles du viewport
+- **Clic gauche** : sélection (clic) / orbite (glisser)
+- **Clic droit tenu** : caméra FPS — regard à la souris + **ZQSD** pour se
+  déplacer (codes physiques : WASD en QWERTY marche aussi), **E/Espace**
+  monter, **Q** descendre, **Shift** = rapide
+- **Molette** : avancer/reculer · **Clic milieu** : pan
+
+### Raccourcis hiérarchie (mode projet)
+- **Ctrl+C / Ctrl+V** copier/coller · **Ctrl+D** dupliquer ·
+  **Suppr** supprimer · **F2** renommer · **clic droit** : menu contextuel
 
 Note : le viewport dessine les deux faces des polygones (pratique en
 édition) ; la console, elle, cull les faces arrière.

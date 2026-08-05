@@ -1,5 +1,12 @@
-// Viewport : rendu natif 320x240 (upscalé en pixels nets), caméra
-// orbitale, sélection d'entité au clic, surlignage de la sélection.
+// Viewport : rendu natif 320x240 (upscalé en pixels nets), sélection au
+// clic, et caméra style Unity :
+//   clic gauche (drag)   orbite autour du point visé
+//   clic gauche (clic)   sélection d'entité
+//   clic droit (tenu)    regard FPS + déplacement ZQSD/WASD (codes
+//                        physiques : marche en AZERTY comme en QWERTY),
+//                        E/Espace monter, Q descendre, Shift = rapide
+//   clic milieu (drag)   pan
+//   molette              avancer/reculer (dolly)
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
@@ -14,6 +21,9 @@ export interface ViewportProps {
   selected: number;
   onSelect: (index: number) => void;
 }
+
+const MOVE_SPEED = 420; // unités monde / seconde
+const LOOK_SPEED = 0.0045;
 
 export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,48 +46,78 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
     const three = new THREE.Scene();
     stateRef.current = { renderer, camera, three, graph: null, highlight: null };
 
-    // Caméra orbitale minimaliste (drag = orbite, molette = zoom,
-    // clic droit drag = pan de la cible).
-    const orbit = { yaw: 0.5, pitch: 0.45, dist: 900, target: new THREE.Vector3(0, 60, 150) };
-    const applyCamera = () => {
-      const { yaw, pitch, dist, target } = orbit;
-      camera.position.set(
-        target.x + dist * Math.sin(yaw) * Math.cos(pitch),
-        target.y + dist * Math.sin(pitch),
-        target.z - dist * Math.cos(yaw) * Math.cos(pitch),
+    /* État caméra : position + regard (yaw/pitch), pivot d'orbite à
+     * distance `dist` devant la caméra. */
+    const cam = {
+      pos: new THREE.Vector3(),
+      yaw: 0.5,
+      pitch: -0.45,
+      dist: 900,
+    };
+    const forward = () =>
+      new THREE.Vector3(
+        Math.sin(cam.yaw) * Math.cos(cam.pitch),
+        Math.sin(cam.pitch),
+        -Math.cos(cam.yaw) * Math.cos(cam.pitch),
       );
-      camera.lookAt(target);
+    // Position initiale : reproduit l'ancienne vue orbitale par défaut.
+    {
+      const target = new THREE.Vector3(0, 60, 150);
+      cam.pos.copy(target).addScaledVector(forward(), -cam.dist);
+    }
+    const applyCamera = () => {
+      camera.position.copy(cam.pos);
+      camera.rotation.set(cam.pitch, -cam.yaw, 0, "YXZ");
     };
     applyCamera();
 
-    let dragging = 0;
+    /* Souris. */
+    let dragButton = -1;
     let moved = false;
+    const keys = new Set<string>();
+    canvas.tabIndex = 0; // focus clavier
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("pointerdown", (e) => {
-      dragging = e.button === 2 ? 2 : 1;
+      dragButton = e.button;
       moved = false;
       canvas.setPointerCapture(e.pointerId);
+      canvas.focus();
     });
     canvas.addEventListener("pointermove", (e) => {
-      if (!dragging) return;
+      if (dragButton < 0) return;
       if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) moved = true;
-      if (dragging === 1) {
-        orbit.yaw += e.movementX * 0.008;
-        orbit.pitch = Math.min(1.4, Math.max(-1.4, orbit.pitch + e.movementY * 0.008));
+      if (dragButton === 0) {
+        // Orbite autour du pivot devant la caméra.
+        const pivot = cam.pos.clone().addScaledVector(forward(), cam.dist);
+        cam.yaw += e.movementX * LOOK_SPEED;
+        cam.pitch = THREE.MathUtils.clamp(
+          cam.pitch - e.movementY * LOOK_SPEED,
+          -1.45,
+          1.45,
+        );
+        cam.pos.copy(pivot).addScaledVector(forward(), -cam.dist);
+      } else if (dragButton === 2) {
+        // Regard FPS : la position ne bouge pas.
+        cam.yaw += e.movementX * LOOK_SPEED;
+        cam.pitch = THREE.MathUtils.clamp(
+          cam.pitch - e.movementY * LOOK_SPEED,
+          -1.45,
+          1.45,
+        );
       } else {
+        // Pan.
         const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
         const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
-        orbit.target.addScaledVector(right, -e.movementX * orbit.dist * 0.002);
-        orbit.target.addScaledVector(up, e.movementY * orbit.dist * 0.002);
+        cam.pos.addScaledVector(right, -e.movementX * cam.dist * 0.0018);
+        cam.pos.addScaledVector(up, e.movementY * cam.dist * 0.0018);
       }
       applyCamera();
     });
     canvas.addEventListener("pointerup", (e) => {
-      const wasDrag = dragging;
-      dragging = 0;
+      const was = dragButton;
+      dragButton = -1;
       canvas.releasePointerCapture(e.pointerId);
-      // Clic simple (pas un drag) : sélection par raycast.
-      if (wasDrag === 1 && !moved && stateRef.current?.graph) {
+      if (was === 0 && !moved && stateRef.current?.graph) {
         const rect = canvas.getBoundingClientRect();
         const ndc = new THREE.Vector2(
           ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -92,22 +132,55 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
     });
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
-      orbit.dist = Math.min(4000, Math.max(120, orbit.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+      const step = cam.dist * (e.deltaY > 0 ? 0.1 : -0.1);
+      cam.pos.addScaledVector(forward(), -step);
+      cam.dist = THREE.MathUtils.clamp(cam.dist + step, 60, 4000);
       applyCamera();
     });
 
+    /* Clavier (codes physiques : ZQSD azerty = WASD qwerty). */
+    canvas.addEventListener("keydown", (e) => {
+      keys.add(e.code);
+      if (
+        ["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "Space"].includes(e.code)
+      ) {
+        e.preventDefault();
+      }
+    });
+    canvas.addEventListener("keyup", (e) => keys.delete(e.code));
+    canvas.addEventListener("blur", () => keys.clear());
+
+    /* Boucle : déplacement continu + rendu. */
     let raf = 0;
-    const loop = () => {
+    let last = performance.now();
+    const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
+      const dt = Math.min((now - last) / 1000, 0.1);
+      last = now;
+
       const s = stateRef.current;
       if (!s) return;
+
+      if (keys.size > 0) {
+        const speed = MOVE_SPEED * dt * (keys.has("ShiftLeft") || keys.has("ShiftRight") ? 3 : 1);
+        const fwd = forward();
+        const right = new THREE.Vector3(Math.cos(cam.yaw), 0, Math.sin(cam.yaw));
+        if (keys.has("KeyW")) cam.pos.addScaledVector(fwd, speed);
+        if (keys.has("KeyS")) cam.pos.addScaledVector(fwd, -speed);
+        if (keys.has("KeyA")) cam.pos.addScaledVector(right, -speed);
+        if (keys.has("KeyD")) cam.pos.addScaledVector(right, speed);
+        if (keys.has("KeyE") || keys.has("Space")) cam.pos.y += speed;
+        if (keys.has("KeyQ")) cam.pos.y -= speed;
+        applyCamera();
+      }
+
       if (s.graph) {
         updateLightUniforms(s.graph.materials, s.camera, s.graph.lighting.toward);
       }
       s.highlight?.update();
       s.renderer.render(s.three, s.camera);
     };
-    loop();
+    raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
       renderer.dispose();
@@ -151,9 +224,8 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
       s.three.remove(s.highlight);
       s.highlight = null;
     }
-    if (selected >= 0) {
-      const target = s.graph.entityGroups[selected];
-      const helper = new THREE.BoxHelper(target, 0xffcc00);
+    if (selected >= 0 && selected < s.graph.entityGroups.length) {
+      const helper = new THREE.BoxHelper(s.graph.entityGroups[selected], 0xffcc00);
       s.three.add(helper);
       s.highlight = helper;
     }
@@ -165,6 +237,7 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
       className="viewport-canvas"
       width={PS1_RESOLUTION.x}
       height={PS1_RESOLUTION.y}
+      title="Clic gauche : orbite/sélection · Clic droit tenu : caméra FPS (ZQSD, E/Espace ↑, Q ↓, Shift rapide) · Molette : avancer · Clic milieu : pan"
     />
   );
 }

@@ -35,16 +35,14 @@ function Hierarchy({
   selected,
   onSelect,
   onAdd,
-  onDuplicate,
-  onDelete,
+  onContextMenu,
 }: {
   scene: PscScene;
   names: string[];
   selected: number;
   onSelect: (i: number) => void;
   onAdd?: () => void;
-  onDuplicate?: () => void;
-  onDelete?: () => void;
+  onContextMenu?: (i: number, x: number, y: number) => void;
 }) {
   const depths = useMemo(() => {
     const d: number[] = [];
@@ -62,22 +60,12 @@ function Hierarchy({
           <button className="button" onClick={onAdd} title="Nouvelle entité">
             ＋
           </button>
-          <button
-            className="button"
-            onClick={onDuplicate}
-            disabled={selected < 0}
-            title="Dupliquer la sélection"
+          <span
+            className="muted"
+            title="Ctrl+C copier · Ctrl+V coller · Ctrl+D dupliquer · Suppr supprimer · F2 renommer · clic droit : menu"
           >
-            ⧉
-          </button>
-          <button
-            className="button"
-            onClick={onDelete}
-            disabled={selected < 0}
-            title="Supprimer la sélection"
-          >
-            🗑
-          </button>
+            raccourcis ⓘ
+          </span>
         </div>
       )}
       {scene.entities.map((e, i) => (
@@ -86,12 +74,61 @@ function Hierarchy({
           className={`tree-item ${selected === i ? "selected" : ""}`}
           style={{ paddingLeft: 8 + depths[i] * 16 }}
           onClick={() => onSelect(i)}
+          onContextMenu={(ev) => {
+            if (!onContextMenu) return;
+            ev.preventDefault();
+            onSelect(i);
+            onContextMenu(i, ev.clientX, ev.clientY);
+          }}
         >
           <span className="tree-icon">{e.model >= 0 ? "▣" : "○"}</span>
           {names[i] ?? `entité ${i}`}
           {e.model >= 0 && (
             <span className="tree-meta">{scene.models[e.model].prims.length} tris</span>
           )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------ menu contextuel -- */
+
+function ContextMenu({
+  x,
+  y,
+  onClose,
+  actions,
+}: {
+  x: number;
+  y: number;
+  onClose: () => void;
+  actions: { label: string; shortcut?: string; onClick: () => void; danger?: boolean }[];
+}) {
+  useEffect(() => {
+    const close = () => onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="context-menu" style={{ left: x, top: y }}>
+      {actions.map((a) => (
+        <div
+          key={a.label}
+          className={`context-item ${a.danger ? "danger" : ""}`}
+          onClick={() => {
+            onClose();
+            a.onClick();
+          }}
+        >
+          <span>{a.label}</span>
+          {a.shortcut && <span className="context-shortcut">{a.shortcut}</span>}
         </div>
       ))}
     </div>
@@ -143,6 +180,7 @@ function Inspector({
   currentModelId,
   onRename,
   onModelChange,
+  focusNameSignal,
 }: {
   scene: PscScene;
   name: string;
@@ -153,12 +191,21 @@ function Inspector({
   currentModelId?: string | null;
   onRename?: (name: string) => void;
   onModelChange?: (id: string | null) => void;
+  focusNameSignal?: number;
 }) {
   const entity = scene.entities[selected];
   const toDeg = (u: number) => Math.round((u / 4096) * 3600) / 10;
   const toUnits = (deg: number) => Math.round((deg / 360) * 4096);
   const [draftName, setDraftName] = useState(name);
+  const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => setDraftName(name), [name]);
+  /* F2 / menu « Renommer » : focus + sélection du champ nom. */
+  useEffect(() => {
+    if (focusNameSignal) {
+      nameRef.current?.focus();
+      nameRef.current?.select();
+    }
+  }, [focusNameSignal]);
 
   return (
     <div className="panel">
@@ -166,6 +213,7 @@ function Inspector({
       {onRename ? (
         <div className="field-group">
           <input
+            ref={nameRef}
             className="name-input"
             value={draftName}
             spellCheck={false}
@@ -255,7 +303,10 @@ export default function App() {
   const [sceneDoc, setSceneDoc] = useState<SceneDoc | null>(null);
   const [entityNames, setEntityNames] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [renameFocus, setRenameFocus] = useState(0);
   const rebuildTimer = useRef<number>(0);
+  const clipboardRef = useRef<Record<string, unknown> | null>(null);
 
   const loadBuffer = useCallback((name: string, buffer: ArrayBuffer) => {
     try {
@@ -438,6 +489,51 @@ export default function App() {
     [mutateDoc, selected, entityNames],
   );
 
+  const copyEntity = useCallback(() => {
+    if (selected < 0 || !sceneDoc) return;
+    const src = sceneDoc.entities?.find((e) => e.name === entityNames[selected]);
+    if (src) clipboardRef.current = structuredClone(src);
+  }, [selected, sceneDoc, entityNames]);
+
+  const pasteEntity = useCallback(() => {
+    const src = clipboardRef.current;
+    if (!src) return;
+    const name = uniqueName(src.name as string);
+    mutateDoc((doc) => {
+      const clone = structuredClone(src);
+      clone.name = name;
+      const pos = (clone.position as number[]) ?? [0, 0, 0];
+      clone.position = [pos[0] + 50, pos[1], pos[2]];
+      doc.entities = doc.entities ?? [];
+      doc.entities.push(clone);
+    }, name);
+  }, [mutateDoc, uniqueName]);
+
+  /* Raccourcis clavier globaux (hors champs de saisie). */
+  useEffect(() => {
+    if (!isTauri) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (!sceneDoc) return;
+      if (e.ctrlKey && e.code === "KeyC") {
+        copyEntity();
+      } else if (e.ctrlKey && e.code === "KeyV") {
+        pasteEntity();
+      } else if (e.ctrlKey && e.code === "KeyD") {
+        e.preventDefault();
+        duplicateEntity();
+      } else if (e.key === "Delete") {
+        deleteEntity();
+      } else if (e.key === "F2" && selected >= 0) {
+        e.preventDefault();
+        setRenameFocus((n) => n + 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sceneDoc, selected, copyEntity, pasteEntity, duplicateEntity, deleteEntity]);
+
   const saveScene = useCallback(async () => {
     if (!project || !sceneDoc) return;
     try {
@@ -618,9 +714,33 @@ export default function App() {
               selected={selected}
               onSelect={setSelected}
               onAdd={isTauri && sceneDoc ? addEntity : undefined}
-              onDuplicate={isTauri && sceneDoc ? duplicateEntity : undefined}
-              onDelete={isTauri && sceneDoc ? deleteEntity : undefined}
+              onContextMenu={
+                isTauri && sceneDoc ? (_, x, y) => setMenu({ x, y }) : undefined
+              }
             />
+            {menu && (
+              <ContextMenu
+                x={menu.x}
+                y={menu.y}
+                onClose={() => setMenu(null)}
+                actions={[
+                  {
+                    label: "Renommer",
+                    shortcut: "F2",
+                    onClick: () => setRenameFocus((n) => n + 1),
+                  },
+                  { label: "Copier", shortcut: "Ctrl+C", onClick: copyEntity },
+                  { label: "Coller", shortcut: "Ctrl+V", onClick: pasteEntity },
+                  { label: "Dupliquer", shortcut: "Ctrl+D", onClick: duplicateEntity },
+                  {
+                    label: "Supprimer",
+                    shortcut: "Suppr",
+                    onClick: deleteEntity,
+                    danger: true,
+                  },
+                ]}
+              />
+            )}
             {viewMode === "vram" ? (
               <VramPanel scene={scene} />
             ) : (
@@ -644,6 +764,7 @@ export default function App() {
                 currentModelId={currentModelId}
                 onRename={isTauri && sceneDoc ? renameEntity : undefined}
                 onModelChange={isTauri && sceneDoc ? setEntityModel : undefined}
+                focusNameSignal={renameFocus}
               />
             ) : (
               <div className="panel">
