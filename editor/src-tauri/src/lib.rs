@@ -164,13 +164,30 @@ fn play(
             "mkpsxiso introuvable : l'ISO n'a pas été générée (voir PATH)".into(),
         );
     }
-    let emulator = emulator_path.unwrap_or_else(|| "pcsx-redux".into());
+    let mut emulator = PathBuf::from(emulator_path.unwrap_or_else(|| "pcsx-redux".into()));
+    // Tolérance : si on nous donne le dossier d'installation, chercher
+    // l'exécutable dedans (erreur classique sous Windows -> "Accès refusé").
+    if emulator.is_dir() {
+        for candidate in ["pcsx-redux.exe", "pcsx-redux"] {
+            let full = emulator.join(candidate);
+            if full.is_file() {
+                emulator = full;
+                break;
+            }
+        }
+        if emulator.is_dir() {
+            return Err(format!(
+                "{} est un dossier et ne contient pas pcsx-redux.exe — indique le chemin de l'exécutable",
+                emulator.display()
+            ));
+        }
+    }
     let port = port.unwrap_or(psxpipe::redux::DEFAULT_PORT);
     let args = psxpipe::redux::launch_args(&summary.cue_path, port);
     Command::new(&emulator)
         .args(&args)
         .spawn()
-        .map_err(|e| format!("lancement de {emulator} impossible : {e}"))?;
+        .map_err(|e| format!("lancement de {} impossible : {e}", emulator.display()))?;
     Ok(summary)
 }
 
