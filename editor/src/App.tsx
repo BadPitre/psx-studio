@@ -289,22 +289,24 @@ function Inspector({
         )}
         {onSubdivChange && entity.model >= 0 && (
           <div className="field">
-            <label>Subdivision anti-warping (arête max, vide = off)</label>
-            <input
-              type="number"
-              min={1}
-              max={32767}
-              step={8}
+            <label>Subdivision anti-warping</label>
+            <select
+              className="scene-select model-select"
               value={draftSubdiv}
-              placeholder="off"
-              onChange={(e) => setDraftSubdiv(e.target.value)}
-              onBlur={() => {
-                const v = draftSubdiv.trim() === "" ? null : Number(draftSubdiv);
-                if (v !== (subdiv ?? null) && (v === null || v > 0)) onSubdivChange(v);
+              onChange={(e) => {
+                setDraftSubdiv(e.target.value);
+                onSubdivChange(e.target.value === "" ? null : Number(e.target.value));
               }}
-              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-              title="Coupe les grands triangles du modèle pour limiter la déformation affine des textures (32-64 conseillé pour sols et murs). Reconvertit le modèle immédiatement."
-            />
+              title="Découpe les grands triangles du modèle pour limiter la déformation affine des textures (pour les sols et grands murs). Reconvertit le modèle immédiatement."
+            >
+              <option value="">désactivée</option>
+              <option value="64">légère (arête max 64)</option>
+              <option value="48">moyenne (arête max 48)</option>
+              <option value="32">forte (arête max 32)</option>
+              {draftSubdiv !== "" && !["64", "48", "32"].includes(draftSubdiv) && (
+                <option value={draftSubdiv}>personnalisée ({draftSubdiv})</option>
+              )}
+            </select>
           </div>
         )}
       </div>
