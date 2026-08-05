@@ -33,6 +33,15 @@ static size_t	arena_used;
 
 static Scene*	current_scene;
 
+/* Distance d'affichage courante (0 = illimitee), posee par la camera de
+ * scene via Scene_SetDrawDistance. */
+static int32_t	draw_distance;
+
+void Scene_SetDrawDistance(int32_t d)
+{
+	draw_distance = d;
+}
+
 EditorBeacon g_editor_beacon;
 
 static void* Arena_Alloc(size_t size)
@@ -228,8 +237,10 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 		ent->parent = (rec->parent == PSC_NO_INDEX) ? -1 : (int16_t)rec->parent;
 		ent->script = rec->script;
 		ent->flags = rec->flags;
-		/* v1.2 : le FOV camera vit dans le pad du vecteur position. */
+		/* v1.2 : FOV camera dans le pad position, distance d'affichage
+		 * dans le pad rotation. */
 		ent->cam_fov = (uint16_t)rec->pos.pad;
+		ent->cam_draw = (uint16_t)rec->rot.pad;
 		ent->visible = 1;
 		ent->solid = (ent->model >= 0);
 	}
@@ -270,9 +281,13 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 				continue;
 			int slot = scene->light_entity_count++;
 			scene->light_entities[slot] = (int16_t)light_table[i].entity;
+			/* Intensite en pourcent (pad, 0 = 100) : la matrice couleur
+			 * GTE est en 4.12, une lumiere peut depasser 100 %. */
+			int intensity = light_table[i].pad ? light_table[i].pad : 100;
 			for (int c = 0; c < 3; c++)
-				color_mtx.m[c][1 + slot] =
-					(int16_t)(((int32_t)light_table[i].color[c] << 12) / 255);
+				color_mtx.m[c][1 + slot] = (int16_t)(
+					(((int32_t)light_table[i].color[c] << 12) / 255
+						* intensity) / 100);
 		}
 	}
 	gte_SetColorMatrix(&color_mtx);
@@ -456,6 +471,11 @@ uint8_t* Scene_Draw(const Scene* scene, const MATRIX* view, uint32_t* ot,
 		comp.t[0] = view_t[0] + view->t[0];
 		comp.t[1] = view_t[1] + view->t[1];
 		comp.t[2] = view_t[2] + view->t[2];
+
+		/* Distance d'affichage (camera v1.2) : culling par entite, avec
+		 * une marge d'un demi-modele pour ne pas couper trop tot. */
+		if (draw_distance > 0 && comp.t[2] - 300 > draw_distance)
+			continue;
 
 		/* Lighting: world light direction against the entity's rotation
 		 * (unscaled, so non-uniform scale doesn't skew intensities). */

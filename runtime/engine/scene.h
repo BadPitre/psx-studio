@@ -138,6 +138,10 @@ int Scene_LoadFromCd(Scene* scene, const char* path);
  * once per frame, before Scene_Draw). */
 void Scene_UpdateWorld(Scene* scene);
 
+/* Distance d'affichage : les entites au-dela (en Z vue) ne sont pas
+ * dessinees. 0 = illimitee. Posee par Scene_ApplyCamera. */
+void Scene_SetDrawDistance(int32_t d);
+
 /* Appelle on_start / on_update des scripts attaches. */
 void Scene_StartScripts(Scene* scene);
 void Scene_UpdateScripts(Scene* scene);

@@ -330,7 +330,12 @@ export function Viewport({
             towardThree: new THREE.Vector3(0, 0, 1).transformDirection(
               group.matrixWorld,
             ),
-            color: light.color,
+            // Intensité appliquée à la couleur (le shader clampe la somme).
+            color: light.color.map((c) => c * light.intensity) as [
+              number,
+              number,
+              number,
+            ],
           });
         }
         return lights;
@@ -376,8 +381,11 @@ export function Viewport({
         pipCam.matrixWorld.copy(group.matrixWorld).multiply(MIRROR_Y);
         pipCam.matrixWorldInverse.copy(pipCam.matrixWorld).invert();
         const fov = s.graph.entityCamFov[sel] || PS1_DEFAULT_FOV;
-        if (Math.abs(pipCam.fov - fov) > 0.01) {
+        // Distance d'affichage : le far plane du PiP simule le culling.
+        const far = s.graph.entityCamDraw[sel] || 8192;
+        if (Math.abs(pipCam.fov - fov) > 0.01 || Math.abs(pipCam.far - far) > 1) {
           pipCam.fov = fov;
+          pipCam.far = far;
           pipCam.updateProjectionMatrix();
         }
         const pipLights = currentLights(s.graph);
@@ -450,7 +458,10 @@ export function Viewport({
       }
       if (flags & ENTITY_FLAG_CAMERA) {
         const fov = graph.entityCamFov[i] || PS1_DEFAULT_FOV;
-        const cam = new THREE.PerspectiveCamera(fov, 4 / 3, 30, 300);
+        // Le frustum matérialise la distance d'affichage quand elle est
+        // bornée (sinon une longueur d'aperçu raisonnable).
+        const far = graph.entityCamDraw[i] || 300;
+        const cam = new THREE.PerspectiveCamera(fov, 4 / 3, 30, far);
         cam.matrixAutoUpdate = false;
         cam.updateProjectionMatrix();
         const helper = new THREE.CameraHelper(cam);

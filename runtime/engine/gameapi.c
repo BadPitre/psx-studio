@@ -94,6 +94,7 @@ int Scene_ApplyCamera(void)
 	{
 		gte_SetGeomScreen(160);
 	}
+	Scene_SetDrawDistance(cam->cam_draw);
 	return 1;
 }
 

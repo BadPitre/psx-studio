@@ -205,10 +205,14 @@ function Inspector({
   onSubdivChange,
   light,
   onLightChange,
+  lightIntensity,
+  onLightIntensityChange,
   isCamera,
   onCameraChange,
   camFov,
   onCamFovChange,
+  camDraw,
+  onCamDrawChange,
   focusNameSignal,
 }: {
   scene: PscScene;
@@ -226,10 +230,14 @@ function Inspector({
   onSubdivChange?: (subdiv: number | null) => void;
   light?: [number, number, number] | null;
   onLightChange?: (color: [number, number, number] | null) => void;
+  lightIntensity?: number | null;
+  onLightIntensityChange?: (v: number | null) => void;
   isCamera?: boolean;
   onCameraChange?: (on: boolean) => void;
   camFov?: number | null;
   onCamFovChange?: (fov: number | null) => void;
+  camDraw?: number | null;
+  onCamDrawChange?: (d: number | null) => void;
   focusNameSignal?: number;
 }) {
   const entity = scene.entities[selected];
@@ -360,6 +368,31 @@ function Inspector({
               />
             )}
           </label>
+          {light && onLightIntensityChange && (
+            <div className="camera-props">
+              <div className="field">
+                <label>
+                  Intensité — {Math.round((lightIntensity ?? 1) * 100)} %
+                </label>
+                <input
+                  type="range"
+                  min={10}
+                  max={250}
+                  step={5}
+                  value={Math.round((lightIntensity ?? 1) * 100)}
+                  onChange={(e) => {
+                    const pct = Number(e.target.value);
+                    onLightIntensityChange(pct === 100 ? null : pct / 100);
+                  }}
+                  title="Multiplicateur d'intensité : la matrice couleur du GTE est en 4.12, une lumière peut dépasser 100 %"
+                />
+              </div>
+              <div className="field-readonly">
+                directionnelle GTE · par sommet (Gouraud) · pas d'ombres ·
+                direction = rotation de l'entité (-Z local)
+              </div>
+            </div>
+          )}
           <label className="component-row">
             <input
               type="checkbox"
@@ -384,6 +417,23 @@ function Inspector({
                     if (v === null || (v >= 10 && v <= 170)) onCamFovChange(v);
                   }}
                   title="Champ de vision vertical. Le défaut console (distance de projection h = 160) vaut ~74°. Le runtime le convertit en gte_SetGeomScreen."
+                />
+              </div>
+              <div className="field">
+                <label>Distance d'affichage (unités, vide = ∞)</label>
+                <input
+                  type="number"
+                  min={100}
+                  max={32767}
+                  step={100}
+                  value={camDraw ?? ""}
+                  placeholder="illimitée"
+                  onChange={(e) => {
+                    const v = e.target.value === "" ? null : Number(e.target.value);
+                    if (v === null || (v >= 100 && v <= 32767))
+                      onCamDrawChange?.(v);
+                  }}
+                  title="Les entités au-delà ne sont pas dessinées (culling par objet, le « pop » maîtrisé des jeux PS1). Le far plane du PiP la simule."
                 />
               </div>
               <div className="field-readonly">
@@ -785,8 +835,13 @@ export default function App() {
       mutateDoc((doc) => {
         const entity = doc.entities?.find((e) => e.name === name);
         if (!entity) return;
-        if (color) entity.light = { color };
-        else delete entity.light;
+        if (color) {
+          entity.light = { color };
+          // Lumière et caméra sont exclusives : une entité a un seul rôle.
+          delete entity.camera;
+        } else {
+          delete entity.light;
+        }
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -802,19 +857,43 @@ export default function App() {
         // Ne pas écraser un FOV déjà réglé en re-cochant la case.
         if (on && !entity.camera) entity.camera = true;
         else if (!on) delete entity.camera;
+        // Lumière et caméra sont exclusives : une entité a un seul rôle.
+        if (on) delete entity.light;
       }, name);
     },
     [mutateDoc, selected, entityNames],
   );
 
-  const setEntityCamFov = useCallback(
-    (fov: number | null) => {
+  /* Propriétés caméra (fov, draw_distance) fusionnées dans l'objet
+     camera du JSON ; toutes au défaut -> retour à `true`. */
+  const setEntityCamProp = useCallback(
+    (key: "fov" | "draw_distance", value: number | null) => {
       if (selected < 0) return;
       const name = entityNames[selected];
       mutateDoc((doc) => {
         const entity = doc.entities?.find((e) => e.name === name);
         if (!entity || !entity.camera) return;
-        entity.camera = fov === null ? true : { fov };
+        const props: Record<string, number> =
+          typeof entity.camera === "object"
+            ? { ...(entity.camera as Record<string, number>) }
+            : {};
+        if (value === null) delete props[key];
+        else props[key] = value;
+        entity.camera = Object.keys(props).length > 0 ? props : true;
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
+  const setEntityLightIntensity = useCallback(
+    (v: number | null) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity || !entity.light) return;
+        const light = entity.light as { color: [number, number, number] };
+        entity.light = v === null ? { color: light.color } : { color: light.color, intensity: v };
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -992,10 +1071,15 @@ export default function App() {
     ((selectedJsonEntity?.light as { color?: [number, number, number] } | undefined)
       ?.color as [number, number, number] | undefined) ?? null;
   const currentCamera = Boolean(selectedJsonEntity?.camera);
-  const currentCamFov =
-    (typeof selectedJsonEntity?.camera === "object" &&
-      (selectedJsonEntity.camera as { fov?: number }).fov) ||
-    null;
+  const camProps =
+    typeof selectedJsonEntity?.camera === "object"
+      ? (selectedJsonEntity.camera as { fov?: number; draw_distance?: number })
+      : {};
+  const currentCamFov = camProps.fov ?? null;
+  const currentCamDraw = camProps.draw_distance ?? null;
+  const currentLightIntensity =
+    ((selectedJsonEntity?.light as { intensity?: number } | undefined)
+      ?.intensity as number | undefined) ?? null;
   const currentModelPmd =
     (currentModelId &&
       sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||
@@ -1227,10 +1311,22 @@ export default function App() {
                 }
                 light={currentLight}
                 onLightChange={isTauri && sceneDoc ? setEntityLight : undefined}
+                lightIntensity={currentLightIntensity}
+                onLightIntensityChange={
+                  isTauri && sceneDoc ? setEntityLightIntensity : undefined
+                }
                 isCamera={currentCamera}
                 onCameraChange={isTauri && sceneDoc ? setEntityCamera : undefined}
                 camFov={currentCamFov}
-                onCamFovChange={isTauri && sceneDoc ? setEntityCamFov : undefined}
+                onCamFovChange={
+                  isTauri && sceneDoc ? (v) => setEntityCamProp("fov", v) : undefined
+                }
+                camDraw={currentCamDraw}
+                onCamDrawChange={
+                  isTauri && sceneDoc
+                    ? (v) => setEntityCamProp("draw_distance", v)
+                    : undefined
+                }
                 focusNameSignal={renameFocus}
               />
             ) : (

@@ -137,13 +137,25 @@ pub struct EntityJson {
 #[serde(deny_unknown_fields)]
 pub struct LightJson {
     pub color: [u8; 3],
+    /// Multiplicateur d'intensité (0.1–2.5, défaut 1.0). Les matrices
+    /// couleur du GTE sont en 4.12 : une lumière peut dépasser 100 %.
+    #[serde(default)]
+    pub intensity: Option<f32>,
 }
 
 #[derive(Deserialize, Clone)]
 #[serde(untagged)]
 pub enum CameraJson {
     Enabled(bool),
-    Props { fov: f32 },
+    Props {
+        #[serde(default)]
+        fov: Option<f32>,
+        /// Distance d'affichage en unités monde (0/absent = illimitée) :
+        /// les entités au-delà ne sont pas dessinées — le « pop » maîtrisé
+        /// des jeux PS1, et du budget GPU récupéré.
+        #[serde(default)]
+        draw_distance: Option<f32>,
+    },
 }
 
 impl Default for CameraJson {
@@ -158,7 +170,13 @@ impl CameraJson {
     }
     pub fn fov(&self) -> Option<f32> {
         match self {
-            CameraJson::Props { fov } => Some(*fov),
+            CameraJson::Props { fov, .. } => *fov,
+            CameraJson::Enabled(_) => None,
+        }
+    }
+    pub fn draw_distance(&self) -> Option<f32> {
+        match self {
+            CameraJson::Props { draw_distance, .. } => *draw_distance,
             CameraJson::Enabled(_) => None,
         }
     }
@@ -491,7 +509,23 @@ pub fn build_with_options(
             entities.extend_from_slice(&c.to_le_bytes());
         }
         entities.extend_from_slice(&cam_fov.to_le_bytes());
-        push_svec(&mut entities, rot);
+        // Distance d'affichage caméra : pad du vecteur rotation (0 = infini).
+        let cam_draw = match e.camera.draw_distance() {
+            Some(d) => {
+                if !(100.0..=32767.0).contains(&d) {
+                    return Err(format!(
+                        "entity '{}': draw_distance {d} hors plage (100-32767 unités)",
+                        e.name
+                    ));
+                }
+                d.round() as u16
+            }
+            None => 0,
+        };
+        for c in rot {
+            entities.extend_from_slice(&c.to_le_bytes());
+        }
+        entities.extend_from_slice(&cam_draw.to_le_bytes());
         push_svec(&mut entities, scale);
         let parent = match &e.parent {
             Some(p) => pos_to_sorted[name_to_pos[p.as_str()]],
@@ -512,6 +546,12 @@ pub fn build_with_options(
         if e.camera.enabled() {
             flags |= ENTITY_FLAG_CAMERA;
         }
+        if e.light.is_some() && e.camera.enabled() {
+            report.warnings.push(format!(
+                "entité '{}' : lumière ET caméra sur la même entité — choisis un rôle (l'éditeur les rend exclusifs)",
+                e.name
+            ));
+        }
         entities.extend_from_slice(&flags.to_le_bytes());
         // Script : indice+1 dans la table (0 = aucun) — les fichiers
         // antérieurs ont 0 ici, donc restent valides.
@@ -525,7 +565,7 @@ pub fn build_with_options(
     /* Table des lumières (v1.2) : entités-lumières dans l'ordre du
      * fichier. Le GTE offre 3 directionnelles ; la lumière des settings
      * occupe la ligne 0, donc 2 entités max — le surplus est ignoré. */
-    let mut lights: Vec<(u16, [u8; 3])> = Vec::new();
+    let mut lights: Vec<(u16, [u8; 3], u8)> = Vec::new();
     for &i in &order {
         let e = &scene.entities[i];
         if let Some(light) = &e.light {
@@ -536,7 +576,20 @@ pub fn build_with_options(
                 ));
                 continue;
             }
-            lights.push((pos_to_sorted[i], light.color));
+            // Intensité en pourcent dans l'octet de pad (0 = 100 %).
+            let intensity = match light.intensity {
+                Some(v) => {
+                    if !(0.1..=2.5).contains(&v) {
+                        return Err(format!(
+                            "entité '{}': intensity {v} hors plage (0.1-2.5)",
+                            e.name
+                        ));
+                    }
+                    (v * 100.0).round() as u8
+                }
+                None => 0,
+            };
+            lights.push((pos_to_sorted[i], light.color, intensity));
         }
     }
 
@@ -623,9 +676,9 @@ pub fn build_with_options(
     for name in &script_names {
         out.extend_from_slice(&script_hash(name).to_le_bytes());
     }
-    for (entity, color) in &lights {
+    for (entity, color, intensity) in &lights {
         out.extend_from_slice(&entity.to_le_bytes());
-        out.extend_from_slice(&[color[0], color[1], color[2], 0]);
+        out.extend_from_slice(&[color[0], color[1], color[2], *intensity]);
     }
     for (offset, (blob, _)) in model_offsets.iter().zip(&model_blobs) {
         out.resize(*offset, 0);
@@ -694,6 +747,8 @@ pub struct PscLight {
     /// Indice d'entité (ordre du fichier) : sa rotation donne la direction.
     pub entity: u16,
     pub color: [u8; 3],
+    /// Intensité en pourcent (0 = 100).
+    pub intensity_percent: u8,
 }
 
 /// Parse la table des lumières d'un .psc (vide pour les fichiers < v1.2).
@@ -708,6 +763,7 @@ pub fn parse_lights(data: &[u8], header: &PscHeader) -> Vec<PscLight> {
         lights.push(PscLight {
             entity: u16::from_le_bytes([data[o], data[o + 1]]),
             color: [data[o + 2], data[o + 3], data[o + 4]],
+            intensity_percent: data[o + 5],
         });
     }
     lights

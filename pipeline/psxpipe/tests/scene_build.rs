@@ -252,3 +252,35 @@ fn camera_fov_in_entity_pad() {
     std::fs::write(&p, bad).unwrap();
     assert!(scene::build_file(&p).unwrap_err().contains("fov"));
 }
+
+#[test]
+fn light_intensity_and_camera_draw_distance() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    let json = r#"{
+      "name": "params",
+      "assets": { "textures": [], "models": [] },
+      "entities": [
+        { "name": "forte", "light": { "color": [255, 0, 0], "intensity": 1.8 } },
+        { "name": "cam",   "camera": { "fov": 74, "draw_distance": 1500 } }
+      ]
+    }"#;
+    let p = dir.path().join("params.json");
+    std::fs::write(&p, json).unwrap();
+    let (bytes, _) = scene::build_file(&p).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    let lights = scene::parse_lights(&bytes, &h);
+    assert_eq!(lights[0].intensity_percent, 180);
+
+    // draw_distance dans le pad du vecteur rotation (offset 0x0E).
+    let rec = h.entities_offset as usize + scene::ENTITY_SIZE; // entité 1
+    assert_eq!(u16::from_le_bytes([bytes[rec + 0x0E], bytes[rec + 0x0F]]), 1500);
+    assert_eq!(u16::from_le_bytes([bytes[rec + 6], bytes[rec + 7]]), 74);
+
+    // Hors plage : erreurs claires.
+    std::fs::write(&p, json.replace("1.8", "9.0")).unwrap();
+    assert!(scene::build_file(&p).unwrap_err().contains("intensity"));
+    std::fs::write(&p, json.replace("1500", "50")).unwrap();
+    assert!(scene::build_file(&p).unwrap_err().contains("draw_distance"));
+}

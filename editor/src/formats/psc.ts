@@ -25,6 +25,8 @@ export interface PscEntity {
   flags: number;
   /** FOV vertical caméra en degrés (0 = défaut PS1, ~74°). */
   camFov: number;
+  /** Distance d'affichage caméra en unités monde (0 = illimitée). */
+  camDraw: number;
 }
 
 /** FOV vertical de la projection PS1 native (h = 160) : 2·atan(120/160). */
@@ -35,6 +37,8 @@ export interface PscLight {
   /** Indice d'entité : sa rotation donne la direction (éclaire vers -Z). */
   entity: number;
   color: [number, number, number];
+  /** Multiplicateur d'intensité (1.0 = 100 %). */
+  intensity: number;
 }
 
 export interface PscScene {
@@ -111,6 +115,7 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
       model: model === NO_INDEX ? -1 : model,
       flags: data.getUint16(rec + 0x1c, true),
       camFov: data.getUint16(rec + 6, true),
+      camDraw: data.getUint16(rec + 0x0e, true),
     });
   }
 
@@ -124,6 +129,7 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
       lights.push({
         entity: data.getUint16(rec, true),
         color: rgb(rec + 2),
+        intensity: (data.getUint8(rec + 5) || 100) / 100,
       });
     }
   }

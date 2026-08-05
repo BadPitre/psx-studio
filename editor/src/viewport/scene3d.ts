@@ -20,6 +20,8 @@ export interface SceneGraph {
   entityFlags: number[];
   /** FOV caméra par entité (0 = défaut PS1). */
   entityCamFov: number[];
+  /** Distance d'affichage caméra par entité (0 = illimitée). */
+  entityCamDraw: number[];
 }
 
 function timToTexture(scene: PscScene, index: number): THREE.DataTexture | null {
@@ -146,5 +148,6 @@ export function buildSceneGraph(scene: PscScene): SceneGraph {
     lights: scene.lights,
     entityFlags: scene.entities.map((e) => e.flags),
     entityCamFov: scene.entities.map((e) => e.camFov),
+    entityCamDraw: scene.entities.map((e) => e.camDraw),
   };
 }

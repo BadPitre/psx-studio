@@ -114,7 +114,7 @@ et avec les framebuffers (erreur si chevauchement).
 | Offset | Type | Champ |
 |---|---|---|
 | 0x00 | i16×3 + `cam_fov` u16 | position locale ; le pad porte le FOV vertical caméra en degrés (v1.2, 0 = défaut ~74°) |
-| 0x08 | i16×3 + pad | rotation locale (unités 4096 = 360°) |
+| 0x08 | i16×3 + `cam_draw` u16 | rotation locale (unités 4096 = 360°) ; le pad porte la distance d'affichage caméra (v1.2, 0 = illimitée) |
 | 0x10 | i16×3 + pad | échelle locale (4.12, 4096 = 1.0) |
 | 0x18 | u16 | parent (indice, `0xFFFF` = racine) |
 | 0x1A | u16 | modèle (indice, `0xFFFF` = aucun) |
@@ -137,7 +137,10 @@ résout chaque hash contre `g_scripts[]` au chargement ; un hash inconnu vaut
 
 ### Table des lumières (v1.2, `light_count` × 6 octets)
 
-| u16 `entity` | u8×3 `color` | u8 pad |
+| u16 `entity` | u8×3 `color` | u8 `intensity` (pourcent, 0 = 100) |
+
+L'intensité multiplie la couleur dans la matrice GTE (4.12 : une lumière
+peut dépasser 100 %, jusqu'à 250 %).
 
 `entity` = indice d'entité (ordre du fichier) : sa **rotation donne la
 direction** — convention unique du studio, une entité « regarde » et
@@ -147,8 +150,9 @@ runtime re-dérive la direction chaque frame (vers-la-source = +Z monde,
 live tweaking — change l'éclairage en direct. Les couleurs remplissent
 les colonnes 1-2 de la matrice couleur GTE.
 
-Côté JSON : `"light": { "color": [r, g, b] }` sur l'entité, et
-`"camera": true` ou `"camera": { "fov": 74 }` pour le composant caméra
+Côté JSON : `"light": { "color": [r, g, b], "intensity": 1.5 }` sur
+l'entité (intensité optionnelle, 0.1–2.5), et `"camera": true` ou
+`"camera": { "fov": 74, "draw_distance": 1500 }` pour le composant caméra
 (la première entité caméra donne la vue initiale de la scène ; les
 scripts peuvent reprendre la main). Le FOV vertical est converti par le
 runtime en distance de projection GTE (`gte_SetGeomScreen`,
