@@ -52,8 +52,9 @@ puis « Ouvrir un projet… » → `examples/demo` → **▶ Play**.
 - `examples/demo/` — projet exemple complet
 - `docs/` — [mode d'emploi](docs/GETTING-STARTED.md), specs
   ([PMD](docs/PMD-FORMAT.md), [Scene](docs/SCENE-FORMAT.md)), doc
-  d'architecture (`psx-studio-doc-projet.md`) et guides de phase 0→6
-  (le journal de construction du studio)
+  d'architecture (`psx-studio-doc-projet.md`), guides de phase 0→6
+  (le journal de construction du studio) et [feuille de
+  route](docs/ROADMAP.md) des chantiers suivants
 
 ## Contribuer
 
