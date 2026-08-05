@@ -31,6 +31,7 @@ typedef struct Entity
 	int16_t		model;		/* indice de modele, -1 = aucun */
 	int16_t		parent;		/* indice d'entite, -1 = racine */
 	uint16_t	script;		/* indice table scripts + 1, 0 = aucun */
+	uint16_t	flags;		/* composants : ENTITY_FLAG_LIGHT / _CAMERA */
 	uint8_t		visible;	/* 0 = ni rendu ni collision */
 	uint8_t		solid;		/* participe aux collisions AABB */
 
@@ -71,6 +72,11 @@ uint16_t Input_Pressed(void);
 /* La camera est pilotee par les scripts (position monde + angles). */
 
 void Camera_Set(int32_t x, int32_t y, int32_t z, int yaw, int pitch);
+
+/* Applique la premiere entite camera de la scene courante comme vue
+ * initiale (position monde + rotation). Retourne 1 si appliquee — les
+ * scripts peuvent ensuite reprendre la main a chaque frame. */
+int Scene_ApplyCamera(void);
 
 /* ------------------------------------------------------------- dialogue -- */
 /* Boite de dialogue en bas d'ecran (jusqu'a 3 lignes, separees par \n).

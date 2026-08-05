@@ -151,8 +151,20 @@ typedef struct
 	int		pitch;
 } FreeCamera;
 
-static void ResetCamera(FreeCamera* cam)
+static void ResetCamera(FreeCamera* cam, const Scene* scene)
 {
+	/* Entite camera de la scene (v1.2) : vue initiale. */
+	if (scene && scene->camera_entity >= 0)
+	{
+		const Entity* c = &scene->entities[scene->camera_entity];
+		cam->pos.vx = c->world.t[0];
+		cam->pos.vy = c->world.t[1];
+		cam->pos.vz = c->world.t[2];
+		/* L'entite regarde vers -Z local ; la fpscam est en miroir yaw. */
+		cam->yaw = (2048 - c->rot.vy) & 4095;
+		cam->pitch = c->rot.vx;
+		return;
+	}
 	cam->pos.vx = 0;
 	cam->pos.vy = -140;		/* above the ground (Y is down) */
 	cam->pos.vz = -420;
@@ -329,7 +341,7 @@ int main(int argc, const char** argv)
 	int err = Scene_LoadFromCd(&scene, SCENE_PATHS[scene_index]);
 	assert(err == 0);
 	SetBackground(&ctx, &scene.background);
-	ResetCamera(&cam);
+	ResetCamera(&cam, &scene);
 
 	uint16_t prev_held = 0;
 	int tri_total = Scene_TriangleCount(&scene);
@@ -359,7 +371,7 @@ int main(int argc, const char** argv)
 				assert(err == 0);
 			}
 			SetBackground(&ctx, &scene.background);
-			ResetCamera(&cam);
+			ResetCamera(&cam, &scene);
 			tri_total = Scene_TriangleCount(&scene);
 			/* The CD read stopped any CD-DA playback. */
 			if (music_on)
@@ -376,7 +388,7 @@ int main(int argc, const char** argv)
 				StopMusic();
 		}
 		if (pressed & PAD_START)
-			ResetCamera(&cam);
+			ResetCamera(&cam, &scene);
 
 		UpdateCamera(&cam, held);
 

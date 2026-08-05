@@ -68,6 +68,20 @@ void Camera_Set(int32_t x, int32_t y, int32_t z, int yaw, int pitch)
 	cam_pitch = pitch;
 }
 
+int Scene_ApplyCamera(void)
+{
+	Scene* scene = Scene_Current();
+	if (!scene || scene->camera_entity < 0)
+		return 0;
+	const Entity* cam = &scene->entities[scene->camera_entity];
+	/* Convention : l'entite regarde le long de son axe -Z local (comme
+	 * les modeles et les lumieres). La camera GTE (fpscam) tourne en
+	 * sens miroir sur le yaw : yaw_cam = 180° - rot.vy. */
+	Camera_Set(cam->world.t[0], cam->world.t[1], cam->world.t[2],
+		(2048 - cam->rot.vy) & 4095, cam->rot.vx);
+	return 1;
+}
+
 void Camera_GetViewMatrix(MATRIX* view)
 {
 	SVECTOR rot = { (int16_t)cam_pitch, (int16_t)cam_yaw, 0, 0 };

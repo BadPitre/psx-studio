@@ -17,6 +17,7 @@ pub const HEADER_SIZE: usize = 64;
 pub const MODEL_ENTRY_SIZE: usize = 12;
 pub const TEXTURE_ENTRY_SIZE: usize = 8;
 pub const ENTITY_SIZE: usize = 32;
+pub const LIGHT_ENTRY_SIZE: usize = 6;
 pub const NO_INDEX: u16 = 0xFFFF;
 
 /* ---------------------------------------------------------------- JSON -- */
@@ -116,7 +117,30 @@ pub struct EntityJson {
     /// runtime dans le registre compilé avec le jeu.
     #[serde(default)]
     pub script: Option<String>,
+    /// Composant lumière directionnelle (v1.2) : la rotation de l'entité
+    /// donne la direction (la lumière éclaire le long de son axe -Z
+    /// local, comme les modèles font face à -Z). 2 max par scène : la
+    /// lumière des settings occupe la ligne 0 du GTE, celles-ci les
+    /// lignes 1 et 2.
+    #[serde(default)]
+    pub light: Option<LightJson>,
+    /// Composant caméra (v1.2) : la première entité caméra donne la vue
+    /// initiale de la scène. Convention unique du studio : une entité
+    /// « regarde » le long de son axe -Z local (modèles, lumières,
+    /// caméras).
+    #[serde(default)]
+    pub camera: bool,
 }
+
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct LightJson {
+    pub color: [u8; 3],
+}
+
+/// Flags d'entité (champ réservé depuis la v1).
+pub const ENTITY_FLAG_LIGHT: u16 = 1 << 0;
+pub const ENTITY_FLAG_CAMERA: u16 = 1 << 1;
 
 /// Hash FNV-1a 32 bits d'un nom de script (le runtime fait le même calcul).
 pub fn script_hash(name: &str) -> u32 {
@@ -437,7 +461,14 @@ pub fn build_with_options(
         };
         entities.extend_from_slice(&parent.to_le_bytes());
         entities.extend_from_slice(&model.to_le_bytes());
-        entities.extend_from_slice(&0u16.to_le_bytes()); // flags
+        let mut flags = 0u16;
+        if e.light.is_some() {
+            flags |= ENTITY_FLAG_LIGHT;
+        }
+        if e.camera {
+            flags |= ENTITY_FLAG_CAMERA;
+        }
+        entities.extend_from_slice(&flags.to_le_bytes());
         // Script : indice+1 dans la table (0 = aucun) — les fichiers
         // antérieurs ont 0 ici, donc restent valides.
         let script_ref = match &e.script {
@@ -447,13 +478,32 @@ pub fn build_with_options(
         entities.extend_from_slice(&script_ref.to_le_bytes());
     }
 
+    /* Table des lumières (v1.2) : entités-lumières dans l'ordre du
+     * fichier. Le GTE offre 3 directionnelles ; la lumière des settings
+     * occupe la ligne 0, donc 2 entités max — le surplus est ignoré. */
+    let mut lights: Vec<(u16, [u8; 3])> = Vec::new();
+    for &i in &order {
+        let e = &scene.entities[i];
+        if let Some(light) = &e.light {
+            if lights.len() >= 2 {
+                report.warnings.push(format!(
+                    "lumière '{}' ignorée : 3 directionnelles max sur le GTE (settings + 2 entités)",
+                    e.name
+                ));
+                continue;
+            }
+            lights.push((pos_to_sorted[i], light.color));
+        }
+    }
+
     /* Layout: header | model table | texture table | entities | scripts
-     * (table de hashes) | blobs. */
+     * (table de hashes) | lights | blobs. */
     let models_offset = HEADER_SIZE;
     let textures_offset = models_offset + model_blobs.len() * MODEL_ENTRY_SIZE;
     let entities_offset = textures_offset + texture_blobs.len() * TEXTURE_ENTRY_SIZE;
     let scripts_offset = entities_offset + entities.len();
-    let mut blob_cursor = scripts_offset + script_names.len() * 4;
+    let lights_offset = scripts_offset + script_names.len() * 4;
+    let mut blob_cursor = lights_offset + lights.len() * LIGHT_ENTRY_SIZE;
 
     let align4 = |v: usize| (v + 3) & !3;
     let mut model_entries = Vec::new();
@@ -519,12 +569,19 @@ pub fn build_with_options(
     // Extension v1.1 dans les octets réservés : table des scripts.
     out.extend_from_slice(&(script_names.len() as u16).to_le_bytes());
     out.extend_from_slice(&(scripts_offset as u32).to_le_bytes());
+    // Extension v1.2 : table des lumières (0x38 offset, 0x3C count).
+    out.extend_from_slice(&(lights_offset as u32).to_le_bytes());
+    out.extend_from_slice(&(lights.len() as u16).to_le_bytes());
     out.resize(HEADER_SIZE, 0); // reserved
     out.extend_from_slice(&model_entries);
     out.extend_from_slice(&texture_entries);
     out.extend_from_slice(&entities);
     for name in &script_names {
         out.extend_from_slice(&script_hash(name).to_le_bytes());
+    }
+    for (entity, color) in &lights {
+        out.extend_from_slice(&entity.to_le_bytes());
+        out.extend_from_slice(&[color[0], color[1], color[2], 0]);
     }
     for (offset, (blob, _)) in model_offsets.iter().zip(&model_blobs) {
         out.resize(*offset, 0);
@@ -583,6 +640,33 @@ pub struct PscHeader {
     pub light_toward: [i16; 3],
     pub script_count: u16,
     pub scripts_offset: u32,
+    pub lights_offset: u32,
+    pub light_count: u16,
+}
+
+/// Une entrée de la table des lumières (v1.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PscLight {
+    /// Indice d'entité (ordre du fichier) : sa rotation donne la direction.
+    pub entity: u16,
+    pub color: [u8; 3],
+}
+
+/// Parse la table des lumières d'un .psc (vide pour les fichiers < v1.2).
+pub fn parse_lights(data: &[u8], header: &PscHeader) -> Vec<PscLight> {
+    let mut lights = Vec::new();
+    let base = header.lights_offset as usize;
+    for i in 0..header.light_count as usize {
+        let o = base + i * LIGHT_ENTRY_SIZE;
+        if o + LIGHT_ENTRY_SIZE > data.len() {
+            break;
+        }
+        lights.push(PscLight {
+            entity: u16::from_le_bytes([data[o], data[o + 1]]),
+            color: [data[o + 2], data[o + 3], data[o + 4]],
+        });
+    }
+    lights
 }
 
 pub fn parse_header(data: &[u8]) -> Result<PscHeader, String> {
@@ -610,6 +694,8 @@ pub fn parse_header(data: &[u8]) -> Result<PscHeader, String> {
         light_toward: [i16at(44), i16at(46), i16at(48)],
         script_count: u16at(50),
         scripts_offset: u32at(52),
+        lights_offset: u32at(56),
+        light_count: u16at(60),
     };
     if h.version != VERSION {
         return Err(format!("unsupported PSC version {}", h.version));

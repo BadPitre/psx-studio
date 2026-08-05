@@ -48,8 +48,25 @@ typedef struct {
 	int16_t		light_toward[3];	/* 4.12, world space, points AT the source */
 	uint16_t	script_count;		/* extension v1.1 (0 sur les anciens fichiers) */
 	uint32_t	scripts_offset;		/* table de hashes FNV-1a 32 */
-	uint8_t		reserved[8];
+	uint32_t	lights_offset;		/* extension v1.2 : table des lumieres */
+	uint16_t	light_count;		/* entites-lumieres (2 max, lignes GTE 1-2) */
+	uint8_t		reserved[2];
 } PscHeader;
+
+/* Une entree de la table des lumieres (v1.2) : l'entite donne la
+ * direction (elle eclaire le long de son axe -Z local), la couleur est
+ * ici. */
+typedef struct {
+	uint16_t	entity;
+	uint8_t		color[3];
+	uint8_t		pad;
+} PscLightRec;
+
+/* Flags d'entite. */
+#define ENTITY_FLAG_LIGHT	(1 << 0)
+#define ENTITY_FLAG_CAMERA	(1 << 1)
+
+#define SCENE_MAX_ENTITY_LIGHTS	2
 
 typedef struct {
 	uint32_t	offset;
@@ -102,7 +119,13 @@ typedef struct {
 	int					entity_count;
 	/* Scripts resolus par hash (index table -> registre du jeu). */
 	const ScriptDef*	scripts[SCENE_MAX_SCRIPTS];
-	MATRIX				light_mtx;		/* row 0 = vector toward the light */
+	/* Lumieres : ligne 0 = soleil des settings (fixe), lignes 1-2 =
+	 * entites-lumieres, re-derivees chaque frame de leur rotation. */
+	MATRIX				light_mtx;
+	int16_t				light_entities[SCENE_MAX_ENTITY_LIGHTS];
+	int					light_entity_count;
+	/* Premiere entite camera (-1 : aucune) : vue initiale de la scene. */
+	int16_t				camera_entity;
 	CVECTOR				background;
 } Scene;
 

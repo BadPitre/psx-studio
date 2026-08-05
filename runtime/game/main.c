@@ -125,6 +125,9 @@ int main(int argc, const char** argv)
 	int err = Scene_LoadFromCd(&scene, "\\SCENE0.PSC;1");
 	assert(err == 0);
 	SetBackground(&ctx, &scene.background);
+	/* Entite camera de la scene = vue initiale ; les scripts (camera de
+	 * suivi du player) reprennent la main ensuite. */
+	Scene_ApplyCamera();
 	Scene_StartScripts(&scene);
 
 	for (;;)

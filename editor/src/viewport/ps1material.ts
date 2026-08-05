@@ -16,12 +16,13 @@ export const PS1_RESOLUTION = new THREE.Vector2(320, 240);
 
 const vertexShader = /* glsl */ `
   uniform vec2 uResolution;
-  uniform vec3 uLightViewDir;   // vers la source, espace vue
-  uniform vec3 uLightColor;     // 0-1
-  uniform vec3 uAmbient;        // 0-1
-  attribute vec3 baseColor;     // couleur de base du paquet, 128 = neutre
+  // 3 lumières directionnelles, comme le GTE (soleil + 2 entités).
+  uniform vec3 uLightViewDir[3];  // vers la source, espace vue
+  uniform vec3 uLightColor[3];    // 0-1 (noir = ligne inactive)
+  uniform vec3 uAmbient;          // 0-1
+  attribute vec3 baseColor;       // couleur de base du paquet, 128 = neutre
   varying vec3 vColor;
-  varying vec3 vUvW;            // uv * w (mapping affine) + w
+  varying vec3 vUvW;              // uv * w (mapping affine) + w
 
   void main() {
     vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -30,11 +31,15 @@ const vertexShader = /* glsl */ `
     vec2 half_res = uResolution * 0.5;
     clip.xy = floor(clip.xy / clip.w * half_res) / half_res * clip.w;
 
-    // Gouraud : CC = ambiante + couleur lumière * max(0, N.L), comme le GTE.
+    // Gouraud : CC = ambiante + somme des lumières * max(0, N.L), comme
+    // les matrices lumière/couleur du GTE.
     vec3 n = normalize(normalMatrix * normal);
-    float intensity = max(dot(n, uLightViewDir), 0.0);
+    vec3 cc = uAmbient;
+    for (int l = 0; l < 3; l++) {
+      cc += uLightColor[l] * max(dot(n, uLightViewDir[l]), 0.0);
+    }
     // Le GTE clampe CC à 255 avant la modulation GPU.
-    vec3 cc = min(uAmbient + uLightColor * intensity, vec3(1.0));
+    cc = min(cc, vec3(1.0));
     // Modulation GPU : 128 = neutre (facteur (base/128) * (CC*255/128)).
     vColor = (baseColor / 128.0) * (cc * 255.0 / 128.0);
 
@@ -94,9 +99,15 @@ export function makePs1Material(
       uMap: { value: texture },
       uTextured: { value: texture !== null },
       uDither: { value: true },
-      uLightViewDir: { value: new THREE.Vector3() },
+      uLightViewDir: {
+        value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()],
+      },
       uLightColor: {
-        value: new THREE.Vector3(...lighting.color.map((c) => c / 255)),
+        value: [
+          new THREE.Vector3(...lighting.color.map((c) => c / 255)),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+        ],
       },
       uAmbient: {
         value: new THREE.Vector3(...lighting.ambient.map((c) => c / 255)),
@@ -106,20 +117,42 @@ export function makePs1Material(
   });
 }
 
-/** À appeler chaque frame : lumière monde (PS1) → espace vue caméra. */
+/** Une lumière prête pour les uniforms : direction en monde three. */
+export interface ViewportLight {
+  /** Vers la source, espace monde three (+Y haut). */
+  towardThree: THREE.Vector3;
+  /** 0-255. */
+  color: [number, number, number];
+}
+
+/** À appeler chaque frame : lumières monde three → espace vue caméra. */
 export function updateLightUniforms(
   materials: THREE.ShaderMaterial[],
   camera: THREE.Camera,
-  toward: [number, number, number],
+  lights: ViewportLight[],
 ) {
-  // Monde PS1 (+Y bas) → monde three (+Y haut) : Y négé par le groupe
-  // racine, donc la direction lumière doit l'être aussi.
-  const world = new THREE.Vector3(toward[0], -toward[1], toward[2]);
-  const view = world
-    .clone()
-    .transformDirection(camera.matrixWorldInverse)
-    .normalize();
+  const view: THREE.Vector3[] = [];
+  const colors: [number, number, number][] = [];
+  for (let l = 0; l < 3; l++) {
+    const light = lights[l];
+    view.push(
+      light
+        ? light.towardThree
+            .clone()
+            .transformDirection(camera.matrixWorldInverse)
+            .normalize()
+        : new THREE.Vector3(),
+    );
+    colors.push(light ? light.color : [0, 0, 0]);
+  }
   for (const m of materials) {
-    (m.uniforms.uLightViewDir.value as THREE.Vector3).copy(view);
+    for (let l = 0; l < 3; l++) {
+      (m.uniforms.uLightViewDir.value as THREE.Vector3[])[l].copy(view[l]);
+      (m.uniforms.uLightColor.value as THREE.Vector3[])[l].set(
+        colors[l][0] / 255,
+        colors[l][1] / 255,
+        colors[l][2] / 255,
+      );
+    }
   }
 }

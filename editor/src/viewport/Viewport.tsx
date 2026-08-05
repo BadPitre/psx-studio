@@ -11,7 +11,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import type { PscScene } from "../formats/psc";
+import { ENTITY_FLAG_CAMERA, ENTITY_FLAG_LIGHT, type PscScene } from "../formats/psc";
 import { buildSceneGraph, applyEntityTransform, type SceneGraph } from "./scene3d";
 import { updateLightUniforms, PS1_RESOLUTION } from "./ps1material";
 
@@ -66,6 +66,13 @@ export function Viewport({
     graph: SceneGraph | null;
     highlight: THREE.BoxHelper | null;
     gizmo: TransformControls;
+    /** Marqueurs de composants (flèche lumière, frustum caméra). */
+    flagHelpers: {
+      kind: "light" | "camera";
+      entity: number;
+      obj: THREE.Object3D;
+      cam?: THREE.PerspectiveCamera;
+    }[];
   } | null>(null);
 
   /* Callbacks/état accessibles depuis les closures d'init (une seule fois). */
@@ -148,6 +155,7 @@ export function Viewport({
       graph: null,
       highlight: null,
       gizmo,
+      flagHelpers: [],
     };
 
     /* État caméra : position + regard (yaw/pitch), pivot d'orbite à
@@ -284,7 +292,47 @@ export function Viewport({
       }
 
       if (s.graph) {
-        updateLightUniforms(s.graph.materials, s.camera, s.graph.lighting.toward);
+        // Lumière 0 = soleil des settings ; 1-2 = entités-lumières, dont
+        // la direction suit la rotation courante du groupe (gizmo,
+        // overrides) : +Z local en monde three (le miroir Y de la racine
+        // est inclus dans matrixWorld).
+        s.graph.root.updateMatrixWorld(true);
+        const t = s.graph.lighting.toward;
+        const lights = [
+          {
+            towardThree: new THREE.Vector3(t[0], -t[1], t[2]),
+            color: s.graph.lighting.color,
+          },
+        ];
+        for (const light of s.graph.lights) {
+          const group = s.graph.entityGroups[light.entity];
+          if (!group || lights.length >= 3) continue;
+          lights.push({
+            towardThree: new THREE.Vector3(0, 0, 1).transformDirection(
+              group.matrixWorld,
+            ),
+            color: light.color,
+          });
+        }
+        updateLightUniforms(s.graph.materials, s.camera, lights);
+
+        // Marqueurs de composants : suivent la transform courante.
+        for (const h of s.flagHelpers) {
+          const group = s.graph.entityGroups[h.entity];
+          if (!group) continue;
+          if (h.kind === "light") {
+            const arrow = h.obj as THREE.ArrowHelper;
+            arrow.position.setFromMatrixPosition(group.matrixWorld);
+            arrow.setDirection(
+              new THREE.Vector3(0, 0, -1).transformDirection(group.matrixWorld),
+            );
+          } else if (h.cam) {
+            // Convention unique : l'entité regarde vers -Z local, comme
+            // les caméras three — matrice reprise telle quelle.
+            h.cam.matrixWorld.copy(group.matrixWorld);
+            h.obj.matrixWorldNeedsUpdate = true;
+          }
+        }
       }
       s.highlight?.update();
       s.renderer.render(s.three, s.camera);
@@ -329,11 +377,38 @@ export function Viewport({
     s.gizmo.detach();
     s.three.clear();
     if (s.highlight) s.overlayScene.remove(s.highlight);
+    for (const h of s.flagHelpers) s.overlayScene.remove(h.obj);
+    s.flagHelpers = [];
     s.graph = null;
     s.highlight = null;
     if (!scene) return;
     const graph = buildSceneGraph(scene);
     s.three.add(graph.root);
+
+    /* Marqueurs de composants dans le calque net. */
+    graph.entityFlags.forEach((flags, i) => {
+      if (flags & ENTITY_FLAG_LIGHT) {
+        const c = graph.lights.find((l) => l.entity === i)?.color ?? [255, 255, 255];
+        const arrow = new THREE.ArrowHelper(
+          new THREE.Vector3(0, 0, -1),
+          new THREE.Vector3(),
+          130,
+          new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255).getHex(),
+          36,
+          20,
+        );
+        s.overlayScene.add(arrow);
+        s.flagHelpers.push({ kind: "light", entity: i, obj: arrow });
+      }
+      if (flags & ENTITY_FLAG_CAMERA) {
+        const cam = new THREE.PerspectiveCamera(53, 4 / 3, 30, 300);
+        cam.matrixAutoUpdate = false;
+        cam.updateProjectionMatrix();
+        const helper = new THREE.CameraHelper(cam);
+        s.overlayScene.add(helper);
+        s.flagHelpers.push({ kind: "camera", entity: i, obj: helper, cam });
+      }
+    });
     s.three.background = new THREE.Color(
       scene.background[0] / 255,
       scene.background[1] / 255,

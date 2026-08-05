@@ -217,9 +217,10 @@ struct Instance<'a> {
     t: [f32; 3],
 }
 
+/// Jusqu'à 3 lumières directionnelles, comme le GTE (soleil + 2 entités).
 struct Lighting {
-    toward: [f32; 3],
-    color: [f32; 3],
+    /// (vers la source, couleur 0-1) par lumière active.
+    lights: Vec<([f32; 3], [f32; 3])>,
     ambient: [f32; 3],
 }
 
@@ -274,17 +275,20 @@ fn render(
             if nclip <= 0.0 {
                 continue;
             }
-            // Per-vertex GTE-style lighting: CC = ambient + color * (N.L)
+            // Per-vertex GTE-style lighting: CC = ambient + Σ color * (N.L)
             let mut light = [[0.0f32; 3]; 3];
             for k in 0..3 {
                 let n = mat_vec(&inst.light_rot, inst.model.normals[prim.nidx[k]]);
-                let d = (lighting.toward[0] * n[0]
-                    + lighting.toward[1] * n[1]
-                    + lighting.toward[2] * n[2])
-                    .max(0.0);
+                let mut cc = lighting.ambient;
+                for (toward, color) in &lighting.lights {
+                    let d = (toward[0] * n[0] + toward[1] * n[1] + toward[2] * n[2])
+                        .max(0.0);
+                    for ch in 0..3 {
+                        cc[ch] += color[ch] * d * 255.0;
+                    }
+                }
                 for ch in 0..3 {
-                    light[k][ch] =
-                        (lighting.ambient[ch] + lighting.color[ch] * d * 255.0) / 128.0;
+                    light[k][ch] = cc[ch].min(255.0) / 128.0;
                 }
             }
             tris.push(RasterTri {
@@ -485,17 +489,36 @@ fn main() {
             })
             .collect();
 
-        let lighting = Lighting {
-            toward: [
+        let mut lights = vec![(
+            [
                 h.light_toward[0] as f32 / 4096.0,
                 h.light_toward[1] as f32 / 4096.0,
                 h.light_toward[2] as f32 / 4096.0,
             ],
-            color: [
+            [
                 h.light_color[0] as f32 / 255.0,
                 h.light_color[1] as f32 / 255.0,
                 h.light_color[2] as f32 / 255.0,
             ],
+        )];
+        // Entités-lumières (v1.2) : vers la source = +Z monde de l'entité
+        // (3e colonne de sa rotation monde), comme le runtime.
+        for light in psxpipe::scene::parse_lights(&data, &h) {
+            let Some(e) = ents.get(light.entity as usize) else { continue };
+            if lights.len() >= 3 {
+                break;
+            }
+            lights.push((
+                [e.light_rot[0][2], e.light_rot[1][2], e.light_rot[2][2]],
+                [
+                    light.color[0] as f32 / 255.0,
+                    light.color[1] as f32 / 255.0,
+                    light.color[2] as f32 / 255.0,
+                ],
+            ));
+        }
+        let lighting = Lighting {
+            lights,
             ambient: [
                 h.ambient[0] as f32,
                 h.ambient[1] as f32,
@@ -533,11 +556,13 @@ fn main() {
             t: [0.0, 0.0, dist],
         }];
         let lighting = Lighting {
-            toward: {
-                let n = (3.0f32).sqrt();
-                [-1.0 / n, -1.0 / n, -1.0 / n]
-            },
-            color: [1.0, 1.0, 1.0],
+            lights: vec![(
+                {
+                    let n = (3.0f32).sqrt();
+                    [-1.0 / n, -1.0 / n, -1.0 / n]
+                },
+                [1.0, 1.0, 1.0],
+            )],
             ambient: [64.0, 64.0, 64.0],
         };
         let identity = rot_matrix(0.0, 0.0, 0.0);

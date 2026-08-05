@@ -87,11 +87,14 @@ Conventions :
 | 0x2C | i16×3 | vecteur **vers** la source lumière, 4.12, espace monde |
 | 0x32 | u16 | `script_count` (v1.1 ; 0 = pas de table de scripts) |
 | 0x34 | u32 | `scripts_offset` (v1.1 ; 0 si `script_count` = 0) |
-| 0x38 | 8 | réservé (0) |
+| 0x38 | u32 | `lights_offset` (v1.2 ; 0 = pas de table de lumières) |
+| 0x3C | u16 | `light_count` (v1.2 ; 2 max — le GTE offre 3 lignes, le soleil des settings occupe la ligne 0) |
+| 0x3E | 2 | réservé (0) |
 
-L'extension v1.1 vit dans les octets réservés de la v1 : un lecteur v1 ignore
-ces champs (ils valaient 0), un lecteur v1.1 lit une scène v1 comme « sans
-scripts ». `version` reste 1.
+Les extensions v1.1/v1.2 vivent dans les octets réservés de la v1 : un
+lecteur ancien ignore ces champs (ils valaient 0), un lecteur récent lit
+une scène ancienne comme « sans scripts / sans lumières ». `version`
+reste 1.
 
 ### Table des modèles (`model_count` × 12 octets)
 | u32 `offset` | u32 `size` | u16 `texture` | u16 pad |
@@ -115,7 +118,7 @@ et avec les framebuffers (erreur si chevauchement).
 | 0x10 | i16×3 + pad | échelle locale (4.12, 4096 = 1.0) |
 | 0x18 | u16 | parent (indice, `0xFFFF` = racine) |
 | 0x1A | u16 | modèle (indice, `0xFFFF` = aucun) |
-| 0x1C | u16 | flags (réservé) |
+| 0x1C | u16 | flags (v1.2) : bit 0 = lumière, bit 1 = caméra |
 | 0x1E | u16 | `script_ref` (v1.1) : 0 = aucun, sinon **indice + 1** dans la table des scripts |
 
 Invariant : **`parent < index`** pour toute entité non racine (le sérialiseur
@@ -131,6 +134,23 @@ identique dans `scene.rs::script_hash` et `scene.c::Script_Hash`). Les noms
 apparaissent dans l'ordre de première utilisation par les entités. Le runtime
 résout chaque hash contre `g_scripts[]` au chargement ; un hash inconnu vaut
 « pas de script » (+ warning debug), la scène reste jouable.
+
+### Table des lumières (v1.2, `light_count` × 6 octets)
+
+| u16 `entity` | u8×3 `color` | u8 pad |
+
+`entity` = indice d'entité (ordre du fichier) : sa **rotation donne la
+direction** — convention unique du studio, une entité « regarde » et
+« éclaire » le long de son axe **-Z local** (comme les modèles). Le
+runtime re-dérive la direction chaque frame (vers-la-source = +Z monde,
+3e colonne de la rotation monde) : tourner l'entité — script, gizmo ou
+live tweaking — change l'éclairage en direct. Les couleurs remplissent
+les colonnes 1-2 de la matrice couleur GTE.
+
+Côté JSON : `"light": { "color": [r, g, b] }` sur l'entité, et
+`"camera": true` pour le composant caméra (la première entité caméra
+donne la vue initiale de la scène ; les scripts peuvent reprendre la
+main).
 
 ### Blobs
 Après les tables : blobs modèles puis textures, chacun aligné sur 4.

@@ -11,21 +11,20 @@
 Philosophie Unity : une entité *devient* lumière ou caméra, se manipule
 au gizmo, s'anime par script, se règle en live tweaking.
 
-1. **Lumières directionnelles ×3** (support natif GTE, lignes 1-2 des
-   matrices lumière/couleur aujourd'hui vides)
-   - format : bit `light` dans les flags d'entité (réservés v1) + table
-     couleurs dans les octets réservés de l'en-tête — recette v1.1
-   - direction = rotation de l'entité ; la lumière des settings reste le
-     soleil par défaut (rétrocompatible)
-   - viewport + previewer Rust : passer de 1 à 3 lumières
+1. ~~**Lumières directionnelles ×3**~~ — **livré** (format v1.2 : flags
+   d'entité + table dans les octets réservés ; direction = rotation de
+   l'entité, re-dérivée chaque frame ; viewport et previewer à 3
+   lumières ; UI inspecteur avec couleur ; lune bleutée dans le village
+   de démo)
 2. **Lumières ponctuelles (torches)** — approximation d'époque :
    - par objet dessiné : direction torche→objet + atténuation par la
      distance injectées dans une ligne GTE libre
    - habillage : billboard additif (halo) + script de vacillement
    - vitrine : une torche dans le village de démo
-3. **Caméras** : bit `camera`, frustum dans le calque net de l'éditeur,
-   vue initiale du runtime prise sur la première caméra de la scène
-   (les scripts gardent la main), puis `Camera_Activate()` par script
+3. ~~**Caméras**~~ — **livré** (bit `camera`, frustum dans le calque net,
+   vue initiale du runtime — `Scene_ApplyCamera()` — dans le game et le
+   player ; convention unique : une entité regarde vers son -Z local).
+   Reste : `Camera_Activate()` par script pour les cinématiques.
 
 ## Lot B — Streaming (niveau 1 : préchargement)
 

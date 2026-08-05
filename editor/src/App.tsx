@@ -81,7 +81,9 @@ function Hierarchy({
             onContextMenu(i, ev.clientX, ev.clientY);
           }}
         >
-          <span className="tree-icon">{e.model >= 0 ? "▣" : "○"}</span>
+          <span className="tree-icon">
+            {e.flags & 1 ? "☀" : e.flags & 2 ? "🎥" : e.model >= 0 ? "▣" : "○"}
+          </span>
           {names[i] ?? `entité ${i}`}
           {e.model >= 0 && (
             <span className="tree-meta">{scene.models[e.model].prims.length} tris</span>
@@ -137,6 +139,14 @@ function ContextMenu({
 
 /* --------------------------------------------------------- inspecteur -- */
 
+const rgbToHex = (c: [number, number, number]) =>
+  "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+const hexToRgb = (hex: string): [number, number, number] => [
+  parseInt(hex.slice(1, 3), 16),
+  parseInt(hex.slice(3, 5), 16),
+  parseInt(hex.slice(5, 7), 16),
+];
+
 function Vec3Field({
   label,
   value,
@@ -184,6 +194,10 @@ function Inspector({
   onScriptChange,
   subdiv,
   onSubdivChange,
+  light,
+  onLightChange,
+  isCamera,
+  onCameraChange,
   focusNameSignal,
 }: {
   scene: PscScene;
@@ -199,6 +213,10 @@ function Inspector({
   onScriptChange?: (script: string | null) => void;
   subdiv?: number | null;
   onSubdivChange?: (subdiv: number | null) => void;
+  light?: [number, number, number] | null;
+  onLightChange?: (color: [number, number, number] | null) => void;
+  isCamera?: boolean;
+  onCameraChange?: (on: boolean) => void;
   focusNameSignal?: number;
 }) {
   const entity = scene.entities[selected];
@@ -310,6 +328,38 @@ function Inspector({
           </div>
         )}
       </div>
+      {onLightChange && onCameraChange && (
+        <div className="field-group">
+          <div className="field-group-title">Composants</div>
+          <label className="component-row">
+            <input
+              type="checkbox"
+              checked={!!light}
+              onChange={(e) => onLightChange(e.target.checked ? [255, 235, 200] : null)}
+            />
+            <span>☀ Lumière directionnelle</span>
+            {light && (
+              <input
+                type="color"
+                value={rgbToHex(light)}
+                onChange={(e) => onLightChange(hexToRgb(e.target.value))}
+                title="Couleur de la lumière (la rotation de l'entité donne la direction : elle éclaire le long de son axe -Z)"
+              />
+            )}
+          </label>
+          <label className="component-row">
+            <input
+              type="checkbox"
+              checked={!!isCamera}
+              onChange={(e) => onCameraChange(e.target.checked)}
+            />
+            <span>🎥 Caméra (vue initiale de la scène)</span>
+          </label>
+          <div className="hint" style={{ padding: "2px 0 0" }}>
+            3 lumières max (GTE) : le soleil des settings + 2 entités.
+          </div>
+        </div>
+      )}
       {onScriptChange && (
         <div className="field-group">
           <div className="field-group-title">Script</div>
@@ -665,6 +715,34 @@ export default function App() {
     [mutateDoc, selected, entityNames],
   );
 
+  const setEntityLight = useCallback(
+    (color: [number, number, number] | null) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity) return;
+        if (color) entity.light = { color };
+        else delete entity.light;
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
+  const setEntityCamera = useCallback(
+    (on: boolean) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity) return;
+        if (on) entity.camera = true;
+        else delete entity.camera;
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
   const copyEntity = useCallback(() => {
     if (selected < 0 || !sceneDoc) return;
     const src = sceneDoc.entities?.find((e) => e.name === entityNames[selected]);
@@ -833,6 +911,10 @@ export default function App() {
       : undefined;
   const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
   const currentScript = (selectedJsonEntity?.script as string | undefined) ?? null;
+  const currentLight =
+    ((selectedJsonEntity?.light as { color?: [number, number, number] } | undefined)
+      ?.color as [number, number, number] | undefined) ?? null;
+  const currentCamera = Boolean(selectedJsonEntity?.camera);
   const currentModelPmd =
     (currentModelId &&
       sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||
@@ -1050,6 +1132,10 @@ export default function App() {
                 onSubdivChange={
                   isTauri && sceneDoc && currentModelPmd ? applyModelSubdiv : undefined
                 }
+                light={currentLight}
+                onLightChange={isTauri && sceneDoc ? setEntityLight : undefined}
+                isCamera={currentCamera}
+                onCameraChange={isTauri && sceneDoc ? setEntityCamera : undefined}
                 focusNameSignal={renameFocus}
               />
             ) : (

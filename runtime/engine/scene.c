@@ -19,6 +19,8 @@ _Static_assert(sizeof(PscHeader) == 64, "PSC header must be 64 bytes");
 _Static_assert(sizeof(PscModelEntry) == 12, "model entry must be 12 bytes");
 _Static_assert(sizeof(PscTextureEntry) == 8, "texture entry must be 8 bytes");
 _Static_assert(sizeof(PscEntityRec) == 32, "entity record must be 32 bytes");
+_Static_assert(sizeof(PscLightRec) == 6, "light record must be 6 bytes");
+_Static_assert(offsetof(PscHeader, lights_offset) == 56, "v1.2 layout");
 
 /* Scene arena ------------------------------------------------------------- */
 /* All per-scene data (the raw .psc file + runtime entity array) lives here.
@@ -225,11 +227,26 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 		ent->model = (rec->model == PSC_NO_INDEX) ? -1 : (int16_t)rec->model;
 		ent->parent = (rec->parent == PSC_NO_INDEX) ? -1 : (int16_t)rec->parent;
 		ent->script = rec->script;
+		ent->flags = rec->flags;
 		ent->visible = 1;
 		ent->solid = (ent->model >= 0);
 	}
 
-	/* Scene lighting: one directional light + ambient + background. */
+	/* Premiere entite camera : vue initiale de la scene. */
+	scene->camera_entity = -1;
+	for (int i = 0; i < scene->entity_count; i++)
+	{
+		if (scene->entities[i].flags & ENTITY_FLAG_CAMERA)
+		{
+			scene->camera_entity = (int16_t)i;
+			break;
+		}
+	}
+
+	/* Eclairage : ligne 0 = soleil des settings ; lignes 1-2 = entites-
+	 * lumieres (v1.2), direction re-derivee chaque frame de leur rotation
+	 * dans Scene_UpdateWorld. Les couleurs vont dans les colonnes de la
+	 * matrice couleur GTE. */
 	memset(&scene->light_mtx, 0, sizeof(MATRIX));
 	scene->light_mtx.m[0][0] = header->light_toward[0];
 	scene->light_mtx.m[0][1] = header->light_toward[1];
@@ -238,6 +255,24 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 	MATRIX color_mtx = {{{0}}};
 	for (int c = 0; c < 3; c++)
 		color_mtx.m[c][0] = (int16_t)(((int32_t)header->light_color[c] << 12) / 255);
+
+	scene->light_entity_count = 0;
+	if (header->lights_offset != 0)
+	{
+		const PscLightRec* light_table =
+			(const PscLightRec*)(data + header->lights_offset);
+		for (int i = 0; i < header->light_count &&
+			scene->light_entity_count < SCENE_MAX_ENTITY_LIGHTS; i++)
+		{
+			if (light_table[i].entity >= header->entity_count)
+				continue;
+			int slot = scene->light_entity_count++;
+			scene->light_entities[slot] = (int16_t)light_table[i].entity;
+			for (int c = 0; c < 3; c++)
+				color_mtx.m[c][1 + slot] =
+					(int16_t)(((int32_t)light_table[i].color[c] << 12) / 255);
+		}
+	}
 	gte_SetColorMatrix(&color_mtx);
 	gte_SetBackColor(header->ambient[0], header->ambient[1], header->ambient[2]);
 
@@ -306,7 +341,20 @@ void Scene_UpdateWorld(Scene* scene)
 			ent->world.t[2] = world_pos[2] + parent->world.t[2];
 		}
 	}
+
+	/* Entites-lumieres : une lumiere eclaire le long de son axe -Z local,
+	 * le GTE veut le vecteur VERS la source = +Z monde = 3e colonne de la
+	 * rotation monde. Tourner l'entite (script, gizmo, live tweak) change
+	 * donc l'eclairage en direct. */
+	for (int l = 0; l < scene->light_entity_count; l++)
+	{
+		const Entity* e = &scene->entities[scene->light_entities[l]];
+		scene->light_mtx.m[1 + l][0] = e->light_rot.m[0][2];
+		scene->light_mtx.m[1 + l][1] = e->light_rot.m[1][2];
+		scene->light_mtx.m[1 + l][2] = e->light_rot.m[2][2];
+	}
 }
+
 
 void Scene_StartScripts(Scene* scene)
 {

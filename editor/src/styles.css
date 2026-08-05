@@ -115,6 +115,26 @@ body {
 
 /* Options de rendu, à droite du viewport. */
 .view-bar { left: auto; right: 10px; transform: none; }
+
+/* Lignes de composants de l'inspecteur (case + libellé + options). */
+.component-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.component-row input[type="color"] {
+  width: 34px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: transparent;
+  margin-left: auto;
+  cursor: pointer;
+}
 .viewport-stack {
   position: relative;
   width: 100%;

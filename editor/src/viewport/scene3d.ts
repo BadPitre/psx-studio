@@ -4,7 +4,7 @@
 
 import * as THREE from "three";
 import type { PmdModel } from "../formats/pmd";
-import type { PscScene } from "../formats/psc";
+import type { PscLight, PscScene } from "../formats/psc";
 import { makePs1Material, type Ps1Lighting } from "./ps1material";
 
 export interface SceneGraph {
@@ -14,6 +14,10 @@ export interface SceneGraph {
   entityGroups: THREE.Group[];
   materials: THREE.ShaderMaterial[];
   lighting: Ps1Lighting;
+  /** Entités-lumières (v1.2) : direction vivante via leur groupe. */
+  lights: PscLight[];
+  /** Flags par entité (composants lumière/caméra). */
+  entityFlags: number[];
 }
 
 function timToTexture(scene: PscScene, index: number): THREE.DataTexture | null {
@@ -132,5 +136,12 @@ export function buildSceneGraph(scene: PscScene): SceneGraph {
     entityGroups.push(group);
   });
 
-  return { root, entityGroups, materials, lighting };
+  return {
+    root,
+    entityGroups,
+    materials,
+    lighting,
+    lights: scene.lights,
+    entityFlags: scene.entities.map((e) => e.flags),
+  };
 }

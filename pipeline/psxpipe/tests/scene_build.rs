@@ -16,7 +16,7 @@ fn village_builds_and_parses() {
     let h = scene::parse_header(&bytes).unwrap();
     assert_eq!(h.model_count, 4);
     assert_eq!(h.texture_count, 3);
-    assert_eq!(h.entity_count, 7);
+    assert_eq!(h.entity_count, 9);
     assert_eq!(h.total_size as usize, bytes.len());
     assert_eq!(h.background, [24, 32, 56]);
 
@@ -168,4 +168,48 @@ fn scripts_table_and_entity_refs() {
     })
     .unwrap();
     assert_eq!(scene::parse_header(&bytes2).unwrap().script_count, 2);
+}
+
+#[test]
+fn lights_table_and_camera_flags() {
+    let bytes = build_village();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    // La lune est la seule entité-lumière (la lumière des settings ne
+    // compte pas dans la table), la caméra est flaguée.
+    assert_eq!(h.light_count, 1);
+    let lights = scene::parse_lights(&bytes, &h);
+    assert_eq!(lights.len(), 1);
+    assert_eq!(lights[0].color, [70, 90, 160]);
+
+    let flags = |i: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + 0x1C], bytes[rec + 0x1D]])
+    };
+    // Ordre topo stable : lune = 7, camera = 8.
+    assert_eq!(lights[0].entity, 7);
+    assert_eq!(flags(7), scene::ENTITY_FLAG_LIGHT);
+    assert_eq!(flags(8), scene::ENTITY_FLAG_CAMERA);
+    for i in 0..7 {
+        assert_eq!(flags(i), 0, "entité {i} sans composant");
+    }
+
+    // Plus de 2 lumières : les extras sont ignorés avec un warning.
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    let json = r#"{
+      "name": "trop",
+      "assets": { "textures": [], "models": [] },
+      "entities": [
+        { "name": "l1", "light": { "color": [255, 0, 0] } },
+        { "name": "l2", "light": { "color": [0, 255, 0] } },
+        { "name": "l3", "light": { "color": [0, 0, 255] } }
+      ]
+    }"#;
+    let p = dir.path().join("trop.json");
+    std::fs::write(&p, json).unwrap();
+    let (bytes3, report) = scene::build_file(&p).unwrap();
+    let h3 = scene::parse_header(&bytes3).unwrap();
+    assert_eq!(h3.light_count, 2);
+    assert!(report.warnings.iter().any(|w| w.contains("l3")), "{:?}", report.warnings);
 }

@@ -21,10 +21,21 @@ describe("parsePsc sur scene0.psc (village)", () => {
   it("lit l'en-tête et les réglages de scène", () => {
     expect(scene.models.length).toBe(4);
     expect(scene.textures.length).toBe(3);
-    expect(scene.entities.length).toBe(7);
+    expect(scene.entities.length).toBe(9);
     expect(scene.background).toEqual([24, 32, 56]);
     // Le vecteur lumière pointe vers la source (Y négatif = vers le haut).
     expect(scene.lightToward[1]).toBeLessThan(-0.4);
+  });
+
+  it("lit les composants v1.2 (lumière + caméra)", () => {
+    // La lune : entité-lumière bleutée ; la caméra est flaguée.
+    expect(scene.lights.length).toBe(1);
+    expect(scene.lights[0].color).toEqual([70, 90, 160]);
+    const light = scene.entities[scene.lights[0].entity];
+    expect(light.flags & 1).toBe(1);
+    expect(scene.entities.some((e) => e.flags & 2)).toBe(true);
+    // Les entités classiques n'ont aucun flag.
+    expect(scene.entities[0].flags).toBe(0);
   });
 
   it("décode les modèles PMD embarqués", () => {

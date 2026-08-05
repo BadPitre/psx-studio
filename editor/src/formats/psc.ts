@@ -6,6 +6,10 @@ import { parseTim, type TimTexture } from "./tim";
 
 export const NO_INDEX = 0xffff;
 
+/** Flags d'entité (v1.2). */
+export const ENTITY_FLAG_LIGHT = 1 << 0;
+export const ENTITY_FLAG_CAMERA = 1 << 1;
+
 export interface PscEntity {
   /** Position locale (unités monde GTE, +Y vers le bas). */
   pos: [number, number, number];
@@ -17,6 +21,15 @@ export interface PscEntity {
   parent: number;
   /** Indice de modèle ou -1 (nœud vide). */
   model: number;
+  /** Composants : ENTITY_FLAG_LIGHT / ENTITY_FLAG_CAMERA. */
+  flags: number;
+}
+
+/** Lumière directionnelle portée par une entité (v1.2). */
+export interface PscLight {
+  /** Indice d'entité : sa rotation donne la direction (éclaire vers -Z). */
+  entity: number;
+  color: [number, number, number];
 }
 
 export interface PscScene {
@@ -30,6 +43,8 @@ export interface PscScene {
   modelTexture: number[];
   textures: TimTexture[];
   entities: PscEntity[];
+  /** Lumières additionnelles (v1.2, 2 max — le GTE en offre 3 avec le soleil). */
+  lights: PscLight[];
 }
 
 export function parsePsc(buffer: ArrayBuffer): PscScene {
@@ -89,7 +104,22 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
       scale: [i16(16) / 4096, i16(18) / 4096, i16(20) / 4096],
       parent: parent === NO_INDEX ? -1 : parent,
       model: model === NO_INDEX ? -1 : model,
+      flags: data.getUint16(rec + 0x1c, true),
     });
+  }
+
+  // Table des lumières (v1.2 ; offset 0 sur les anciens fichiers).
+  const lights: PscLight[] = [];
+  const lightsOffset = data.getUint32(56, true);
+  const lightCount = data.getUint16(60, true);
+  if (lightsOffset > 0) {
+    for (let i = 0; i < lightCount; i++) {
+      const rec = lightsOffset + i * 6;
+      lights.push({
+        entity: data.getUint16(rec, true),
+        color: rgb(rec + 2),
+      });
+    }
   }
 
   return {
@@ -105,6 +135,7 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
     modelTexture,
     textures,
     entities,
+    lights,
   };
 }
 
