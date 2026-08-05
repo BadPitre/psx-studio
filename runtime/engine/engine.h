@@ -34,6 +34,8 @@ typedef struct Entity
 	uint16_t	flags;		/* composants : ENTITY_FLAG_LIGHT / _CAMERA */
 	uint16_t	cam_fov;	/* FOV vertical camera en degres, 0 = defaut */
 	uint16_t	cam_draw;	/* distance d'affichage camera, 0 = illimitee */
+	uint16_t	light_radius;	/* rayon lumiere ponctuelle (mutable :
+							 * le faire osciller = vacillement) */
 	uint8_t		visible;	/* 0 = ni rendu ni collision */
 	uint8_t		solid;		/* participe aux collisions AABB */
 

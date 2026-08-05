@@ -63,10 +63,12 @@ typedef struct {
 } PscLightRec;
 
 /* Flags d'entite. */
-#define ENTITY_FLAG_LIGHT	(1 << 0)
-#define ENTITY_FLAG_CAMERA	(1 << 1)
+#define ENTITY_FLAG_LIGHT		(1 << 0)
+#define ENTITY_FLAG_CAMERA		(1 << 1)
+#define ENTITY_FLAG_LIGHT_POINT	(1 << 2)
 
 #define SCENE_MAX_ENTITY_LIGHTS	2
+#define SCENE_MAX_POINT_LIGHTS	4
 
 typedef struct {
 	uint32_t	offset;
@@ -120,10 +122,22 @@ typedef struct {
 	/* Scripts resolus par hash (index table -> registre du jeu). */
 	const ScriptDef*	scripts[SCENE_MAX_SCRIPTS];
 	/* Lumieres : ligne 0 = soleil des settings (fixe), lignes 1-2 =
-	 * entites-lumieres, re-derivees chaque frame de leur rotation. */
+	 * entites-lumieres directionnelles, re-derivees chaque frame de
+	 * leur rotation. */
 	MATRIX				light_mtx;
 	int16_t				light_entities[SCENE_MAX_ENTITY_LIGHTS];
 	int					light_entity_count;
+	/* Matrice couleur de base (colonnes soleil + directionnelles). */
+	MATRIX				color_mtx;
+	/* Torches : appliquees PAR OBJET dans Scene_Draw (direction vers
+	 * l'objet + attenuation par la distance, sur les lignes GTE libres
+	 * — l'approximation des jeux d'epoque). Couleur premultipliee par
+	 * l'intensite, en 4.12 ; le rayon vit dans l'entite (mutable). */
+	struct {
+		int16_t	entity;
+		int16_t	color[3];
+	}					point_lights[SCENE_MAX_POINT_LIGHTS];
+	int					point_light_count;
 	/* Premiere entite camera (-1 : aucune) : vue initiale de la scene. */
 	int16_t				camera_entity;
 	CVECTOR				background;

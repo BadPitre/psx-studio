@@ -16,11 +16,12 @@ au gizmo, s'anime par script, se règle en live tweaking.
    l'entité, re-dérivée chaque frame ; viewport et previewer à 3
    lumières ; UI inspecteur avec couleur ; lune bleutée dans le village
    de démo)
-2. **Lumières ponctuelles (torches)** — approximation d'époque :
-   - par objet dessiné : direction torche→objet + atténuation par la
-     distance injectées dans une ligne GTE libre
-   - habillage : billboard additif (halo) + script de vacillement
-   - vitrine : une torche dans le village de démo
+2. ~~**Lumières ponctuelles (torches)**~~ — **livré** (type point +
+   rayon dans le format, approximation par objet dans Scene_Draw avec
+   distance octogonale, halo additif B+F, script `torche` qui fait
+   osciller le rayon, torche orange dans le village, éditeur avec
+   type/rayon + sphère filaire + shader par sommet, previewer en
+   parité par objet)
 3. ~~**Caméras**~~ — **livré** (bit `camera`, frustum dans le calque net,
    vue initiale du runtime — `Scene_ApplyCamera()` — dans le game et le
    player ; convention unique : une entité regarde vers son -Z local).

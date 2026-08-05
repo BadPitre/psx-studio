@@ -9,6 +9,8 @@ export const NO_INDEX = 0xffff;
 /** Flags d'entité (v1.2). */
 export const ENTITY_FLAG_LIGHT = 1 << 0;
 export const ENTITY_FLAG_CAMERA = 1 << 1;
+/** Modificateur : lumière ponctuelle (torche) au lieu de directionnelle. */
+export const ENTITY_FLAG_LIGHT_POINT = 1 << 2;
 
 export interface PscEntity {
   /** Position locale (unités monde GTE, +Y vers le bas). */
@@ -27,6 +29,8 @@ export interface PscEntity {
   camFov: number;
   /** Distance d'affichage caméra en unités monde (0 = illimitée). */
   camDraw: number;
+  /** Rayon de lumière ponctuelle en unités monde (0 = directionnelle). */
+  lightRadius: number;
 }
 
 /** FOV vertical de la projection PS1 native (h = 160) : 2·atan(120/160). */
@@ -116,6 +120,7 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
       flags: data.getUint16(rec + 0x1c, true),
       camFov: data.getUint16(rec + 6, true),
       camDraw: data.getUint16(rec + 0x0e, true),
+      lightRadius: data.getUint16(rec + 0x16, true),
     });
   }
 

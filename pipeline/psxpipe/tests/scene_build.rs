@@ -16,7 +16,7 @@ fn village_builds_and_parses() {
     let h = scene::parse_header(&bytes).unwrap();
     assert_eq!(h.model_count, 4);
     assert_eq!(h.texture_count, 3);
-    assert_eq!(h.entity_count, 9);
+    assert_eq!(h.entity_count, 10);
     assert_eq!(h.total_size as usize, bytes.len());
     assert_eq!(h.background, [24, 32, 56]);
 
@@ -167,7 +167,7 @@ fn scripts_table_and_entity_refs() {
         p
     })
     .unwrap();
-    assert_eq!(scene::parse_header(&bytes2).unwrap().script_count, 2);
+    assert_eq!(scene::parse_header(&bytes2).unwrap().script_count, 3);
 }
 
 #[test]
@@ -175,21 +175,28 @@ fn lights_table_and_camera_flags() {
     let bytes = build_village();
     let h = scene::parse_header(&bytes).unwrap();
 
-    // La lune est la seule entité-lumière (la lumière des settings ne
-    // compte pas dans la table), la caméra est flaguée.
-    assert_eq!(h.light_count, 1);
+    // Lune (directionnelle) + torche (ponctuelle) dans la table ; la
+    // caméra est flaguée.
+    assert_eq!(h.light_count, 2);
     let lights = scene::parse_lights(&bytes, &h);
-    assert_eq!(lights.len(), 1);
+    assert_eq!(lights.len(), 2);
     assert_eq!(lights[0].color, [70, 90, 160]);
+    assert_eq!(lights[1].color, [255, 150, 60]);
+    assert_eq!(lights[1].intensity_percent, 160);
 
     let flags = |i: usize| {
         let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
         u16::from_le_bytes([bytes[rec + 0x1C], bytes[rec + 0x1D]])
     };
-    // Ordre topo stable : lune = 7, camera = 8.
+    // Ordre topo stable : lune = 7, torche = 8, camera = 9.
     assert_eq!(lights[0].entity, 7);
+    assert_eq!(lights[1].entity, 8);
     assert_eq!(flags(7), scene::ENTITY_FLAG_LIGHT);
-    assert_eq!(flags(8), scene::ENTITY_FLAG_CAMERA);
+    assert_eq!(
+        flags(8),
+        scene::ENTITY_FLAG_LIGHT | scene::ENTITY_FLAG_LIGHT_POINT
+    );
+    assert_eq!(flags(9), scene::ENTITY_FLAG_CAMERA);
     for i in 0..7 {
         assert_eq!(flags(i), 0, "entité {i} sans composant");
     }
@@ -283,4 +290,50 @@ fn light_intensity_and_camera_draw_distance() {
     assert!(scene::build_file(&p).unwrap_err().contains("intensity"));
     std::fs::write(&p, json.replace("1500", "50")).unwrap();
     assert!(scene::build_file(&p).unwrap_err().contains("draw_distance"));
+}
+
+#[test]
+fn point_lights_flag_and_radius() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    let json = r#"{
+      "name": "torches",
+      "assets": { "textures": [], "models": [] },
+      "entities": [
+        { "name": "soleil2", "light": { "color": [255, 255, 255] } },
+        { "name": "torche",  "light": { "type": "point", "color": [255, 150, 60], "radius": 500 } },
+        { "name": "torche2", "light": { "type": "point", "color": [255, 150, 60] } }
+      ]
+    }"#;
+    let p = dir.path().join("t.json");
+    std::fs::write(&p, json).unwrap();
+    let (bytes, _) = scene::build_file(&p).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    // Les 3 entrent dans la table (2 directionnelles max ne compte pas
+    // les ponctuelles, plafonnées à 4 séparément).
+    assert_eq!(h.light_count, 3);
+
+    let flags_at = |i: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + 0x1C], bytes[rec + 0x1D]])
+    };
+    let radius_at = |i: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + 0x16], bytes[rec + 0x17]])
+    };
+    assert_eq!(flags_at(0), scene::ENTITY_FLAG_LIGHT);
+    assert_eq!(
+        flags_at(1),
+        scene::ENTITY_FLAG_LIGHT | scene::ENTITY_FLAG_LIGHT_POINT
+    );
+    assert_eq!(radius_at(0), 0);
+    assert_eq!(radius_at(1), 500);
+    assert_eq!(radius_at(2), 600); // défaut
+
+    // Type inconnu et rayon hors plage : erreurs claires.
+    std::fs::write(&p, json.replace("\"point\"", "\"spot\"")).unwrap();
+    assert!(scene::build_file(&p).unwrap_err().contains("type de lumière"));
+    std::fs::write(&p, json.replace("500", "20")).unwrap();
+    assert!(scene::build_file(&p).unwrap_err().contains("radius"));
 }

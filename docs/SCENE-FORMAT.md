@@ -142,6 +142,18 @@ résout chaque hash contre `g_scripts[]` au chargement ; un hash inconnu vaut
 L'intensité multiplie la couleur dans la matrice GTE (4.12 : une lumière
 peut dépasser 100 %, jusqu'à 250 %).
 
+Deux types, distingués par les flags de l'entité : **directionnelle**
+(défaut, lignes GTE natives, 2 max en plus du soleil) et **ponctuelle**
+(bit 2, « torche », 4 max) — JSON : `"light": { "type": "point",
+"color": [...], "radius": 520 }`. Le rayon vit dans le pad du vecteur
+échelle de l'entité (u16, unités monde) et reste **mutable au runtime**
+(le faire osciller = vacillement). Une ponctuelle est appliquée **par
+objet** dans `Scene_Draw` : direction torche→objet + atténuation
+linéaire par la distance (approchée en octogonal, sans racine carrée)
+injectées dans les lignes GTE restantes — l'approximation des jeux
+d'époque — plus un **halo additif** (losange semi-transparent, mode B+F
+du GPU) projeté à sa position.
+
 `entity` = indice d'entité (ordre du fichier) : sa **rotation donne la
 direction** — convention unique du studio, une entité « regarde » et
 « éclaire » le long de son axe **-Z local** (comme les modèles). Le

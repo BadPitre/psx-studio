@@ -221,6 +221,9 @@ struct Instance<'a> {
 struct Lighting {
     /// (vers la source, couleur 0-1) par lumière active.
     lights: Vec<([f32; 3], [f32; 3])>,
+    /// Torches : (position monde, couleur 0-1 premultipliée, rayon) —
+    /// converties par objet en directionnelles locales, comme le runtime.
+    points: Vec<([f32; 3], [f32; 3], f32)>,
     ambient: [f32; 3],
 }
 
@@ -249,6 +252,27 @@ fn render(
             let r = mat_vec(view_rot, inst.t);
             [r[0] + view_t[0], r[1] + view_t[1], r[2] + view_t[2]]
         };
+
+        // Torches -> directionnelles locales par objet (parité runtime :
+        // distance octogonale, atténuation linéaire, 3 lignes GTE max).
+        let mut eff_lights = lighting.lights.clone();
+        for (pos, color, radius) in &lighting.points {
+            if eff_lights.len() >= 3 {
+                break;
+            }
+            let d = [pos[0] - inst.t[0], pos[1] - inst.t[1], pos[2] - inst.t[2]];
+            let (ax, ay, az) = (d[0].abs(), d[1].abs(), d[2].abs());
+            let mx = ax.max(ay).max(az);
+            let dist = mx + (ax + ay + az - mx) * 0.5;
+            if dist <= 0.0 || dist >= *radius {
+                continue;
+            }
+            let falloff = (radius - dist) / radius;
+            eff_lights.push((
+                [d[0] / dist, d[1] / dist, d[2] / dist],
+                [color[0] * falloff, color[1] * falloff, color[2] * falloff],
+            ));
+        }
         for prim in &inst.model.prims {
             let mut sxy = [[0.0f32; 2]; 3];
             let mut zsum = 0.0;
@@ -280,7 +304,7 @@ fn render(
             for k in 0..3 {
                 let n = mat_vec(&inst.light_rot, inst.model.normals[prim.nidx[k]]);
                 let mut cc = lighting.ambient;
-                for (toward, color) in &lighting.lights {
+                for (toward, color) in &eff_lights {
                     let d = (toward[0] * n[0] + toward[1] * n[1] + toward[2] * n[2])
                         .max(0.0);
                     for ch in 0..3 {
@@ -432,6 +456,8 @@ fn main() {
             light_rot: Mat3,
             t: [f32; 3],
             model: u16,
+            flags: u16,
+            light_radius: u16,
         }
         let mut ents: Vec<Ent> = Vec::new();
         for i in 0..h.entity_count as usize {
@@ -467,6 +493,8 @@ fn main() {
                 light_rot,
                 t,
                 model,
+                flags: u16at(rec + 0x1C),
+                light_radius: u16at(rec + 0x16),
             });
         }
 
@@ -501,24 +529,34 @@ fn main() {
                 h.light_color[2] as f32 / 255.0,
             ],
         )];
-        // Entités-lumières (v1.2) : vers la source = +Z monde de l'entité
-        // (3e colonne de sa rotation monde), comme le runtime.
+        // Entités-lumières (v1.2) : directionnelles (vers la source = +Z
+        // monde, 3e colonne de la rotation) et torches (position + rayon),
+        // comme le runtime. Intensité en pourcent dans le pad.
+        let mut points = Vec::new();
         for light in psxpipe::scene::parse_lights(&data, &h) {
             let Some(e) = ents.get(light.entity as usize) else { continue };
-            if lights.len() >= 3 {
-                break;
+            let intensity = if light.intensity_percent == 0 {
+                1.0
+            } else {
+                light.intensity_percent as f32 / 100.0
+            };
+            let color = [
+                light.color[0] as f32 / 255.0 * intensity,
+                light.color[1] as f32 / 255.0 * intensity,
+                light.color[2] as f32 / 255.0 * intensity,
+            ];
+            if e.flags & 0x4 != 0 {
+                points.push((e.t, color, e.light_radius as f32));
+            } else if lights.len() < 3 {
+                lights.push((
+                    [e.light_rot[0][2], e.light_rot[1][2], e.light_rot[2][2]],
+                    color,
+                ));
             }
-            lights.push((
-                [e.light_rot[0][2], e.light_rot[1][2], e.light_rot[2][2]],
-                [
-                    light.color[0] as f32 / 255.0,
-                    light.color[1] as f32 / 255.0,
-                    light.color[2] as f32 / 255.0,
-                ],
-            ));
         }
         let lighting = Lighting {
             lights,
+            points,
             ambient: [
                 h.ambient[0] as f32,
                 h.ambient[1] as f32,
@@ -563,6 +601,7 @@ fn main() {
                 },
                 [1.0, 1.0, 1.0],
             )],
+            points: Vec::new(),
             ambient: [64.0, 64.0, 64.0],
         };
         let identity = rot_matrix(0.0, 0.0, 0.0);

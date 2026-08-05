@@ -19,13 +19,18 @@ const vertexShader = /* glsl */ `
   // 3 lumières directionnelles, comme le GTE (soleil + 2 entités).
   uniform vec3 uLightViewDir[3];  // vers la source, espace vue
   uniform vec3 uLightColor[3];    // 0-1 (noir = ligne inactive)
+  // Torches : jusqu'à 4 ponctuelles (position espace vue, rayon monde).
+  uniform vec3 uPointPos[4];
+  uniform vec3 uPointColor[4];    // 0-1 (noir = inactive)
+  uniform float uPointRadius[4];
   uniform vec3 uAmbient;          // 0-1
   attribute vec3 baseColor;       // couleur de base du paquet, 128 = neutre
   varying vec3 vColor;
   varying vec3 vUvW;              // uv * w (mapping affine) + w
 
   void main() {
-    vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 view_pos = modelViewMatrix * vec4(position, 1.0);
+    vec4 clip = projectionMatrix * view_pos;
 
     // Vertex snapping : coordonnées écran entières, le "jitter" PS1.
     vec2 half_res = uResolution * 0.5;
@@ -37,6 +42,16 @@ const vertexShader = /* glsl */ `
     vec3 cc = uAmbient;
     for (int l = 0; l < 3; l++) {
       cc += uLightColor[l] * max(dot(n, uLightViewDir[l]), 0.0);
+    }
+    // Torches : atténuation linéaire par la distance (la console
+    // l'applique par objet ; l'éditeur, par sommet — même esprit).
+    for (int p = 0; p < 4; p++) {
+      if (uPointRadius[p] > 0.0) {
+        vec3 delta = uPointPos[p] - view_pos.xyz;
+        float dist = length(delta);
+        float falloff = max(1.0 - dist / uPointRadius[p], 0.0);
+        cc += uPointColor[p] * max(dot(n, delta / max(dist, 1.0)), 0.0) * falloff;
+      }
     }
     // Le GTE clampe CC à 255 avant la modulation GPU.
     cc = min(cc, vec3(1.0));
@@ -109,6 +124,23 @@ export function makePs1Material(
           new THREE.Vector3(),
         ],
       },
+      uPointPos: {
+        value: [
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+        ],
+      },
+      uPointColor: {
+        value: [
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+          new THREE.Vector3(),
+        ],
+      },
+      uPointRadius: { value: [0, 0, 0, 0] },
       uAmbient: {
         value: new THREE.Vector3(...lighting.ambient.map((c) => c / 255)),
       },
@@ -125,11 +157,19 @@ export interface ViewportLight {
   color: [number, number, number];
 }
 
+/** Une torche : position monde three, couleur 0-255, rayon monde. */
+export interface ViewportPointLight {
+  posThree: THREE.Vector3;
+  color: [number, number, number];
+  radius: number;
+}
+
 /** À appeler chaque frame : lumières monde three → espace vue caméra. */
 export function updateLightUniforms(
   materials: THREE.ShaderMaterial[],
   camera: THREE.Camera,
   lights: ViewportLight[],
+  points: ViewportPointLight[] = [],
 ) {
   const view: THREE.Vector3[] = [];
   const colors: [number, number, number][] = [];
@@ -145,6 +185,15 @@ export function updateLightUniforms(
     );
     colors.push(light ? light.color : [0, 0, 0]);
   }
+  const pointView: THREE.Vector3[] = [];
+  for (let p = 0; p < 4; p++) {
+    const light = points[p];
+    pointView.push(
+      light
+        ? light.posThree.clone().applyMatrix4(camera.matrixWorldInverse)
+        : new THREE.Vector3(),
+    );
+  }
   for (const m of materials) {
     for (let l = 0; l < 3; l++) {
       (m.uniforms.uLightViewDir.value as THREE.Vector3[])[l].copy(view[l]);
@@ -153,6 +202,16 @@ export function updateLightUniforms(
         colors[l][1] / 255,
         colors[l][2] / 255,
       );
+    }
+    for (let p = 0; p < 4; p++) {
+      const light = points[p];
+      (m.uniforms.uPointPos.value as THREE.Vector3[])[p].copy(pointView[p]);
+      (m.uniforms.uPointColor.value as THREE.Vector3[])[p].set(
+        (light?.color[0] ?? 0) / 255,
+        (light?.color[1] ?? 0) / 255,
+        (light?.color[2] ?? 0) / 255,
+      );
+      (m.uniforms.uPointRadius.value as number[])[p] = light?.radius ?? 0;
     }
   }
 }

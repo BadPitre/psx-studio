@@ -238,9 +238,10 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 		ent->script = rec->script;
 		ent->flags = rec->flags;
 		/* v1.2 : FOV camera dans le pad position, distance d'affichage
-		 * dans le pad rotation. */
+		 * dans le pad rotation, rayon de torche dans le pad echelle. */
 		ent->cam_fov = (uint16_t)rec->pos.pad;
 		ent->cam_draw = (uint16_t)rec->rot.pad;
+		ent->light_radius = (uint16_t)rec->scale.pad;
 		ent->visible = 1;
 		ent->solid = (ent->model >= 0);
 	}
@@ -270,26 +271,46 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 		color_mtx.m[c][0] = (int16_t)(((int32_t)header->light_color[c] << 12) / 255);
 
 	scene->light_entity_count = 0;
+	scene->point_light_count = 0;
 	if (header->lights_offset != 0)
 	{
 		const PscLightRec* light_table =
 			(const PscLightRec*)(data + header->lights_offset);
-		for (int i = 0; i < header->light_count &&
-			scene->light_entity_count < SCENE_MAX_ENTITY_LIGHTS; i++)
+		for (int i = 0; i < header->light_count; i++)
 		{
 			if (light_table[i].entity >= header->entity_count)
 				continue;
-			int slot = scene->light_entity_count++;
-			scene->light_entities[slot] = (int16_t)light_table[i].entity;
 			/* Intensite en pourcent (pad, 0 = 100) : la matrice couleur
 			 * GTE est en 4.12, une lumiere peut depasser 100 %. */
 			int intensity = light_table[i].pad ? light_table[i].pad : 100;
-			for (int c = 0; c < 3; c++)
-				color_mtx.m[c][1 + slot] = (int16_t)(
-					(((int32_t)light_table[i].color[c] << 12) / 255
-						* intensity) / 100);
+			uint16_t eflags = scene->entities[light_table[i].entity].flags;
+
+			if (eflags & ENTITY_FLAG_LIGHT_POINT)
+			{
+				if (scene->point_light_count >= SCENE_MAX_POINT_LIGHTS)
+					continue;
+				int slot = scene->point_light_count++;
+				scene->point_lights[slot].entity =
+					(int16_t)light_table[i].entity;
+				for (int c = 0; c < 3; c++)
+					scene->point_lights[slot].color[c] = (int16_t)(
+						(((int32_t)light_table[i].color[c] << 12) / 255
+							* intensity) / 100);
+			}
+			else
+			{
+				if (scene->light_entity_count >= SCENE_MAX_ENTITY_LIGHTS)
+					continue;
+				int slot = scene->light_entity_count++;
+				scene->light_entities[slot] = (int16_t)light_table[i].entity;
+				for (int c = 0; c < 3; c++)
+					color_mtx.m[c][1 + slot] = (int16_t)(
+						(((int32_t)light_table[i].color[c] << 12) / 255
+							* intensity) / 100);
+			}
 		}
 	}
+	scene->color_mtx = color_mtx;
 	gte_SetColorMatrix(&color_mtx);
 	gte_SetBackColor(header->ambient[0], header->ambient[1], header->ambient[2]);
 
@@ -479,15 +500,121 @@ uint8_t* Scene_Draw(const Scene* scene, const MATRIX* view, uint32_t* ot,
 
 		/* Lighting: world light direction against the entity's rotation
 		 * (unscaled, so non-uniform scale doesn't skew intensities). */
+		MATRIX wl = scene->light_mtx;
+		MATRIX cmx = scene->color_mtx;
+
+		/* Torches : approximation d'epoque — chaque objet convertit les
+		 * lumieres ponctuelles a portee en directionnelles locales sur
+		 * les lignes GTE restantes (direction torche->objet, couleur
+		 * attenuee par la distance). */
+		int rows = 1 + scene->light_entity_count;
+		for (int p = 0; p < scene->point_light_count && rows < 3; p++)
+		{
+			const Entity* le = &scene->entities[scene->point_lights[p].entity];
+			int32_t radius = le->light_radius;
+			if (!le->visible || radius <= 0 || le == ent)
+				continue;
+
+			int32_t d[3] = {
+				le->world.t[0] - ent->world.t[0],
+				le->world.t[1] - ent->world.t[1],
+				le->world.t[2] - ent->world.t[2],
+			};
+			/* Distance approchee (octogonale) : max + (reste >> 1),
+			 * assez precise pour une attenuation, sans racine carree. */
+			int32_t ax = d[0] < 0 ? -d[0] : d[0];
+			int32_t ay = d[1] < 0 ? -d[1] : d[1];
+			int32_t az = d[2] < 0 ? -d[2] : d[2];
+			int32_t mx = ax > ay ? (ax > az ? ax : az) : (ay > az ? ay : az);
+			int32_t dist = mx + ((ax + ay + az - mx) >> 1);
+			if (dist <= 0 || dist >= radius)
+				continue;
+
+			int32_t falloff = ((radius - dist) << 12) / radius;
+			for (int c = 0; c < 3; c++)
+			{
+				/* Vers la source, normalise ~4.12. */
+				wl.m[rows][c] = (int16_t)(d[c] * 4096 / dist);
+				cmx.m[c][rows] = (int16_t)(
+					((int32_t)scene->point_lights[p].color[c] * falloff) >> 12);
+			}
+			rows++;
+		}
+
 		MATRIX light;
-		MulMat3(&scene->light_mtx, &ent->light_rot, &light);
+		MulMat3(&wl, &ent->light_rot, &light);
 
 		gte_SetRotMatrix(&comp);
 		gte_SetTransMatrix(&comp);
 		gte_SetLightMatrix(&light);
+		gte_SetColorMatrix(&cmx);
 
 		packet = Pmd_Draw(&scene->models[ent->model], ot, ot_length,
 			packet, packet_limit);
+	}
+
+	/* Halos additifs des torches : un losange semi-transparent (mode
+	 * B+F du GPU) projete a la position de chaque lumiere ponctuelle. */
+	for (int p = 0; p < scene->point_light_count; p++)
+	{
+		const Entity* le = &scene->entities[scene->point_lights[p].entity];
+		if (!le->visible || le->light_radius == 0)
+			continue;
+		if (packet + sizeof(DR_TPAGE) + sizeof(POLY_F4) > packet_limit)
+			break;
+
+		SVECTOR posw = {
+			(int16_t)le->world.t[0],
+			(int16_t)le->world.t[1],
+			(int16_t)le->world.t[2],
+			0,
+		};
+		gte_SetRotMatrix(view);
+		gte_SetTransMatrix(view);
+		gte_ldv0(&posw);
+		gte_rtps();
+		int32_t otz;
+		gte_stotz(&otz);
+		if (otz <= 2 || otz >= ot_length)
+			continue;
+		DVECTOR sxy;
+		gte_stsxy0(&sxy);
+
+		int32_t sz;
+		gte_stsz(&sz);
+		if (sz <= 0)
+			continue;
+		int32_t r = (le->light_radius * 40) / sz;
+		if (r < 2)
+			r = 2;
+		if (r > 96)
+			r = 96;
+
+		/* Mode additif : le tpage de l'etat (abr = 1) porte le blending
+		 * des primitives non texturees. */
+		DR_TPAGE* tp = (DR_TPAGE*)packet;
+		setDrawTPage(tp, 0, 1, getTPage(0, 1, 0, 0));
+		addPrim(&ot[otz], tp);
+		packet += sizeof(DR_TPAGE);
+
+		int32_t hc[3];
+		for (int c = 0; c < 3; c++)
+		{
+			hc[c] = scene->point_lights[p].color[c] >> 5;
+			if (hc[c] > 255)
+				hc[c] = 255;
+		}
+		POLY_F4* halo = (POLY_F4*)packet;
+		setPolyF4(halo);
+		setSemiTrans(halo, 1);
+		setRGB0(halo, (uint8_t)hc[0], (uint8_t)hc[1], (uint8_t)hc[2]);
+		setXY4(halo,
+			sxy.vx, sxy.vy - r,
+			sxy.vx - r, sxy.vy,
+			sxy.vx + r, sxy.vy,
+			sxy.vx, sxy.vy + r);
+		addPrim(&ot[otz], halo);
+		packet += sizeof(POLY_F4);
 	}
 
 	return packet;

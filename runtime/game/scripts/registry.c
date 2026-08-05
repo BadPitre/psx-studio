@@ -12,10 +12,13 @@ void Player_Start(Entity* self);
 void Player_Update(Entity* self);
 void Npc_Start(Entity* self);
 void Npc_Update(Entity* self);
+void Torche_Start(Entity* self);
+void Torche_Update(Entity* self);
 
 const ScriptDef g_scripts[] = {
 	{ "player", Player_Start, Player_Update },
 	{ "npc",    Npc_Start,    Npc_Update },
+	{ "torche", Torche_Start, Torche_Update },
 };
 
 const int g_script_count = sizeof(g_scripts) / sizeof(g_scripts[0]);

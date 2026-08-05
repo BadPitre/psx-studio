@@ -14,6 +14,7 @@ import { TransformControls } from "three/examples/jsm/controls/TransformControls
 import {
   ENTITY_FLAG_CAMERA,
   ENTITY_FLAG_LIGHT,
+  ENTITY_FLAG_LIGHT_POINT,
   PS1_DEFAULT_FOV,
   type PscScene,
 } from "../formats/psc";
@@ -77,9 +78,9 @@ export function Viewport({
     graph: SceneGraph | null;
     highlight: THREE.BoxHelper | null;
     gizmo: TransformControls;
-    /** Marqueurs de composants (flèche lumière, frustum caméra). */
+    /** Marqueurs de composants (flèche/sphère lumière, frustum caméra). */
     flagHelpers: {
-      kind: "light" | "camera";
+      kind: "light" | "point" | "camera";
       entity: number;
       obj: THREE.Object3D;
       cam?: THREE.PerspectiveCamera;
@@ -324,6 +325,7 @@ export function Viewport({
           },
         ];
         for (const light of graph.lights) {
+          if (graph.entityFlags[light.entity] & ENTITY_FLAG_LIGHT_POINT) continue;
           const group = graph.entityGroups[light.entity];
           if (!group || lights.length >= 3) continue;
           lights.push({
@@ -340,10 +342,33 @@ export function Viewport({
         }
         return lights;
       };
+      const currentPoints = (graph: SceneGraph) => {
+        const points = [];
+        for (const light of graph.lights) {
+          if (!(graph.entityFlags[light.entity] & ENTITY_FLAG_LIGHT_POINT)) continue;
+          const group = graph.entityGroups[light.entity];
+          if (!group || points.length >= 4) continue;
+          points.push({
+            posThree: new THREE.Vector3().setFromMatrixPosition(group.matrixWorld),
+            color: light.color.map((c) => c * light.intensity) as [
+              number,
+              number,
+              number,
+            ],
+            radius: graph.entityLightRadius[light.entity] || 300,
+          });
+        }
+        return points;
+      };
 
       if (s.graph) {
         s.graph.root.updateMatrixWorld(true);
-        updateLightUniforms(s.graph.materials, s.camera, currentLights(s.graph));
+        updateLightUniforms(
+          s.graph.materials,
+          s.camera,
+          currentLights(s.graph),
+          currentPoints(s.graph),
+        );
 
         // Marqueurs de composants : suivent la transform courante.
         for (const h of s.flagHelpers) {
@@ -355,6 +380,8 @@ export function Viewport({
             arrow.setDirection(
               new THREE.Vector3(0, 0, -1).transformDirection(group.matrixWorld),
             );
+          } else if (h.kind === "point") {
+            h.obj.position.setFromMatrixPosition(group.matrixWorld);
           } else if (h.cam) {
             // Convention unique : l'entité regarde vers -Z local, comme
             // les caméras three (conjugaison du miroir racine).
@@ -388,8 +415,12 @@ export function Viewport({
           pipCam.far = far;
           pipCam.updateProjectionMatrix();
         }
-        const pipLights = currentLights(s.graph);
-        updateLightUniforms(s.graph.materials, pipCam, pipLights);
+        updateLightUniforms(
+          s.graph.materials,
+          pipCam,
+          currentLights(s.graph),
+          currentPoints(s.graph),
+        );
         pipRenderer.render(s.three, pipCam);
       }
     };
@@ -445,16 +476,28 @@ export function Viewport({
     graph.entityFlags.forEach((flags, i) => {
       if (flags & ENTITY_FLAG_LIGHT) {
         const c = graph.lights.find((l) => l.entity === i)?.color ?? [255, 255, 255];
-        const arrow = new THREE.ArrowHelper(
-          new THREE.Vector3(0, 0, -1),
-          new THREE.Vector3(),
-          130,
-          new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255).getHex(),
-          36,
-          20,
-        );
-        s.overlayScene.add(arrow);
-        s.flagHelpers.push({ kind: "light", entity: i, obj: arrow });
+        const hex = new THREE.Color(c[0] / 255, c[1] / 255, c[2] / 255).getHex();
+        if (flags & ENTITY_FLAG_LIGHT_POINT) {
+          // Torche : sphère filaire au rayon d'action.
+          const radius = graph.entityLightRadius[i] || 300;
+          const sphere = new THREE.LineSegments(
+            new THREE.WireframeGeometry(new THREE.SphereGeometry(radius, 12, 8)),
+            new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: 0.35 }),
+          );
+          s.overlayScene.add(sphere);
+          s.flagHelpers.push({ kind: "point", entity: i, obj: sphere });
+        } else {
+          const arrow = new THREE.ArrowHelper(
+            new THREE.Vector3(0, 0, -1),
+            new THREE.Vector3(),
+            130,
+            hex,
+            36,
+            20,
+          );
+          s.overlayScene.add(arrow);
+          s.flagHelpers.push({ kind: "light", entity: i, obj: arrow });
+        }
       }
       if (flags & ENTITY_FLAG_CAMERA) {
         const fov = graph.entityCamFov[i] || PS1_DEFAULT_FOV;

@@ -141,6 +141,20 @@ pub struct LightJson {
     /// couleur du GTE sont en 4.12 : une lumière peut dépasser 100 %.
     #[serde(default)]
     pub intensity: Option<f32>,
+    /// "directional" (défaut) ou "point" (torche : atténuation par la
+    /// distance, appliquée par objet — l'approximation d'époque).
+    #[serde(rename = "type", default)]
+    pub kind: Option<String>,
+    /// Rayon d'action d'une lumière ponctuelle en unités monde
+    /// (défaut 600).
+    #[serde(default)]
+    pub radius: Option<f32>,
+}
+
+impl LightJson {
+    pub fn is_point(&self) -> bool {
+        self.kind.as_deref() == Some("point")
+    }
 }
 
 #[derive(Deserialize, Clone)]
@@ -185,6 +199,9 @@ impl CameraJson {
 /// Flags d'entité (champ réservé depuis la v1).
 pub const ENTITY_FLAG_LIGHT: u16 = 1 << 0;
 pub const ENTITY_FLAG_CAMERA: u16 = 1 << 1;
+/// Modificateur du bit lumière : ponctuelle (torche) au lieu de
+/// directionnelle. Le rayon vit dans le pad du vecteur échelle.
+pub const ENTITY_FLAG_LIGHT_POINT: u16 = 1 << 2;
 
 /// Hash FNV-1a 32 bits d'un nom de script (le runtime fait le même calcul).
 pub fn script_hash(name: &str) -> u32 {
@@ -468,12 +485,6 @@ pub fn build_with_options(
     let mut entities = Vec::with_capacity(n * ENTITY_SIZE);
     for &i in &order {
         let e = &scene.entities[i];
-        let push_svec = |out: &mut Vec<u8>, v: [i16; 3]| {
-            for c in v {
-                out.extend_from_slice(&c.to_le_bytes());
-            }
-            out.extend_from_slice(&[0, 0]);
-        };
         let pos = [
             quantize_i16(e.position[0], "position.x", &e.name)?,
             quantize_i16(e.position[1], "position.y", &e.name)?,
@@ -526,7 +537,33 @@ pub fn build_with_options(
             entities.extend_from_slice(&c.to_le_bytes());
         }
         entities.extend_from_slice(&cam_draw.to_le_bytes());
-        push_svec(&mut entities, scale);
+        // Rayon de lumière ponctuelle : pad du vecteur échelle (0 sinon).
+        let light_radius = match &e.light {
+            Some(l) if l.is_point() => {
+                let r = l.radius.unwrap_or(600.0);
+                if !(64.0..=8192.0).contains(&r) {
+                    return Err(format!(
+                        "entity '{}': radius {r} hors plage (64-8192 unités)",
+                        e.name
+                    ));
+                }
+                r.round() as u16
+            }
+            Some(l) => {
+                if l.radius.is_some() {
+                    report.warnings.push(format!(
+                        "entité '{}' : radius ignoré (lumière directionnelle)",
+                        e.name
+                    ));
+                }
+                0
+            }
+            None => 0,
+        };
+        for c in scale {
+            entities.extend_from_slice(&c.to_le_bytes());
+        }
+        entities.extend_from_slice(&light_radius.to_le_bytes());
         let parent = match &e.parent {
             Some(p) => pos_to_sorted[name_to_pos[p.as_str()]],
             None => NO_INDEX,
@@ -540,8 +577,18 @@ pub fn build_with_options(
         entities.extend_from_slice(&parent.to_le_bytes());
         entities.extend_from_slice(&model.to_le_bytes());
         let mut flags = 0u16;
-        if e.light.is_some() {
+        if let Some(light) = &e.light {
             flags |= ENTITY_FLAG_LIGHT;
+            match light.kind.as_deref() {
+                None | Some("directional") => {}
+                Some("point") => flags |= ENTITY_FLAG_LIGHT_POINT,
+                Some(other) => {
+                    return Err(format!(
+                        "entity '{}': type de lumière inconnu '{other}' (directional|point)",
+                        e.name
+                    ))
+                }
+            }
         }
         if e.camera.enabled() {
             flags |= ENTITY_FLAG_CAMERA;
@@ -566,15 +613,29 @@ pub fn build_with_options(
      * fichier. Le GTE offre 3 directionnelles ; la lumière des settings
      * occupe la ligne 0, donc 2 entités max — le surplus est ignoré. */
     let mut lights: Vec<(u16, [u8; 3], u8)> = Vec::new();
+    let mut dir_count = 0usize;
+    let mut point_count = 0usize;
     for &i in &order {
         let e = &scene.entities[i];
         if let Some(light) = &e.light {
-            if lights.len() >= 2 {
-                report.warnings.push(format!(
-                    "lumière '{}' ignorée : 3 directionnelles max sur le GTE (settings + 2 entités)",
-                    e.name
-                ));
-                continue;
+            if light.is_point() {
+                if point_count >= 4 {
+                    report.warnings.push(format!(
+                        "torche '{}' ignorée : 4 lumières ponctuelles max par scène",
+                        e.name
+                    ));
+                    continue;
+                }
+                point_count += 1;
+            } else {
+                if dir_count >= 2 {
+                    report.warnings.push(format!(
+                        "lumière '{}' ignorée : 3 directionnelles max sur le GTE (settings + 2 entités)",
+                        e.name
+                    ));
+                    continue;
+                }
+                dir_count += 1;
             }
             // Intensité en pourcent dans l'octet de pad (0 = 100 %).
             let intensity = match light.intensity {

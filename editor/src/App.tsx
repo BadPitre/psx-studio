@@ -240,6 +240,10 @@ function Inspector({
   onLightChange,
   lightIntensity,
   onLightIntensityChange,
+  lightType,
+  onLightTypeChange,
+  lightRadius,
+  onLightRadiusChange,
   isCamera,
   onCameraChange,
   camFov,
@@ -265,6 +269,10 @@ function Inspector({
   onLightChange?: (color: [number, number, number] | null) => void;
   lightIntensity?: number | null;
   onLightIntensityChange?: (v: number | null) => void;
+  lightType?: "directional" | "point";
+  onLightTypeChange?: (t: "directional" | "point") => void;
+  lightRadius?: number | null;
+  onLightRadiusChange?: (r: number | null) => void;
   isCamera?: boolean;
   onCameraChange?: (on: boolean) => void;
   camFov?: number | null;
@@ -399,10 +407,44 @@ function Inspector({
 
       {light && (
         <ComponentCard
-          icon="☀"
-          title="Lumière directionnelle"
+          icon={lightType === "point" ? "🔥" : "☀"}
+          title={lightType === "point" ? "Lumière ponctuelle (torche)" : "Lumière directionnelle"}
           onRemove={onLightChange ? () => onLightChange(null) : undefined}
         >
+          {onLightTypeChange && (
+            <div className="field">
+              <label>Type</label>
+              <select
+                className="scene-select model-select"
+                value={lightType ?? "directional"}
+                onChange={(e) =>
+                  onLightTypeChange(e.target.value as "directional" | "point")
+                }
+                title="Directionnelle : lignes GTE natives (3 max). Ponctuelle : approximation par objet avec atténuation par la distance (4 max), plus halo additif en jeu."
+              >
+                <option value="directional">directionnelle (soleil, lune)</option>
+                <option value="point">ponctuelle (torche, lampe)</option>
+              </select>
+            </div>
+          )}
+          {lightType === "point" && onLightRadiusChange && (
+            <div className="field">
+              <label>Rayon d'action (unités monde)</label>
+              <input
+                type="number"
+                min={64}
+                max={8192}
+                step={20}
+                value={lightRadius ?? ""}
+                placeholder="600"
+                onChange={(e) => {
+                  const v = e.target.value === "" ? null : Number(e.target.value);
+                  if (v === null || (v >= 64 && v <= 8192)) onLightRadiusChange(v);
+                }}
+                title="Au-delà, l'objet n'est plus éclairé (atténuation linéaire). Un script peut le faire osciller = vacillement."
+              />
+            </div>
+          )}
           <div className="field color-field">
             <label>Couleur</label>
             <input
@@ -431,9 +473,9 @@ function Inspector({
             </div>
           )}
           <div className="field-readonly">
-            directionnelle GTE · par sommet (Gouraud) · pas d'ombres ·
-            direction = rotation de l'entité (-Z local) · 3 max par scène
-            (soleil des settings + 2 entités)
+            {lightType === "point"
+              ? "appliquée par objet (approximation d'époque) · atténuation linéaire · halo additif en jeu · 4 max par scène"
+              : "directionnelle GTE · par sommet (Gouraud) · pas d'ombres · direction = rotation de l'entité (-Z local) · 3 max par scène (soleil des settings + 2 entités)"}
           </div>
         </ComponentCard>
       )}
@@ -979,15 +1021,23 @@ export default function App() {
     [mutateDoc, selected, entityNames],
   );
 
-  const setEntityLightIntensity = useCallback(
-    (v: number | null) => {
+  /* Propriétés lumière fusionnées ({ type, color, intensity, radius }) ;
+     null retire la clé, "directional" retire aussi le rayon. */
+  const setEntityLightProp = useCallback(
+    (key: "type" | "intensity" | "radius", value: string | number | null) => {
       if (selected < 0) return;
       const name = entityNames[selected];
       mutateDoc((doc) => {
         const entity = doc.entities?.find((e) => e.name === name);
         if (!entity || !entity.light) return;
-        const light = entity.light as { color: [number, number, number] };
-        entity.light = v === null ? { color: light.color } : { color: light.color, intensity: v };
+        const light = { ...(entity.light as Record<string, unknown>) };
+        if (value === null || (key === "type" && value === "directional")) {
+          delete light[key];
+          if (key === "type") delete light.radius;
+        } else {
+          light[key] = value;
+        }
+        entity.light = light;
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -1184,6 +1234,16 @@ export default function App() {
     ((selectedJsonEntity?.light as { intensity?: number } | undefined)
       ?.intensity as number | undefined) ??
     (pscLight && pscLight.intensity !== 1 ? pscLight.intensity : null);
+  const currentLightType: "directional" | "point" =
+    ((selectedJsonEntity?.light as { type?: string } | undefined)?.type ??
+      (!sceneDoc && (pscEntity?.flags ?? 0) & 4 ? "point" : "directional")) as
+      | "directional"
+      | "point";
+  const currentLightRadius =
+    ((selectedJsonEntity?.light as { radius?: number } | undefined)?.radius as
+      | number
+      | undefined) ??
+    ((!sceneDoc && pscEntity?.lightRadius) || null);
   const currentModelPmd =
     (currentModelId &&
       sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||
@@ -1417,7 +1477,21 @@ export default function App() {
                 onLightChange={isTauri && sceneDoc ? setEntityLight : undefined}
                 lightIntensity={currentLightIntensity}
                 onLightIntensityChange={
-                  isTauri && sceneDoc ? setEntityLightIntensity : undefined
+                  isTauri && sceneDoc
+                    ? (v) => setEntityLightProp("intensity", v)
+                    : undefined
+                }
+                lightType={currentLightType}
+                onLightTypeChange={
+                  isTauri && sceneDoc
+                    ? (t) => setEntityLightProp("type", t)
+                    : undefined
+                }
+                lightRadius={currentLightRadius}
+                onLightRadiusChange={
+                  isTauri && sceneDoc
+                    ? (r) => setEntityLightProp("radius", r)
+                    : undefined
                 }
                 isCamera={currentCamera}
                 onCameraChange={isTauri && sceneDoc ? setEntityCamera : undefined}
