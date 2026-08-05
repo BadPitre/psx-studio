@@ -247,11 +247,14 @@ int main(int argc, const char** argv)
 
 		RotMatrix(&rotation, &world_mtx);
 		TransMatrix(&world_mtx, &position);
+
+		/* Bring the world-space light into model space. This MUST happen
+		 * before gte_SetRotMatrix: MulMatrix0 runs on the GTE and clobbers
+		 * the rotation matrix registers. */
+		MulMatrix0(&light_mtx, &world_mtx, &composite_light);
+
 		gte_SetRotMatrix(&world_mtx);
 		gte_SetTransMatrix(&world_mtx);
-
-		/* Bring the world-space light into model space. */
-		MulMatrix0(&light_mtx, &world_mtx, &composite_light);
 		gte_SetLightMatrix(&composite_light);
 
 		RenderBuffer* draw_buffer = &ctx.buffers[ctx.active_buffer];

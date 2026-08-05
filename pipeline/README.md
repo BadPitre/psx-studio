@@ -14,8 +14,14 @@ psxpipe info     <file.pmd|file.tim>
 - `png2tim` : PNG → **TIM**. Quantization median-cut (16 ou 256 couleurs),
   CLUT, transparence (alpha < 128 → texel 0x0000), placement VRAM avec
   détection de collision framebuffer.
-- `samples/` : cube glTF + texture damier de démonstration, régénérables via
-  `cargo run --example gen_samples -- samples`.
+- `samples/` : assets de démonstration régénérables via
+  `cargo run --example gen_samples -- samples` : cube + damier, et une
+  **maison low-poly** (`house.gltf` + `house.png`, 16 tris, porte/fenêtre,
+  toit débordant) qui sert de modèle de test "façon Blender".
+- **Préview PC** : `cargo run --example preview -- model.pmd texture.tim out.png
+  [--yaw N --pitch N --dist N]` — rendu logiciel 320×240 simulant le runtime
+  (même projection, culling, éclairage, mapping affine) pour vérifier un asset
+  sans booter l'émulateur.
 
 Développement : `cargo test` (tests unitaires + import du cube de bout en
 bout), `cargo clippy`.

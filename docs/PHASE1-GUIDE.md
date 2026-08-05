@@ -78,6 +78,22 @@ packing VRAM que l'éditeur devra gérer (Phase 3).
 
 ## 5. Tester avec un vrai modèle Blender
 
+Un modèle de test "façon Blender" est fourni : `pipeline/samples/house.gltf`
++ `house.png` (maison low-poly, 16 tris, porte/fenêtre, toit débordant).
+Déroule la moulinette dessus pour te faire la main :
+
+```powershell
+cd <repo>\pipeline
+cargo run -- gltf2pmd samples\house.gltf -o ..\runtime\poc-renderer\assets\cube.pmd
+cargo run -- png2tim  samples\house.png  -o ..\runtime\poc-renderer\assets\checker.tim
+# préview PC sans émulateur (mêmes règles de rendu que le runtime) :
+cargo run --example preview -- samples\house.pmd samples\house.tim house.png.preview.png --dist 500
+```
+
+Puis rebuilder `runtime/poc-renderer` : les assets sont embarqués au build.
+
+Pour tes propres modèles :
+
 1. Dans Blender : modèle low-poly (< 800 tris), **UV dans [0,1]** (pas de
    tiling), une seule texture, export **glTF Separate ou Binary**.
 2. Convertir :
@@ -96,6 +112,16 @@ Notes :
   pour ~128 ; augmenter `CAM_DIST_*` dans `main.c` pour un modèle plus grand).
 - Modèle sans texture : ajouter `--untextured` (utilise la couleur de base
   du matériau) ; `--flat` force une normale par face.
+
+## 5 bis. Dépannage
+
+| Symptôme | Cause probable | Fix |
+|---|---|---|
+| Texte affiché mais **aucun modèle** | ordre des appels GTE : `MulMatrix0` écrase les registres de la matrice de rotation (il tourne sur le GTE) | toujours appeler `MulMatrix0` **avant** `gte_SetRotMatrix` (cf. commentaire dans `main.c`) |
+| Modèle noir/sombre | lumière mal orientée (les lignes de la matrice lumière pointent **vers** la source) ou ambiante à 0 | vérifier `light_mtx` et `gte_SetBackColor` |
+| Texture absente (polys invisibles) | texels à 0x0000 = transparent (TIM pas uploadé, tpage/clut faux) | vérifier le VRAM Viewer de PCSX-Redux : texture en (320,0), CLUT en (320,256) |
+| Modèle qui "explose" | coordonnées hors 16 bits ou caméra dans le mesh | augmenter `--size` côté pipeline ou `CAM_DIST_MIN` |
+| Rendu bizarre vs attendu | — | comparer avec `cargo run --example preview` qui simule le runtime sur PC |
 
 ## 6. Critères de sortie de la Phase 1
 

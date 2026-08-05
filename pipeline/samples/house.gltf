@@ -1,0 +1,32 @@
+{
+  "asset": { "version": "2.0", "generator": "psxpipe sample generator" },
+  "scene": 0,
+  "scenes": [ { "nodes": [0] } ],
+  "nodes": [ { "mesh": 0, "name": "House" } ],
+  "meshes": [ {
+    "name": "House",
+    "primitives": [ {
+      "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+      "indices": 3,
+      "material": 0
+    } ]
+  } ],
+  "materials": [ {
+    "name": "HouseMat",
+    "pbrMetallicRoughness": { "baseColorFactor": [1.0, 1.0, 1.0, 1.0] }
+  } ],
+  "buffers": [ { "uri": "house.bin", "byteLength": 1248 } ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 432, "target": 34962 },
+    { "buffer": 0, "byteOffset": 432, "byteLength": 432, "target": 34962 },
+    { "buffer": 0, "byteOffset": 864, "byteLength": 288, "target": 34962 },
+    { "buffer": 0, "byteOffset": 1152, "byteLength": 96, "target": 34963 }
+  ],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 36, "type": "VEC3",
+       "min": [-1.2, 0, -1.2], "max": [1.2, 2.5, 1.2] },
+    { "bufferView": 1, "componentType": 5126, "count": 36, "type": "VEC3" },
+    { "bufferView": 2, "componentType": 5126, "count": 36, "type": "VEC2" },
+    { "bufferView": 3, "componentType": 5123, "count": 48, "type": "SCALAR" }
+  ]
+}

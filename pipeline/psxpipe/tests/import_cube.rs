@@ -64,3 +64,19 @@ fn cube_pmd_serializes_and_parses() {
         assert_eq!(off % 4, 0);
     }
 }
+
+#[test]
+fn house_imports_cleanly() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::write_all(dir.path()).unwrap();
+    let (pmd, report) =
+        gltf_import::import(&dir.path().join("house.gltf"), &gltf_import::ImportOptions::default())
+            .unwrap();
+    // 16 textured gouraud triangles, no degenerates, no warnings.
+    assert_eq!(report.counts, [0, 0, 0, 16]);
+    assert_eq!(report.degenerate_dropped, 0);
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    assert!(pmd.textured);
+    // 36 authored corners dedup to the 13 unique house vertices.
+    assert_eq!(report.vertex_count, 13);
+}
