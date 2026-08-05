@@ -22,6 +22,11 @@ pub struct ImportOptions {
     /// Texture dimensions used to map UVs to texel coordinates.
     pub tex_w: u32,
     pub tex_h: u32,
+    /// Anti-warping subdivision: split every triangle until no edge is
+    /// longer than this many PMD units (None = off). The PS1 GPU maps
+    /// textures affinely per triangle, so big triangles warp badly when
+    /// seen at an angle — subdividing bounds the error.
+    pub subdiv: Option<f32>,
 }
 
 impl Default for ImportOptions {
@@ -32,6 +37,7 @@ impl Default for ImportOptions {
             untextured: false,
             tex_w: 256,
             tex_h: 256,
+            subdiv: None,
         }
     }
 }
@@ -40,6 +46,8 @@ impl Default for ImportOptions {
 pub struct ImportReport {
     pub meshes: usize,
     pub triangles_in: usize,
+    /// Triangles ajoutés par la subdivision anti-warping (0 si désactivée).
+    pub triangles_subdivided: usize,
     pub degenerate_dropped: usize,
     pub vertex_count: usize,
     pub normal_count: usize,
@@ -109,6 +117,96 @@ fn face_normal(p: &[[f32; 3]; 3]) -> [f32; 3] {
 /// glTF → PS1 axis convention.
 fn to_ps1(p: [f32; 3]) -> [f32; 3] {
     [p[0], -p[1], p[2]]
+}
+
+fn lerp3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5]
+}
+
+fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+}
+
+/// Garde-fou : la subdivision ne produira jamais plus de triangles que ça
+/// (un modèle dépassant est déjà bien au-delà du budget console).
+const SUBDIV_MAX_TRIS: usize = 20_000;
+
+/// Coupe récursivement l'arête la plus longue de chaque triangle jusqu'à
+/// ce qu'aucune ne dépasse `max_src` (seuil en unités source). Positions,
+/// normales et UV sont interpolées au point milieu ; la couleur et le
+/// mode flat sont hérités.
+fn subdivide(tris: Vec<Tri>, max_src: f32, warnings: &mut Vec<String>) -> Vec<Tri> {
+    let mut out: Vec<Tri> = Vec::with_capacity(tris.len());
+    let mut stack = tris;
+    let mut capped = false;
+    while let Some(t) = stack.pop() {
+        let lens = [
+            dist(t.pos[0], t.pos[1]),
+            dist(t.pos[1], t.pos[2]),
+            dist(t.pos[2], t.pos[0]),
+        ];
+        let (edge, &len) = lens
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap();
+        if len <= max_src || out.len() + stack.len() >= SUBDIV_MAX_TRIS {
+            capped |= len > max_src;
+            out.push(t);
+            continue;
+        }
+        // Sommets de l'arête coupée (a, b) et sommet opposé c, en
+        // préservant le winding : (a, m, c) + (m, b, c).
+        let (ia, ib, ic) = match edge {
+            0 => (0, 1, 2),
+            1 => (1, 2, 0),
+            _ => (2, 0, 1),
+        };
+        let mid_pos = lerp3(t.pos[ia], t.pos[ib]);
+        let mid_normal = if t.flat {
+            t.normals[ia]
+        } else {
+            normalize(lerp3(t.normals[ia], t.normals[ib]))
+        };
+        let mid_uv = t.uv.map(|uv| {
+            [
+                (uv[ia][0] + uv[ib][0]) * 0.5,
+                (uv[ia][1] + uv[ib][1]) * 0.5,
+            ]
+        });
+        let make = |p0: usize, mid_first: bool| -> Tri {
+            // mid_first=false : (a, m, c) ; true : (m, b, c).
+            let (pos, normals, uv) = if mid_first {
+                (
+                    [mid_pos, t.pos[ib], t.pos[ic]],
+                    [mid_normal, t.normals[ib], t.normals[ic]],
+                    t.uv.map(|uv| [mid_uv.unwrap(), uv[ib], uv[ic]]),
+                )
+            } else {
+                (
+                    [t.pos[p0], mid_pos, t.pos[ic]],
+                    [t.normals[p0], mid_normal, t.normals[ic]],
+                    t.uv.map(|uv| [uv[p0], mid_uv.unwrap(), uv[ic]]),
+                )
+            };
+            Tri {
+                pos,
+                normals,
+                flat: t.flat,
+                uv,
+                color: t.color,
+            }
+        };
+        stack.push(make(ia, false));
+        stack.push(make(ia, true));
+    }
+    if capped {
+        warnings.push(format!(
+            "subdivision plafonnée à {SUBDIV_MAX_TRIS} triangles : augmente le seuil (le modèle dépasse largement le budget console)"
+        ));
+    }
+    out
 }
 
 /// Extrait la première texture baseColor du fichier (embarquée dans un
@@ -312,6 +410,19 @@ pub fn import(path: &Path, opts: &ImportOptions) -> Result<(Pmd, ImportReport), 
     // Header metadata: source units per PMD unit, in 4.12.
     let scale_4_12 = ((max_abs / opts.target_size as f32) * ONE_4_12 as f32).round() as i32;
     report.scale_4_12 = scale_4_12.max(1);
+
+    // Subdivision anti-warping : le seuil est donné en unités PMD finales,
+    // converti en unités source (la subdivision travaille en flottant,
+    // avant quantization — pas de perte cumulative).
+    let tris = match opts.subdiv {
+        Some(max_edge) if max_edge > 0.0 => {
+            let before = tris.len();
+            let subdivided = subdivide(tris, max_edge / quant, &mut report.warnings);
+            report.triangles_subdivided = subdivided.len() - before;
+            subdivided
+        }
+        _ => tris,
+    };
 
     let mut verts: Vec<[i16; 3]> = Vec::new();
     let mut normals_out: Vec<[i16; 3]> = Vec::new();

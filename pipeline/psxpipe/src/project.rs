@@ -46,6 +46,10 @@ pub struct ModelSrc {
     pub tex_w: Option<u32>,
     #[serde(default)]
     pub tex_h: Option<u32>,
+    /// Subdivision anti-warping : longueur d'arête max en unités PMD
+    /// (absent = désactivée). Borne la distorsion affine des textures.
+    #[serde(default)]
+    pub subdiv: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -190,11 +194,12 @@ pub fn build(project_dir: &Path, force: bool) -> Result<BuildReport, String> {
         let src = project_dir.join(&model.gltf);
         let out = library.join(&model.out);
         let hash = format!(
-            "{}:{}:{}x{}",
+            "{}:{}:{}x{}:s{}",
             hash_gltf(&src)?,
             model.size.unwrap_or(128),
             model.tex_w.unwrap_or(256),
-            model.tex_h.unwrap_or(256)
+            model.tex_h.unwrap_or(256),
+            model.subdiv.unwrap_or(0.0)
         );
         if !force && cache.is_fresh(&model.gltf, &hash, &out) {
             report.cached += 1;
@@ -204,6 +209,7 @@ pub fn build(project_dir: &Path, force: bool) -> Result<BuildReport, String> {
             target_size: model.size.unwrap_or(128),
             tex_w: model.tex_w.unwrap_or(256),
             tex_h: model.tex_h.unwrap_or(256),
+            subdiv: model.subdiv,
             ..Default::default()
         };
         let (pmd, import_report) = gltf_import::import(&src, &opts)?;

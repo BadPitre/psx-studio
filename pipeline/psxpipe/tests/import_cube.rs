@@ -66,6 +66,53 @@ fn cube_pmd_serializes_and_parses() {
 }
 
 #[test]
+fn subdivision_bounds_edge_length() {
+    // Cube 256 unités d'arête, seuil 64 : chaque face doit être découpée
+    // jusqu'à ce qu'aucune arête ne dépasse 64 unités PMD.
+    let opts = gltf_import::ImportOptions {
+        subdiv: Some(64.0),
+        ..Default::default()
+    };
+    let (pmd, report) = import_cube(&opts);
+    assert!(report.triangles_subdivided > 0, "aucune subdivision");
+    let total: usize = report.counts.iter().sum();
+    assert_eq!(total, 12 + report.triangles_subdivided - report.degenerate_dropped);
+
+    let edge = |a: u16, b: u16| -> f32 {
+        let (va, vb) = (pmd.verts[a as usize], pmd.verts[b as usize]);
+        let d = [
+            (vb[0] - va[0]) as f32,
+            (vb[1] - va[1]) as f32,
+            (vb[2] - va[2]) as f32,
+        ];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    };
+    let mut max_edge = 0.0f32;
+    for p in &pmd.gt3 {
+        for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+            max_edge = max_edge.max(edge(p.vidx[a], p.vidx[b]));
+        }
+    }
+    // Marge d'un texel : le point milieu est quantifié après coup.
+    assert!(max_edge <= 65.0, "arête de {max_edge} > seuil 64");
+
+    // Interpolation des UV : sur une face du cube (UV pleine plage), un
+    // point milieu doit produire des texels intermédiaires (ni 0 ni 255
+    // partout) — la subdivision ne doit pas dupliquer les UV de coin.
+    let has_mid_uv = pmd
+        .gt3
+        .iter()
+        .flat_map(|p| p.uv.iter())
+        .any(|uv| uv[0] > 16 && uv[0] < 240);
+    assert!(has_mid_uv, "aucun UV intermédiaire après subdivision");
+
+    // Sans subdivision, le même cube garde ses 12 triangles.
+    let (_, plain) = import_cube(&gltf_import::ImportOptions::default());
+    assert_eq!(plain.triangles_subdivided, 0);
+    assert_eq!(plain.counts.iter().sum::<usize>(), 12);
+}
+
+#[test]
 fn house_imports_cleanly() {
     let dir = tempfile::tempdir().unwrap();
     samples::write_all(dir.path()).unwrap();

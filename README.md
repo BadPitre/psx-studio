@@ -1,13 +1,69 @@
 # PSX Studio
 
-Éditeur de jeux 3D pour PlayStation 1, philosophie Unity, 100 % open source (MIT).
+**Un éditeur de jeux 3D pour PlayStation 1, philosophie Unity, 100 % open
+source (MIT).** Scène, hiérarchie, inspecteur, import glTF depuis Blender,
+Play sur émulateur en un bouton — et le résultat tourne sur une vraie
+console : formats binaires natifs, GTE en virgule fixe, Ordering Table,
+2 Mo de RAM.
 
-- `runtime/`  — moteur console (C, PSn00bSDK) — `engine/` (moteur partagé : scène, scripts, entrées, physique, SFX), `hello-triangle/` (Ph. 0), `poc-renderer/` (Ph. 1), `player/` (Ph. 2-3), `game/` (Ph. 5 : démo jouable avec scripts)
-- `pipeline/` — outils d'assets et de build (Rust) — CLI `psxpipe` (`build`, `gltf2pmd`, `png2tim`, `scene`, `wav2vag`) + préview PC + client PCSX-Redux (Play Mode, live tweaking)
-- `examples/` — `demo/` : projet exemple buildable en une commande (`psxpipe build`)
-- `editor/`   — éditeur desktop (Tauri + React + TypeScript + Three.js) — Phase 4 : projet, inspecteur, import d'assets, VRAM viewer, Play Mode ; Phase 5 : champ Script, live tweaking
-- `docs/`     — doc projet (`psx-studio-doc-projet.md`), guides de phase, specs `PMD-FORMAT.md` / `SCENE-FORMAT.md`
+## Ce que ça fait aujourd'hui
 
-Démarrage : `docs/PHASE0-GUIDE.md` (installation), puis les guides `PHASE1` (pipeline + rendu), `PHASE2` (scènes + player), `PHASE3` (build one-command + audio), `PHASE4` (éditeur), `PHASE5` (gameplay : scripts, physique, live tweaking).
+- **Éditeur desktop** (Tauri + React + Three.js) : viewport 320×240
+  authentique (vertex snapping, textures affines, Gouraud GTE), gizmos
+  déplacement/rotation/échelle, hiérarchie parent/enfant, inspecteur,
+  annuler/rétablir, VRAM viewer, import glTF/GLB/PNG par glisser-déposer
+  (texture extraite et quantifiée automatiquement).
+- **Pipeline d'assets** (Rust) : glTF → PMD (packets GPU pré-encodés),
+  PNG → TIM (quantization median-cut, CLUT), WAV → VAG (SPU-ADPCM),
+  subdivision anti-warping, packer VRAM automatique, scènes JSON → PSC
+  (un fichier contigu = une lecture CD), build ISO incrémental avec cache.
+- **Moteur console** (C, PSn00bSDK) : chargement de scène par arène,
+  hiérarchie de transforms, scripts C enregistrés par nom (résolution par
+  hash, zéro interpréteur), entrées manette, physique AABB, dialogues,
+  SFX SPU et musique CD-DA.
+- **Play Mode** : build + lancement PCSX-Redux pilotés depuis l'éditeur
+  (statut, pause, reset) et **live tweaking** : déplacer une entité dans
+  l'éditeur pendant que le jeu tourne l'écrit directement dans la RAM
+  console.
+- **Démo jouable** : un village, un perso qui marche à la manette, des
+  collisions, un PNJ qui parle.
 
-Licence : MIT. Certaines portions du runtime sont adaptées des exemples PSn00bSDK (MPL, © Lameguy64/spicyjpeg) — attribution conservée dans les fichiers concernés.
+## Démarrage
+
+Suis **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)** — prérequis,
+build, premier Play, workflow Blender, écriture de gameplay. Résumé :
+
+```bat
+cd runtime\game && cmake --preset default && cmake --build build
+cd pipeline\psxpipe && cargo run --release --example gen_project -- ..\..\examples\demo
+cd editor && npm install && cargo tauri dev
+```
+
+puis « Ouvrir un projet… » → `examples/demo` → **▶ Play**.
+
+## Arborescence
+
+- `runtime/` — moteur console C : `engine/` (partagé), `game/` (démo
+  jouable Phase 5), `player/` (visionneuse), `hello-triangle/`,
+  `poc-renderer/`
+- `pipeline/` — CLI `psxpipe` (build, gltf2pmd, png2tim, scene, wav2vag,
+  info) + previewer logiciel + client PCSX-Redux
+- `editor/` — l'éditeur desktop (mode navigateur = visionneuse .psc)
+- `examples/demo/` — projet exemple complet
+- `docs/` — [mode d'emploi](docs/GETTING-STARTED.md), specs
+  ([PMD](docs/PMD-FORMAT.md), [Scene](docs/SCENE-FORMAT.md)), doc
+  d'architecture (`psx-studio-doc-projet.md`) et guides de phase 0→6
+  (le journal de construction du studio)
+
+## Contribuer
+
+Le projet est construit pour être repris : formats spécifiés et testés
+des deux côtés, validations sans console (previewer logiciel, simulateur
+GTE, faux serveur émulateur), et une liste d'améliorations autonomes dans
+**[CONTRIBUTING.md](CONTRIBUTING.md)**.
+
+## Licence
+
+MIT (voir [LICENSE](LICENSE)). Certaines portions du runtime sont
+adaptées des exemples PSn00bSDK (MPL, © Lameguy64/spicyjpeg) —
+attribution conservée dans les fichiers concernés.

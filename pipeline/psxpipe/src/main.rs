@@ -38,6 +38,10 @@ enum Cmd {
         /// Texture height in pixels, used to map UVs (max 256)
         #[arg(long, default_value_t = 256)]
         tex_h: u32,
+        /// Anti-warping subdivision: split triangles until no edge exceeds
+        /// this length in PMD units (bounds the affine texture distortion)
+        #[arg(long)]
+        subdiv: Option<f32>,
     },
     /// Convert a PNG image to the TIM texture format
     Png2tim {
@@ -120,6 +124,7 @@ fn run(cli: Cli) -> Result<(), String> {
             untextured,
             tex_w,
             tex_h,
+            subdiv,
         } => {
             if !(1..=32767).contains(&size) {
                 return Err("--size must be between 1 and 32767".into());
@@ -127,12 +132,18 @@ fn run(cli: Cli) -> Result<(), String> {
             if tex_w > 256 || tex_h > 256 || tex_w == 0 || tex_h == 0 {
                 return Err("--tex-w/--tex-h must be between 1 and 256 (one texture page)".into());
             }
+            if let Some(s) = subdiv {
+                if !(1.0..=32767.0).contains(&s) {
+                    return Err("--subdiv must be between 1 and 32767 (PMD units)".into());
+                }
+            }
             let opts = gltf_import::ImportOptions {
                 target_size: size,
                 flat,
                 untextured,
                 tex_w,
                 tex_h,
+                subdiv,
             };
             let (pmd, report) = gltf_import::import(&input, &opts)?;
             let out = output.unwrap_or_else(|| input.with_extension("pmd"));
@@ -141,10 +152,15 @@ fn run(cli: Cli) -> Result<(), String> {
 
             println!("{} -> {} ({} bytes)", input.display(), out.display(), bytes.len());
             println!(
-                "  meshes: {}   triangles: {} ({} degenerate dropped)",
+                "  meshes: {}   triangles: {} ({} degenerate dropped{})",
                 report.meshes,
-                report.triangles_in - report.degenerate_dropped,
-                report.degenerate_dropped
+                report.triangles_in + report.triangles_subdivided - report.degenerate_dropped,
+                report.degenerate_dropped,
+                if report.triangles_subdivided > 0 {
+                    format!(", +{} by subdivision", report.triangles_subdivided)
+                } else {
+                    String::new()
+                }
             );
             println!(
                 "  vertices: {}   normals: {}   scale: {} (4.12)",
