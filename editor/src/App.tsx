@@ -355,7 +355,7 @@ export default function App() {
         )}
         {error && <span className="error">{error}</span>}
       </header>
-      {isTauri && project && <PlayBar projectDir={project.dir} />}
+      {isTauri && <PlayBar projectDir={project?.dir ?? null} />}
       <main className="layout">
         {scene ? (
           <>

@@ -8,7 +8,7 @@ const PORT = 8080;
 
 type PlayState = "idle" | "building" | "launched" | "error";
 
-export function PlayBar({ projectDir }: { projectDir: string }) {
+export function PlayBar({ projectDir }: { projectDir: string | null }) {
   const [state, setState] = useState<PlayState>("idle");
   const [message, setMessage] = useState("");
   const [running, setRunning] = useState<boolean | null>(null);
@@ -37,6 +37,7 @@ export function PlayBar({ projectDir }: { projectDir: string }) {
   }, [state]);
 
   const onPlay = async () => {
+    if (!projectDir) return;
     setState("building");
     setMessage("build en cours…");
     try {
@@ -56,11 +57,14 @@ export function PlayBar({ projectDir }: { projectDir: string }) {
       <button
         className="button play"
         onClick={onPlay}
-        disabled={state === "building"}
+        disabled={state === "building" || !projectDir}
         title="Build incrémental + lancement PCSX-Redux"
       >
         ▶ Play
       </button>
+      {!projectDir && (
+        <span className="muted">ouvre un projet (project.json) pour builder et lancer</span>
+      )}
       {state === "launched" && (
         <>
           <span className={`status-dot ${running === null ? "off" : running ? "run" : "pause"}`} />
