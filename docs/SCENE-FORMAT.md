@@ -41,6 +41,12 @@
       "parent": "maison1",
       "position": [40, -90, 0],
       "model": "cube"
+    },
+    {
+      "name": "perso",
+      "position": [0, 0, -60],
+      "model": "guy",
+      "script": "player"
     }
   ]
 }
@@ -59,6 +65,9 @@ Conventions :
   la matrice lumière GTE).
 - Chemins `pmd`/`tim` relatifs au fichier JSON. Les assets sont **embarqués**
   dans le `.psc`.
+- `script` (v1.1, optionnel) : nom d'un script runtime. Le binaire ne stocke
+  que son **hash FNV-1a 32 bits** (nom passé en minuscules) ; le runtime le
+  résout au chargement contre sa table `g_scripts` compilée dans le jeu.
 
 ## 2. Binaire `.psc` (little-endian, sections alignées sur 4)
 
@@ -76,7 +85,13 @@ Conventions :
 | 0x24 | u8×4 | ambiante RGB + pad |
 | 0x28 | u8×4 | couleur lumière RGB + pad |
 | 0x2C | i16×3 | vecteur **vers** la source lumière, 4.12, espace monde |
-| 0x32 | 14 | réservé (0) |
+| 0x32 | u16 | `script_count` (v1.1 ; 0 = pas de table de scripts) |
+| 0x34 | u32 | `scripts_offset` (v1.1 ; 0 si `script_count` = 0) |
+| 0x38 | 8 | réservé (0) |
+
+L'extension v1.1 vit dans les octets réservés de la v1 : un lecteur v1 ignore
+ces champs (ils valaient 0), un lecteur v1.1 lit une scène v1 comme « sans
+scripts ». `version` reste 1.
 
 ### Table des modèles (`model_count` × 12 octets)
 | u32 `offset` | u32 `size` | u16 `texture` | u16 pad |
@@ -101,11 +116,21 @@ et avec les framebuffers (erreur si chevauchement).
 | 0x18 | u16 | parent (indice, `0xFFFF` = racine) |
 | 0x1A | u16 | modèle (indice, `0xFFFF` = aucun) |
 | 0x1C | u16 | flags (réservé) |
-| 0x1E | u16 | pad |
+| 0x1E | u16 | `script_ref` (v1.1) : 0 = aucun, sinon **indice + 1** dans la table des scripts |
 
 Invariant : **`parent < index`** pour toute entité non racine (le sérialiseur
 trie topologiquement) → le runtime calcule les matrices monde en un seul
 passage avant.
+
+### Table des scripts (v1.1, `script_count` × 4 octets)
+
+| u32 `hash` |
+
+Hash **FNV-1a 32 bits** du nom du script en minuscules (implémentation
+identique dans `scene.rs::script_hash` et `scene.c::Script_Hash`). Les noms
+apparaissent dans l'ordre de première utilisation par les entités. Le runtime
+résout chaque hash contre `g_scripts[]` au chargement ; un hash inconnu vaut
+« pas de script » (+ warning debug), la scène reste jouable.
 
 ### Blobs
 Après les tables : blobs modèles puis textures, chacun aligné sur 4.
@@ -124,10 +149,26 @@ Après les tables : blobs modèles puis textures, chacun aligné sur 4.
 Changement de scène = reset de l'arène + retour à l'étape 1. Aucune
 allocation générique : tout vit dans l'arène, libérée d'un bloc.
 
+Depuis la Phase 5, les entités sont copiées dans un tableau **mutable**
+(`Entity[]`) : les scripts et l'éditeur peuvent modifier pos/rot/scale à
+chaque frame, `Scene_UpdateWorld` recalcule les matrices monde.
+
+### Balise éditeur (live tweaking)
+
+Le runtime publie en RAM une structure de 28 octets commençant par le magic
+`"PSXSTUDIOBCN"` (écrit en dernier), suivie de : `version` u16 (=1),
+`entity_size` u16, `entities_addr` u32 (adresse KSEG de `entities[0]`),
+`entity_count` u16, puis les offsets u16 de `pos`, `rot`, `scale` dans
+`Entity`. L'éditeur la localise en scannant un dump RAM de PCSX-Redux
+(`GET /api/v1/cpu/ram/raw`) puis écrit les transforms directement en RAM
+console (`POST …?offset=&size=`) pendant que le jeu tourne — l'indice
+d'entité est l'indice du fichier `.psc` (ordre topologique).
+
 ## 4. Limites v1 & évolution
 - Pas de noms dans le binaire (debug uniquement côté JSON/éditeur).
-- Composants futurs (Camera, Light multiples, Collider, Script, AudioSource)
+- Composants futurs (Camera, Light multiples, Collider, AudioSource)
   viendront comme nouvelles tables adressées par de nouveaux offsets
-  d'en-tête — sans rupture tant que le layout existant est stable.
+  d'en-tête — sans rupture tant que le layout existant est stable
+  (le composant Script est arrivé exactement comme ça en v1.1).
 - Le placement VRAM reste celui des TIMs (packing assisté en Phase 3).
 - Toute rupture incrémente `version` ; le runtime rejette l'inconnu.

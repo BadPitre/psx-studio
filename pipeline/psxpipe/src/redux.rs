@@ -126,6 +126,98 @@ impl ReduxClient {
     }
 }
 
+/* --------------------------------------------------------- live tweak -- */
+
+/// Balise écrite par le runtime (engine/scene.c) : localisable dans un
+/// dump RAM par son magic, elle décrit la table d'entités pour piloter
+/// les transforms depuis l'éditeur pendant que le jeu tourne.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Beacon {
+    pub entity_size: u16,
+    /// Adresse console (KSEG) de entities[0].
+    pub entities_addr: u32,
+    pub entity_count: u16,
+    pub pos_offset: u16,
+    pub rot_offset: u16,
+    pub scale_offset: u16,
+}
+
+const BEACON_MAGIC: &[u8; 12] = b"PSXSTUDIOBCN";
+
+/// Cherche la balise dans un dump RAM complet.
+pub fn find_beacon(ram: &[u8]) -> Option<Beacon> {
+    let pos = ram
+        .windows(BEACON_MAGIC.len())
+        .position(|w| w == BEACON_MAGIC)?;
+    let b = &ram[pos..];
+    if b.len() < 28 {
+        return None;
+    }
+    let u16at = |o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
+    let version = u16at(12);
+    if version != 1 {
+        return None;
+    }
+    Some(Beacon {
+        entity_size: u16at(14),
+        entities_addr: u32::from_le_bytes(b[16..20].try_into().unwrap()),
+        entity_count: u16at(20),
+        pos_offset: u16at(22),
+        rot_offset: u16at(24),
+        scale_offset: u16at(26),
+    })
+}
+
+impl ReduxClient {
+    /// Dump la RAM et localise la balise du runtime.
+    pub fn locate_beacon(&self) -> Result<Beacon, String> {
+        let ram = self.read_ram()?;
+        find_beacon(&ram).ok_or_else(|| {
+            "balise PSX Studio introuvable en RAM (le jeu tourne-t-il ?)".into()
+        })
+    }
+
+    /// Écrit la transform locale d'une entité (live tweaking). La rotation
+    /// est en unités PS1 (4096 = tour), l'échelle en 4.12.
+    pub fn write_entity_transform(
+        &self,
+        beacon: &Beacon,
+        index: u16,
+        pos: [i32; 3],
+        rot: [i16; 3],
+        scale: [i16; 3],
+    ) -> Result<(), String> {
+        if index >= beacon.entity_count {
+            return Err(format!(
+                "entité {index} hors limite ({} dans la scène)",
+                beacon.entity_count
+            ));
+        }
+        // Adresse KSEG -> offset dans la RAM physique (2 Mo miroités).
+        let base = (beacon.entities_addr & 0x001f_ffff)
+            + index as u32 * beacon.entity_size as u32;
+
+        let mut pos_bytes = Vec::with_capacity(12);
+        for c in pos {
+            pos_bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        self.write_ram(base + beacon.pos_offset as u32, &pos_bytes)?;
+
+        let mut rot_bytes = Vec::with_capacity(6);
+        for c in rot {
+            rot_bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        self.write_ram(base + beacon.rot_offset as u32, &rot_bytes)?;
+
+        let mut scale_bytes = Vec::with_capacity(6);
+        for c in scale {
+            scale_bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        self.write_ram(base + beacon.scale_offset as u32, &scale_bytes)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +289,76 @@ mod tests {
         let client = ReduxClient::new(1);
         let err = client.status().unwrap_err();
         assert!(err.contains("injoignable"), "{err}");
+    }
+
+    /// Construit un faux dump RAM avec une balise à l'offset donné.
+    fn ram_with_beacon(offset: usize, version: u16) -> Vec<u8> {
+        let mut ram = vec![0u8; 64 * 1024];
+        let b = &mut ram[offset..];
+        b[..12].copy_from_slice(BEACON_MAGIC);
+        b[12..14].copy_from_slice(&version.to_le_bytes());
+        b[14..16].copy_from_slice(&112u16.to_le_bytes()); // entity_size
+        b[16..20].copy_from_slice(&0x8003_4a20u32.to_le_bytes()); // entities_addr
+        b[20..22].copy_from_slice(&7u16.to_le_bytes()); // entity_count
+        b[22..24].copy_from_slice(&0u16.to_le_bytes()); // pos_offset
+        b[24..26].copy_from_slice(&12u16.to_le_bytes()); // rot_offset
+        b[26..28].copy_from_slice(&20u16.to_le_bytes()); // scale_offset
+        ram
+    }
+
+    #[test]
+    fn beacon_found_in_ram_dump() {
+        let ram = ram_with_beacon(0x1234, 1);
+        let b = find_beacon(&ram).expect("balise non trouvée");
+        assert_eq!(
+            b,
+            Beacon {
+                entity_size: 112,
+                entities_addr: 0x8003_4a20,
+                entity_count: 7,
+                pos_offset: 0,
+                rot_offset: 12,
+                scale_offset: 20,
+            }
+        );
+    }
+
+    #[test]
+    fn beacon_absent_or_wrong_version_is_none() {
+        assert_eq!(find_beacon(&vec![0u8; 4096]), None);
+        assert_eq!(find_beacon(&ram_with_beacon(64, 2)), None);
+    }
+
+    #[test]
+    fn write_entity_transform_targets_physical_ram() {
+        let ram = ram_with_beacon(0, 1);
+        let beacon = find_beacon(&ram).unwrap();
+        // Adresse KSEG 0x80034a20 -> physique 0x34a20 ; entité 2.
+        let base = 0x34a20 + 2 * 112;
+
+        let (port, server) = fake_redux();
+        let client = ReduxClient::new(port);
+        client
+            .write_entity_transform(&beacon, 2, [10, -20, 30], [0, 1024, 0], [4096, 4096, 4096])
+            .unwrap();
+        let seen = server.join().unwrap();
+        assert_eq!(
+            seen[0],
+            format!("POST /api/v1/cpu/ram/raw?offset={base}&size=12 HTTP/1.1")
+        );
+        assert_eq!(
+            seen[1],
+            format!("POST /api/v1/cpu/ram/raw?offset={}&size=6 HTTP/1.1", base + 12)
+        );
+        assert_eq!(
+            seen[2],
+            format!("POST /api/v1/cpu/ram/raw?offset={}&size=6 HTTP/1.1", base + 20)
+        );
+
+        // Index hors limites : erreur claire, aucune requête.
+        let err = client
+            .write_entity_transform(&beacon, 7, [0; 3], [0; 3], [0; 3])
+            .unwrap_err();
+        assert!(err.contains("hors limite"), "{err}");
     }
 }

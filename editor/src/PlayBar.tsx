@@ -4,11 +4,19 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./bridge";
 
-const PORT = 8080;
+export const PLAY_PORT = 8080;
+const PORT = PLAY_PORT;
 
 type PlayState = "idle" | "building" | "launched" | "error";
 
-export function PlayBar({ projectDir }: { projectDir: string | null }) {
+export function PlayBar({
+  projectDir,
+  onRunningChange,
+}: {
+  projectDir: string | null;
+  /** Live tweaking : signale si le jeu tourne dans l'émulateur. */
+  onRunningChange?: (running: boolean) => void;
+}) {
   const [state, setState] = useState<PlayState>("idle");
   const [message, setMessage] = useState("");
   const [running, setRunning] = useState<boolean | null>(null);
@@ -20,6 +28,10 @@ export function PlayBar({ projectDir }: { projectDir: string | null }) {
   useEffect(() => {
     localStorage.setItem("psxstudio.emulator", emulator);
   }, [emulator]);
+
+  useEffect(() => {
+    onRunningChange?.(state === "launched" && running === true);
+  }, [state, running, onRunningChange]);
 
   /* Poll du statut quand l'émulateur est lancé. */
   useEffect(() => {
@@ -81,7 +93,10 @@ export function PlayBar({ projectDir }: { projectDir: string | null }) {
           <button
             className="button"
             disabled={running === null}
-            onClick={() => api.reduxReset(PORT)}
+            onClick={() => {
+              api.reduxReset(PORT);
+              api.reduxClearBeacon().catch(() => {});
+            }}
           >
             ↺ Reset
           </button>

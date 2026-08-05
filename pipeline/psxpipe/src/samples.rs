@@ -369,13 +369,95 @@ pub fn write_all(dir: &Path) -> Result<(), String> {
     std::fs::write(dir.join("ground.gltf"), ground.to_gltf("Ground", "ground.bin"))
         .map_err(|e| e.to_string())?;
 
+    let guy = guy_mesh();
+    std::fs::write(dir.join("guy.bin"), guy.to_bin()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("guy.gltf"), guy.to_gltf("Guy", "guy.bin"))
+        .map_err(|e| e.to_string())?;
+
     let size = 256u32;
     for (name, rgba) in [("checker.png", checker_rgba(size)), ("house.png", house_rgba(size))] {
         let img: image::RgbaImage =
             image::ImageBuffer::from_raw(size, size, rgba).ok_or("buffer size mismatch")?;
         img.save(dir.join(name)).map_err(|e| e.to_string())?;
     }
+    let img: image::RgbaImage =
+        image::ImageBuffer::from_raw(64, 64, guy_rgba(64)).ok_or("buffer size mismatch")?;
+    img.save(dir.join("guy.png")).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+impl MeshData {
+    /// Boîte axis-alignée : 6 quads CCW vers l'extérieur, tous mappés sur
+    /// le même rectangle UV (zones de couleur d'un atlas).
+    fn box_at(&mut self, center: [f32; 3], half: [f32; 3], uv: [[f32; 2]; 2]) {
+        let faces: [([f32; 3], [f32; 3], [f32; 3]); 6] = [
+            ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            ([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+            ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
+            ([0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+        ];
+        let ([u0, v0], [u1, v1]) = (uv[0], uv[1]);
+        for (n, u, v) in faces {
+            let corner = |su: f32, sv: f32| {
+                [
+                    center[0] + (n[0] + u[0] * su + v[0] * sv) * half[0],
+                    center[1] + (n[1] + u[1] * su + v[1] * sv) * half[1],
+                    center[2] + (n[2] + u[2] * su + v[2] * sv) * half[2],
+                ]
+            };
+            self.quad(
+                [corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)],
+                n,
+                [[u0, v0], [u1, v0], [u1, v1], [u0, v1]],
+            );
+        }
+    }
+}
+
+/// Personnage low-poly (4 boîtes, 48 tris) : jambes, torse, tête.
+/// Atlas 64×64 : peau (quart haut-gauche), chemise (haut-droit),
+/// pantalon (bas-gauche).
+pub fn guy_mesh() -> MeshData {
+    let mut m = MeshData {
+        positions: Vec::new(),
+        normals: Vec::new(),
+        uvs: Vec::new(),
+        indices: Vec::new(),
+    };
+    let skin = [[0.02, 0.02], [0.48, 0.48]];
+    let shirt = [[0.52, 0.02], [0.98, 0.48]];
+    let pants = [[0.02, 0.52], [0.48, 0.98]];
+
+    m.box_at([-0.14, 0.22, 0.0], [0.11, 0.22, 0.13], pants); // jambe G
+    m.box_at([0.14, 0.22, 0.0], [0.11, 0.22, 0.13], pants); //  jambe D
+    m.box_at([0.0, 0.7, 0.0], [0.3, 0.27, 0.17], shirt); //    torse
+    m.box_at([0.0, 1.12, 0.0], [0.17, 0.19, 0.17], skin); //   tête
+    m
+}
+
+/// Atlas 64×64 du personnage : peau + cheveux, chemise, pantalon.
+pub fn guy_rgba(size: u32) -> Vec<u8> {
+    let half = size / 2;
+    let mut out = Vec::with_capacity((size * size * 4) as usize);
+    for y in 0..size {
+        for x in 0..size {
+            let c: [u8; 3] = if y < half && x < half {
+                // Peau, avec une bande cheveux en haut du quart.
+                if y < half / 4 { [72, 48, 32] } else { [222, 178, 138] }
+            } else if y < half {
+                // Chemise à liseré.
+                if y % 12 < 2 { [40, 84, 140] } else { [58, 112, 180] }
+            } else if x < half {
+                [52, 48, 66] // pantalon
+            } else {
+                [40, 40, 40]
+            };
+            out.extend_from_slice(&[c[0], c[1], c[2], 255]);
+        }
+    }
+    out
 }
 
 /// Flat ground plane subdivided into an NxN grid, one full texture repeat
@@ -420,12 +502,14 @@ pub fn scene_village_json() -> &'static str {
   "assets": {
     "textures": [
       { "id": "checker_tex", "tim": "checker.tim" },
-      { "id": "house_tex",   "tim": "house.tim" }
+      { "id": "house_tex",   "tim": "house.tim" },
+      { "id": "guy_tex",     "tim": "guy.tim" }
     ],
     "models": [
       { "id": "cube",   "pmd": "cube.pmd",   "texture": "checker_tex" },
       { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
-      { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" }
+      { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" },
+      { "id": "guy",    "pmd": "guy.pmd",    "texture": "guy_tex" }
     ]
   },
   "entities": [
@@ -433,7 +517,9 @@ pub fn scene_village_json() -> &'static str {
     { "name": "maison1", "position": [-160, 0, 120], "rotation": [0, 35, 0],  "model": "house" },
     { "name": "cheminee", "parent": "maison1", "position": [40, -105, 25], "scale": [0.14, 0.3, 0.14], "model": "cube" },
     { "name": "maison2", "position": [170, 0, 190],  "rotation": [0, -30, 0], "model": "house" },
-    { "name": "maison3", "position": [10, 0, 330],   "rotation": [0, 180, 0], "scale": [1.3, 1.3, 1.3], "model": "house" }
+    { "name": "maison3", "position": [10, 0, 330],   "rotation": [0, 180, 0], "scale": [1.3, 1.3, 1.3], "model": "house" },
+    { "name": "perso",   "position": [0, 0, -60],    "scale": [0.5, 0.5, 0.5], "model": "guy", "script": "player" },
+    { "name": "pnj",     "position": [60, 0, 290],   "scale": [0.5, 0.5, 0.5], "model": "guy", "script": "npc" }
   ]
 }
 "#
@@ -577,10 +663,19 @@ pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
         let (pmd, _) = gltf_import::import(&dir.join(gltf_name), &Default::default())?;
         std::fs::write(dir.join(pmd_name), pmd.write()?).map_err(|e| e.to_string())?;
     }
+    // Le personnage : UVs mappées sur son atlas 64×64.
+    let guy_opts = gltf_import::ImportOptions {
+        tex_w: 64,
+        tex_h: 64,
+        ..Default::default()
+    };
+    let (guy_pmd, _) = gltf_import::import(&dir.join("guy.gltf"), &guy_opts)?;
+    std::fs::write(dir.join("guy.pmd"), guy_pmd.write()?).map_err(|e| e.to_string())?;
 
     let layouts = [
         ("checker.png", "checker.tim", 320u16, 0u16, 320u16, 256u16),
         ("house.png", "house.tim", 448, 0, 320, 257),
+        ("guy.png", "guy.tim", 576, 0, 320, 258),
     ];
     for (png, tim_name, org_x, org_y, clut_x, clut_y) in layouts {
         let img = image::open(dir.join(png))

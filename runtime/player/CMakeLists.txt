@@ -12,8 +12,8 @@ project(
 
 psn00bsdk_add_executable(player GPREL
 	main.c
-	scene.c
 	${PROJECT_SOURCE_DIR}/../engine/pmd.c
+	${PROJECT_SOURCE_DIR}/../engine/scene.c
 )
 target_include_directories(player PRIVATE ${PROJECT_SOURCE_DIR}/../engine)
 

@@ -18,11 +18,13 @@ fn setup_project(dir: &std::path::Path) {
           "models": [
             { "gltf": "assets/cube.gltf",   "out": "cube.pmd" },
             { "gltf": "assets/ground.gltf", "out": "ground.pmd" },
-            { "gltf": "assets/house.gltf",  "out": "house.pmd" }
+            { "gltf": "assets/house.gltf",  "out": "house.pmd" },
+            { "gltf": "assets/guy.gltf",    "out": "guy.pmd", "tex_w": 64, "tex_h": 64 }
           ],
           "textures": [
             { "png": "assets/checker.png", "out": "checker.tim", "bpp": 8 },
-            { "png": "assets/house.png",   "out": "house.tim",   "bpp": 8 }
+            { "png": "assets/house.png",   "out": "house.tim",   "bpp": 8 },
+            { "png": "assets/guy.png",     "out": "guy.tim",     "bpp": 8 }
           ],
           "scenes": ["scenes/scene0.json", "scenes/scene1.json"],
           "sfx": [{ "wav": "audio/sfx.wav", "out": "BLIP.VAG" }],
@@ -38,8 +40,8 @@ fn full_project_build_and_cache() {
     setup_project(dir.path());
 
     let report = project::build(dir.path(), false).unwrap();
-    // 3 models + 2 textures + 1 sfx converted on the first run.
-    assert_eq!(report.converted, 6);
+    // 4 models + 3 textures + 1 sfx converted on the first run.
+    assert_eq!(report.converted, 8);
     assert_eq!(report.cached, 0);
     assert_eq!(report.scenes.len(), 2);
 
@@ -63,7 +65,7 @@ fn full_project_build_and_cache() {
     // Second run: everything cached.
     let report2 = project::build(dir.path(), false).unwrap();
     assert_eq!(report2.converted, 0);
-    assert_eq!(report2.cached, 6);
+    assert_eq!(report2.cached, 8);
 
     // Changing a source (valid but different image) invalidates only it.
     let png = dir.path().join("assets/checker.png");
@@ -72,7 +74,7 @@ fn full_project_build_and_cache() {
     img.save(&png).unwrap();
     let report3 = project::build(dir.path(), false).unwrap();
     assert_eq!(report3.converted, 1);
-    assert_eq!(report3.cached, 5);
+    assert_eq!(report3.cached, 7);
 }
 
 #[test]

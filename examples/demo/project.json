@@ -1,14 +1,16 @@
 {
   "name": "demo",
-  "exe": "../../runtime/player/build/player.exe",
+  "exe": "../../runtime/game/build/game.exe",
   "models": [
     { "gltf": "assets/cube.gltf",   "out": "cube.pmd" },
     { "gltf": "assets/ground.gltf", "out": "ground.pmd" },
-    { "gltf": "assets/house.gltf",  "out": "house.pmd" }
+    { "gltf": "assets/house.gltf",  "out": "house.pmd" },
+    { "gltf": "assets/guy.gltf",    "out": "guy.pmd", "tex_w": 64, "tex_h": 64 }
   ],
   "textures": [
     { "png": "assets/checker.png", "out": "checker.tim", "bpp": 8 },
-    { "png": "assets/house.png",   "out": "house.tim",   "bpp": 8 }
+    { "png": "assets/house.png",   "out": "house.tim",   "bpp": 8 },
+    { "png": "assets/guy.png",     "out": "guy.tim",     "bpp": 8 }
   ],
   "scenes": ["scenes/scene0.json", "scenes/scene1.json"],
   "sfx": [

@@ -112,6 +112,20 @@ pub struct EntityJson {
     pub scale: [f32; 3],
     #[serde(default)]
     pub model: Option<String>,
+    /// Nom du script C attaché (OnStart/OnUpdate), résolu par hash côté
+    /// runtime dans le registre compilé avec le jeu.
+    #[serde(default)]
+    pub script: Option<String>,
+}
+
+/// Hash FNV-1a 32 bits d'un nom de script (le runtime fait le même calcul).
+pub fn script_hash(name: &str) -> u32 {
+    let mut h = 0x811c9dc5u32;
+    for b in name.bytes() {
+        h ^= b.to_ascii_lowercase() as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
 }
 
 /* -------------------------------------------------------------- report -- */
@@ -367,6 +381,21 @@ pub fn build_with_options(
         pos_to_sorted[original] = sorted as u16;
     }
 
+    /* Scripts référencés (indices stables, dans l'ordre de première
+     * apparition) — la table de hashes permet au runtime de résoudre les
+     * fonctions par nom, indépendamment de l'ordre du registre compilé. */
+    let mut script_names: Vec<String> = Vec::new();
+    for &i in &order {
+        if let Some(s) = &scene.entities[i].script {
+            if !script_names.iter().any(|n| n == s) {
+                script_names.push(s.clone());
+            }
+        }
+    }
+    if script_names.len() >= u16::MAX as usize {
+        return Err("too many scripts".into());
+    }
+
     /* Serialize entities in sorted order. */
     let mut entities = Vec::with_capacity(n * ENTITY_SIZE);
     for &i in &order {
@@ -408,14 +437,23 @@ pub fn build_with_options(
         };
         entities.extend_from_slice(&parent.to_le_bytes());
         entities.extend_from_slice(&model.to_le_bytes());
-        entities.extend_from_slice(&[0, 0, 0, 0]); // flags + pad
+        entities.extend_from_slice(&0u16.to_le_bytes()); // flags
+        // Script : indice+1 dans la table (0 = aucun) — les fichiers
+        // antérieurs ont 0 ici, donc restent valides.
+        let script_ref = match &e.script {
+            Some(s) => (script_names.iter().position(|n| n == s).unwrap() + 1) as u16,
+            None => 0,
+        };
+        entities.extend_from_slice(&script_ref.to_le_bytes());
     }
 
-    /* Layout: header | model table | texture table | entities | blobs. */
+    /* Layout: header | model table | texture table | entities | scripts
+     * (table de hashes) | blobs. */
     let models_offset = HEADER_SIZE;
     let textures_offset = models_offset + model_blobs.len() * MODEL_ENTRY_SIZE;
     let entities_offset = textures_offset + texture_blobs.len() * TEXTURE_ENTRY_SIZE;
-    let mut blob_cursor = entities_offset + entities.len();
+    let scripts_offset = entities_offset + entities.len();
+    let mut blob_cursor = scripts_offset + script_names.len() * 4;
 
     let align4 = |v: usize| (v + 3) & !3;
     let mut model_entries = Vec::new();
@@ -478,10 +516,16 @@ pub fn build_with_options(
     for c in toward {
         out.extend_from_slice(&c.to_le_bytes());
     }
+    // Extension v1.1 dans les octets réservés : table des scripts.
+    out.extend_from_slice(&(script_names.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(scripts_offset as u32).to_le_bytes());
     out.resize(HEADER_SIZE, 0); // reserved
     out.extend_from_slice(&model_entries);
     out.extend_from_slice(&texture_entries);
     out.extend_from_slice(&entities);
+    for name in &script_names {
+        out.extend_from_slice(&script_hash(name).to_le_bytes());
+    }
     for (offset, (blob, _)) in model_offsets.iter().zip(&model_blobs) {
         out.resize(*offset, 0);
         out.extend_from_slice(blob);
@@ -537,6 +581,8 @@ pub struct PscHeader {
     pub ambient: [u8; 3],
     pub light_color: [u8; 3],
     pub light_toward: [i16; 3],
+    pub script_count: u16,
+    pub scripts_offset: u32,
 }
 
 pub fn parse_header(data: &[u8]) -> Result<PscHeader, String> {
@@ -562,6 +608,8 @@ pub fn parse_header(data: &[u8]) -> Result<PscHeader, String> {
         ambient: [data[36], data[37], data[38]],
         light_color: [data[40], data[41], data[42]],
         light_toward: [i16at(44), i16at(46), i16at(48)],
+        script_count: u16at(50),
+        scripts_offset: u32at(52),
     };
     if h.version != VERSION {
         return Err(format!("unsupported PSC version {}", h.version));

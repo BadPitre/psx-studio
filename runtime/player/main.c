@@ -36,6 +36,11 @@
 #include "pmd.h"
 #include "scene.h"
 
+/* Le player (Phase 2-3) n'embarque aucun script de gameplay : registre
+ * vide, les entites scriptees d'une scene sont simplement statiques. */
+const ScriptDef g_scripts[1] = {{0, 0, 0}};
+const int g_script_count = 0;
+
 #define OT_LENGTH		1024
 #define BUFFER_LENGTH	32768
 
@@ -377,6 +382,10 @@ int main(int argc, const char** argv)
 
 		MATRIX view;
 		CameraMatrix(&cam, &view);
+
+		/* Les transforms sont mutables depuis la Phase 5 : recalcul des
+		 * matrices monde a chaque frame (necessaire au live tweaking). */
+		Scene_UpdateWorld(&scene);
 
 		RenderBuffer* draw_buffer = &ctx.buffers[ctx.active_buffer];
 		ctx.next_packet = Scene_Draw(&scene, &view, draw_buffer->ot, OT_LENGTH,

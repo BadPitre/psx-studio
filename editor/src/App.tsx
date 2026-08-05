@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parsePsc, sceneTriangleCount, type PscScene } from "./formats/psc";
 import { Viewport } from "./viewport/Viewport";
 import { api, isTauri, onFileDrop, pickProjectDir, type ProjectInfo } from "./bridge";
-import { PlayBar } from "./PlayBar";
+import { PlayBar, PLAY_PORT } from "./PlayBar";
 import { VramPanel } from "./VramPanel";
 
 type Transform = {
@@ -180,6 +180,8 @@ function Inspector({
   currentModelId,
   onRename,
   onModelChange,
+  script,
+  onScriptChange,
   focusNameSignal,
 }: {
   scene: PscScene;
@@ -191,6 +193,8 @@ function Inspector({
   currentModelId?: string | null;
   onRename?: (name: string) => void;
   onModelChange?: (id: string | null) => void;
+  script?: string | null;
+  onScriptChange?: (script: string | null) => void;
   focusNameSignal?: number;
 }) {
   const entity = scene.entities[selected];
@@ -199,6 +203,8 @@ function Inspector({
   const [draftName, setDraftName] = useState(name);
   const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => setDraftName(name), [name]);
+  const [draftScript, setDraftScript] = useState(script ?? "");
+  useEffect(() => setDraftScript(script ?? ""), [script, selected]);
   /* F2 / menu « Renommer » : focus + sélection du champ nom. */
   useEffect(() => {
     if (focusNameSignal) {
@@ -276,6 +282,28 @@ function Inspector({
           <div className="field-readonly">parent : entité {entity.parent}</div>
         )}
       </div>
+      {onScriptChange && (
+        <div className="field-group">
+          <div className="field-group-title">Script</div>
+          <input
+            className="name-input"
+            value={draftScript}
+            placeholder="(aucun script)"
+            spellCheck={false}
+            onChange={(e) => setDraftScript(e.target.value)}
+            onBlur={() => {
+              const trimmed = draftScript.trim();
+              if (trimmed !== (script ?? "")) onScriptChange(trimmed || null);
+            }}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            title="Nom du script runtime (résolu par hash au chargement de la scène, ex. player, npc)"
+          />
+          <div className="hint">
+            Doit correspondre à un ScriptDef enregistré dans le jeu
+            (<code>g_scripts</code>).
+          </div>
+        </div>
+      )}
       <div className="hint">
         Position en unités monde (+Y vers le bas).{" "}
         {isTauri
@@ -307,6 +335,15 @@ export default function App() {
   const [renameFocus, setRenameFocus] = useState(0);
   const rebuildTimer = useRef<number>(0);
   const clipboardRef = useRef<Record<string, unknown> | null>(null);
+
+  /* Live tweaking : quand le jeu tourne dans PCSX-Redux, les éditions de
+     transform sont aussi écrites dans la RAM console (via la balise du
+     runtime). gameRunningRef évite de recréer editTransform à chaque poll. */
+  const gameRunningRef = useRef(false);
+  const liveSyncTimer = useRef<number>(0);
+  const onRunningChange = useCallback((running: boolean) => {
+    gameRunningRef.current = running;
+  }, []);
 
   const loadBuffer = useCallback((name: string, buffer: ArrayBuffer) => {
     try {
@@ -391,6 +428,23 @@ export default function App() {
       next.set(index, t);
       setOverrides(next);
       if (!isTauri || !sceneDoc || !project) return;
+
+      /* Live tweaking : pousser la transform dans la RAM console. Légère
+         temporisation pour ne pas mitrailler l'API pendant une saisie. */
+      if (gameRunningRef.current) {
+        window.clearTimeout(liveSyncTimer.current);
+        liveSyncTimer.current = window.setTimeout(() => {
+          api
+            .reduxSyncEntity(
+              PLAY_PORT,
+              index,
+              t.pos.map(Math.round) as [number, number, number],
+              t.rot.map(Math.round) as [number, number, number],
+              t.scale.map((s) => Math.round(s * 4096)) as [number, number, number],
+            )
+            .catch(() => {}); // balise absente (boot, vieux build) : silencieux
+        }, 80);
+      }
 
       const name = entityNames[index];
       const doc = structuredClone(sceneDoc);
@@ -484,6 +538,20 @@ export default function App() {
         if (!entity) return;
         if (modelId) entity.model = modelId;
         else delete entity.model;
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
+  const setEntityScript = useCallback(
+    (script: string | null) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity) return;
+        if (script) entity.script = script;
+        else delete entity.script;
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -628,12 +696,12 @@ export default function App() {
   }, [loadBuffer]);
 
   const modelIds = sceneDoc?.assets?.models?.map((m) => m.id);
-  const currentModelId =
+  const selectedJsonEntity =
     selected >= 0 && sceneDoc
-      ? ((sceneDoc.entities?.find((e) => e.name === entityNames[selected])?.model as
-          | string
-          | undefined) ?? null)
-      : null;
+      ? sceneDoc.entities?.find((e) => e.name === entityNames[selected])
+      : undefined;
+  const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
+  const currentScript = (selectedJsonEntity?.script as string | undefined) ?? null;
 
   const currentTransform: Transform | null =
     scene && selected >= 0
@@ -704,7 +772,9 @@ export default function App() {
         {notice && <span className="muted">{notice}</span>}
         {error && <span className="error">{error}</span>}
       </header>
-      {isTauri && <PlayBar projectDir={project?.dir ?? null} />}
+      {isTauri && (
+        <PlayBar projectDir={project?.dir ?? null} onRunningChange={onRunningChange} />
+      )}
       <main className="layout">
         {scene ? (
           <>
@@ -764,6 +834,8 @@ export default function App() {
                 currentModelId={currentModelId}
                 onRename={isTauri && sceneDoc ? renameEntity : undefined}
                 onModelChange={isTauri && sceneDoc ? setEntityModel : undefined}
+                script={currentScript}
+                onScriptChange={isTauri && sceneDoc ? setEntityScript : undefined}
                 focusNameSignal={renameFocus}
               />
             ) : (

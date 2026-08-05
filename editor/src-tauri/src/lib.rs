@@ -219,6 +219,8 @@ fn play(
         }
     }
     let port = port.unwrap_or(psxpipe::redux::DEFAULT_PORT);
+    // Nouvelle exécution -> la balise live-tweak devra être relocalisée.
+    *BEACON.lock().unwrap() = None;
     let args = psxpipe::redux::launch_args(&summary.cue_path, port);
     Command::new(&emulator)
         .args(&args)
@@ -248,6 +250,52 @@ fn redux_reset(port: Option<u16>) -> Result<(), String> {
     psxpipe::redux::ReduxClient::new(port.unwrap_or(psxpipe::redux::DEFAULT_PORT)).reset()
 }
 
+/* --------------------------------------------------------- live tweak -- */
+
+// Balise mémorisée après le premier scan RAM : la localiser coûte un dump
+// de 2 Mo, la réutiliser coûte trois petits POST.
+static BEACON: std::sync::Mutex<Option<psxpipe::redux::Beacon>> = std::sync::Mutex::new(None);
+
+/// À appeler quand la cible change (nouveau Play, reset, autre scène) :
+/// la balise sera relocalisée au prochain sync.
+#[tauri::command]
+fn redux_clear_beacon() {
+    *BEACON.lock().unwrap() = None;
+}
+
+/// Écrit la transform d'une entité dans la RAM console pendant que le jeu
+/// tourne. `index` est l'indice dans l'ordre du fichier .psc (entity_names).
+/// Rotation en unités PS1 (4096 = tour), échelle en 4.12.
+#[tauri::command]
+fn redux_sync_entity(
+    port: Option<u16>,
+    index: u16,
+    pos: [i32; 3],
+    rot: [i16; 3],
+    scale: [i16; 3],
+) -> Result<(), String> {
+    let client =
+        psxpipe::redux::ReduxClient::new(port.unwrap_or(psxpipe::redux::DEFAULT_PORT));
+    let cached = *BEACON.lock().unwrap();
+    let beacon = match cached {
+        Some(b) => b,
+        None => {
+            let b = client.locate_beacon()?;
+            *BEACON.lock().unwrap() = Some(b);
+            b
+        }
+    };
+    match client.write_entity_transform(&beacon, index, pos, rot, scale) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // La balise peut être périmée (reset, autre build) : on
+            // invalide pour retenter proprement au prochain appel.
+            *BEACON.lock().unwrap() = None;
+            Err(e)
+        }
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -263,6 +311,8 @@ pub fn run() {
             redux_pause,
             redux_resume,
             redux_reset,
+            redux_clear_beacon,
+            redux_sync_entity,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de PSX Studio");

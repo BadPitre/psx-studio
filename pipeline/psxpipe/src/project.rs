@@ -41,6 +41,11 @@ pub struct ModelSrc {
     pub out: String,
     #[serde(default)]
     pub size: Option<i32>,
+    /// Dimensions de la texture associée (mapping des UV, défaut 256).
+    #[serde(default)]
+    pub tex_w: Option<u32>,
+    #[serde(default)]
+    pub tex_h: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -184,13 +189,21 @@ pub fn build(project_dir: &Path, force: bool) -> Result<BuildReport, String> {
     for model in &project.models {
         let src = project_dir.join(&model.gltf);
         let out = library.join(&model.out);
-        let hash = format!("{}:{}", hash_gltf(&src)?, model.size.unwrap_or(128));
+        let hash = format!(
+            "{}:{}:{}x{}",
+            hash_gltf(&src)?,
+            model.size.unwrap_or(128),
+            model.tex_w.unwrap_or(256),
+            model.tex_h.unwrap_or(256)
+        );
         if !force && cache.is_fresh(&model.gltf, &hash, &out) {
             report.cached += 1;
             continue;
         }
         let opts = gltf_import::ImportOptions {
             target_size: model.size.unwrap_or(128),
+            tex_w: model.tex_w.unwrap_or(256),
+            tex_h: model.tex_h.unwrap_or(256),
             ..Default::default()
         };
         let (pmd, import_report) = gltf_import::import(&src, &opts)?;

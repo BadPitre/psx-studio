@@ -73,4 +73,13 @@ export const api = {
   reduxPause: (port: number) => tauriInvoke<void>("redux_pause", { port }),
   reduxResume: (port: number) => tauriInvoke<void>("redux_resume", { port }),
   reduxReset: (port: number) => tauriInvoke<void>("redux_reset", { port }),
+  /** Live tweaking : écrit la transform d'une entité dans la RAM console. */
+  reduxSyncEntity: (
+    port: number,
+    index: number,
+    pos: [number, number, number],
+    rot: [number, number, number],
+    scale: [number, number, number],
+  ) => tauriInvoke<void>("redux_sync_entity", { port, index, pos, rot, scale }),
+  reduxClearBeacon: () => tauriInvoke<void>("redux_clear_beacon"),
 };
