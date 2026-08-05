@@ -41,7 +41,8 @@ function Hierarchy({
   names: string[];
   selected: number;
   onSelect: (i: number) => void;
-  onAdd?: () => void;
+  /** Ouvre le menu « ajouter » (GameObject / Lumière / Caméra). */
+  onAdd?: (x: number, y: number) => void;
   onContextMenu?: (i: number, x: number, y: number) => void;
 }) {
   const depths = useMemo(() => {
@@ -57,7 +58,15 @@ function Hierarchy({
       <div className="panel-title">Hiérarchie</div>
       {onAdd && (
         <div className="hierarchy-tools">
-          <button className="button" onClick={onAdd} title="Nouvelle entité">
+          <button
+            className="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = (e.target as HTMLElement).getBoundingClientRect();
+              onAdd(r.left, r.bottom + 4);
+            }}
+            title="Ajouter : GameObject, lumière ou caméra"
+          >
             ＋
           </button>
           <span
@@ -442,6 +451,7 @@ export default function App() {
   const [entityNames, setEntityNames] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [renameFocus, setRenameFocus] = useState(0);
   const rebuildTimer = useRef<number>(0);
   const clipboardRef = useRef<Record<string, unknown> | null>(null);
@@ -664,13 +674,37 @@ export default function App() {
     [sceneDoc],
   );
 
-  const addEntity = useCallback(() => {
-    const name = uniqueName("entite");
-    mutateDoc((doc) => {
-      doc.entities = doc.entities ?? [];
-      doc.entities.push({ name, position: [0, 0, 0] });
-    }, name);
-  }, [mutateDoc, uniqueName]);
+  /* Ajout par type : GameObject vide, lumière (orientée vers le sol,
+     couleur chaude) ou caméra (recul + regard vers l'origine, la scène
+     dans le cadre). */
+  const addEntity = useCallback(
+    (kind: "empty" | "light" | "camera") => {
+      const base =
+        kind === "light" ? "lumiere" : kind === "camera" ? "camera" : "entite";
+      const name = uniqueName(base);
+      mutateDoc((doc) => {
+        doc.entities = doc.entities ?? [];
+        if (kind === "light") {
+          doc.entities.push({
+            name,
+            position: [0, -200, 0],
+            rotation: [45, 30, 0],
+            light: { color: [255, 235, 200] },
+          });
+        } else if (kind === "camera") {
+          doc.entities.push({
+            name,
+            position: [0, -200, -420],
+            rotation: [-21, 180, 0],
+            camera: true,
+          });
+        } else {
+          doc.entities.push({ name, position: [0, 0, 0] });
+        }
+      }, name);
+    },
+    [mutateDoc, uniqueName],
+  );
 
   const duplicateEntity = useCallback(() => {
     if (selected < 0) return;
@@ -1083,11 +1117,23 @@ export default function App() {
               names={entityNames}
               selected={selected}
               onSelect={setSelected}
-              onAdd={isTauri && sceneDoc ? addEntity : undefined}
+              onAdd={isTauri && sceneDoc ? (x, y) => setAddMenu({ x, y }) : undefined}
               onContextMenu={
                 isTauri && sceneDoc ? (_, x, y) => setMenu({ x, y }) : undefined
               }
             />
+            {addMenu && (
+              <ContextMenu
+                x={addMenu.x}
+                y={addMenu.y}
+                onClose={() => setAddMenu(null)}
+                actions={[
+                  { label: "▣ GameObject", onClick: () => addEntity("empty") },
+                  { label: "☀ Lumière directionnelle", onClick: () => addEntity("light") },
+                  { label: "🎥 Caméra", onClick: () => addEntity("camera") },
+                ]}
+              />
+            )}
             {menu && (
               <ContextMenu
                 x={menu.x}
