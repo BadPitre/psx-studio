@@ -24,6 +24,7 @@ target/
 node_modules/
 dist/
 editor/src-tauri/target/
+editor/public/*.psc
 
 # Caches projet
 Library/
