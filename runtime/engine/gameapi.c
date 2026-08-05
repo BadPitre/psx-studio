@@ -11,6 +11,7 @@
 #include <psxgpu.h>
 #include <psxgte.h>
 #include <psxpad.h>
+#include <inline_c.h>	/* gte_SetGeomScreen (macro) */
 
 #include "engine.h"
 #include "gameapi.h"
