@@ -123,10 +123,14 @@ de triangles — surveille l'avertissement de budget.)
 - **VRAM** : bouton VRAM = carte des pages texture/CLUT réellement
   packées, avec % d'occupation et pages libres.
 - **Panneau Project** (bande du bas, comme Unity) : tout le contenu du
-  projet — scènes, modèles, textures, audio. Double-clic pour ouvrir
-  une scène ou importer un fichier marqué « non importé » ; clic droit
-  dans le vide → **Créer ▸ Scène**. Le badge « manquant » signale une
-  entrée de `project.json` dont le fichier a disparu.
+  projet — scènes, modèles, textures, audio — dans une arborescence de
+  dossiers **libre** : clic droit → **Créer ▸ Dossier** puis glisse tes
+  tuiles dedans pour ranger (le fichier bouge sur disque et
+  `project.json` suit tout seul). Double-clic pour ouvrir une scène ou
+  importer un fichier marqué « non importé » ; **Créer ▸ Scène** pour
+  démarrer une scène vide. Le badge « manquant » signale une entrée de
+  `project.json` dont le fichier a disparu. L'onglet **Console** à
+  côté garde le journal des imports, builds et erreurs.
 - **▶ Play** : build incrémental + PCSX-Redux. Pendant que le jeu tourne,
   déplacer une entité (gizmo ou inspecteur) **l'écrit dans la RAM
   console** : le décor bouge dans le jeu, sans rebuild.

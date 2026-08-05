@@ -389,12 +389,38 @@ body {
 .project-tab {
   background: none;
   border: none;
-  color: var(--text);
+  color: var(--muted);
   font-weight: 600;
   cursor: pointer;
   padding: 2px 6px;
 }
 .project-tab.active { color: var(--accent); }
+.project-collapse {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.project-caret {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.project-node.drop,
+.project-tile.drop,
+.project-grid.drop { outline: 1px dashed var(--accent); outline-offset: -1px; }
+.project-console {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 10px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+.console-line { padding: 1px 0; }
+.console-line.error { color: #e58c8c; }
+.console-time { color: var(--muted); margin-right: 10px; }
 .project-search {
   background: #14151a;
   border: 1px solid var(--panel-border);

@@ -62,7 +62,7 @@ export interface ProjectFile {
   path: string;
   name: string;
   section: string;
-  kind: "scene" | "model" | "texture" | "audio" | "buffer" | "other";
+  kind: "dir" | "scene" | "model" | "texture" | "audio" | "buffer" | "other";
   size: number;
   registered: boolean;
   exists: boolean;
@@ -76,6 +76,11 @@ export const api = {
   /** Crée une scène vide enregistrée ; retourne son chemin relatif. */
   createScene: (projectDir: string, name: string) =>
     tauriInvoke<string>("create_scene", { projectDir, name }),
+  createFolder: (projectDir: string, parent: string, name: string) =>
+    tauriInvoke<string>("create_folder", { projectDir, parent, name }),
+  /** Déplace un fichier vers un dossier et met à jour project.json. */
+  moveEntry: (projectDir: string, from: string, toDir: string) =>
+    tauriInvoke<string>("move_entry", { projectDir, from, toDir }),
   getModelSubdiv: (projectDir: string, pmdOut: string) =>
     tauriInvoke<number | null>("get_model_subdiv", { projectDir, pmdOut }),
   /** Écrit project.json et reconvertit le modèle ; retourne un résumé. */

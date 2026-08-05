@@ -75,10 +75,16 @@ Project/Assets d'Unity — navigation par dossiers, vignettes, et à
 terme drag & drop vers la hiérarchie/le viewport.
 
 1. ~~**Explorateur**~~ — **livré** : bande repliable sous le viewport,
-   sections (Scènes/Assets/Audio) avec compteurs à gauche, grille de
-   tuiles + recherche à droite. Le contenu croise le disque et
-   `project.json` : badge « non importé » (fichier présent, pas
-   enregistré) et « manquant » (enregistré, disparu du disque)
+   **arborescence de dossiers libre** à gauche (l'utilisateur crée ses
+   dossiers — « Créer ▸ Dossier » — et range par **drag & drop** d'une
+   tuile vers un dossier : le fichier bouge sur disque, project.json est
+   réécrit, le .bin d'un .gltf suit, la scène ouverte est rouverte à son
+   nouveau chemin ; l'import d'un fichier déjà dans le projet respecte
+   son emplacement), grille du dossier + recherche à droite. Le contenu
+   croise le disque et `project.json` : badge « non importé » (fichier
+   présent, pas enregistré) et « manquant » (enregistré, disparu).
+   Onglet **Console** à côté : journal horodaté des imports, builds et
+   erreurs (⚠ sur l'onglet si erreur), bouton Effacer
 2. **Vignettes** : icône par type pour l'instant ; aperçus rendus des
    modèles/textures à venir (rendu offscreen avec le shader PS1)
 3. ~~**Actions**~~ — **livré** : double-clic = ouvrir la scène /

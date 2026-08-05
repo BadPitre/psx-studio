@@ -17,7 +17,7 @@ import {
 } from "./bridge";
 import { PlayBar, PLAY_PORT } from "./PlayBar";
 import { VramPanel } from "./VramPanel";
-import { ProjectPanel } from "./ProjectPanel";
+import { ProjectPanel, type LogEntry } from "./ProjectPanel";
 import { ContextMenu } from "./ContextMenu";
 
 type Transform = {
@@ -599,6 +599,7 @@ export default function App() {
   /* Mode projet (Tauri). */
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [scenePath, setScenePath] = useState<string>("");
   const [sceneDoc, setSceneDoc] = useState<SceneDoc | null>(null);
   const [entityNames, setEntityNames] = useState<string[]>([]);
@@ -736,6 +737,22 @@ export default function App() {
     [rebuild],
   );
 
+  /* Console : chaque notice/erreur affichée alimente aussi le journal. */
+  useEffect(() => {
+    if (!notice) return;
+    setLogs((l) => [
+      ...l.slice(-499),
+      { time: new Date().toLocaleTimeString(), level: "info", text: notice },
+    ]);
+  }, [notice]);
+  useEffect(() => {
+    if (!error) return;
+    setLogs((l) => [
+      ...l.slice(-499),
+      { time: new Date().toLocaleTimeString(), level: "error", text: error },
+    ]);
+  }, [error]);
+
   /* Panneau Project : rafraîchit la liste disque + project.json. */
   const refreshFiles = useCallback(async (dir: string) => {
     try {
@@ -790,6 +807,41 @@ export default function App() {
       }
     },
     [project, selectScene, refreshFiles],
+  );
+
+  const createFolderFromPanel = useCallback(
+    async (parent: string, name: string) => {
+      if (!project) return;
+      try {
+        const rel = await api.createFolder(project.dir, parent, name);
+        setNotice(`dossier créé : ${rel}`);
+        refreshFiles(project.dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, refreshFiles],
+  );
+
+  /* Rangement par drag & drop : project.json suit, et si la scène
+     ouverte a bougé, elle est rouverte à son nouveau chemin. */
+  const moveFromPanel = useCallback(
+    async (from: string, toDir: string) => {
+      if (!project) return;
+      try {
+        const rel = await api.moveEntry(project.dir, from, toDir);
+        setNotice(`déplacé : ${from} → ${rel}`);
+        if (from.startsWith("scenes/") || toDir.startsWith("scenes")) {
+          const proj = await api.openProject(project.dir);
+          setProject(proj);
+          if (from === scenePath) await selectScene(proj, rel);
+        }
+        refreshFiles(project.dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, scenePath, selectScene, refreshFiles],
   );
 
   /* Édition d'une transform : viewport immédiat + JSON + rebuild différé. */
@@ -1548,11 +1600,15 @@ export default function App() {
       {isTauri && project && (
         <ProjectPanel
           files={projectFiles}
+          logs={logs}
           currentScenePath={scenePath}
           onOpenScene={(path) => selectScene(project, path)}
           onImport={importFromPanel}
           onCreateScene={createSceneFromPanel}
+          onCreateFolder={createFolderFromPanel}
+          onMove={moveFromPanel}
           onRefresh={() => refreshFiles(project.dir)}
+          onClearLogs={() => setLogs([])}
         />
       )}
     </div>

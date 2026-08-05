@@ -184,6 +184,51 @@ fn list_files_crosses_disk_and_project_json() {
 }
 
 #[test]
+fn folders_move_and_import_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_project(dir.path());
+
+    // Créer un dossier : visible dans la liste, même vide.
+    let folder = project::create_folder(dir.path(), "assets", "persos").unwrap();
+    assert_eq!(folder, "assets/persos");
+    let files = project::list_files(dir.path()).unwrap();
+    let node = files.iter().find(|f| f.path == "assets/persos").unwrap();
+    assert_eq!(node.kind, "dir");
+    // Noms hostiles nettoyés, remontées hors projet refusées.
+    assert_eq!(project::create_folder(dir.path(), "assets", "mes persos !").unwrap(), "assets/mes_persos__");
+    assert!(project::create_folder(dir.path(), "../ailleurs", "x").is_err());
+    assert!(project::move_entry(dir.path(), "../project.json", "assets").is_err());
+
+    // Déplacer un .gltf enregistré : le .bin suit, project.json est réécrit.
+    let moved = project::move_entry(dir.path(), "assets/house.gltf", "assets/persos").unwrap();
+    assert_eq!(moved, "assets/persos/house.gltf");
+    assert!(dir.path().join("assets/persos/house.bin").exists());
+    assert!(!dir.path().join("assets/house.gltf").exists());
+    let text = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
+    assert!(text.contains("assets/persos/house.gltf"), "{text}");
+    assert!(!text.contains("\"assets/house.gltf\""), "{text}");
+
+    // La liste suit le rangement et le projet se builde toujours.
+    let files = project::list_files(dir.path()).unwrap();
+    let gltf = files.iter().find(|f| f.path == "assets/persos/house.gltf").unwrap();
+    assert!(gltf.registered && gltf.exists);
+    project::build(dir.path(), false).unwrap();
+
+    // Import « sur place » : un fichier déposé dans un sous-dossier du
+    // projet est enregistré là où il est, pas recopié à la racine.
+    std::fs::copy(
+        dir.path().join("assets/checker.png"),
+        dir.path().join("assets/persos/peau.png"),
+    )
+    .unwrap();
+    project::import_asset(dir.path(), &dir.path().join("assets/persos/peau.png")).unwrap();
+    let text = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
+    assert!(text.contains("assets/persos/peau.png"), "{text}");
+    assert!(!dir.path().join("assets/peau.png").exists());
+    project::build(dir.path(), false).unwrap();
+}
+
+#[test]
 fn create_scene_registers_and_stays_buildable() {
     let dir = tempfile::tempdir().unwrap();
     setup_project(dir.path());

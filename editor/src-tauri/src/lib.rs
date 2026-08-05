@@ -218,6 +218,19 @@ fn create_scene(project_dir: String, name: String) -> Result<String, String> {
     psxpipe::project::create_scene(&PathBuf::from(project_dir), &name)
 }
 
+/// Crée un dossier (menu « Créer ▸ Dossier ») ; retourne son chemin relatif.
+#[tauri::command(async)]
+fn create_folder(project_dir: String, parent: String, name: String) -> Result<String, String> {
+    psxpipe::project::create_folder(&PathBuf::from(project_dir), &parent, &name)
+}
+
+/// Déplace un fichier vers un dossier du projet (drag & drop du panneau)
+/// et met à jour project.json ; retourne le nouveau chemin relatif.
+#[tauri::command(async)]
+fn move_entry(project_dir: String, from: String, to_dir: String) -> Result<String, String> {
+    psxpipe::project::move_entry(&PathBuf::from(project_dir), &from, &to_dir)
+}
+
 /* ---------------------------------------------------------- play mode -- */
 
 #[tauri::command(async)]
@@ -343,6 +356,8 @@ pub fn run() {
             import_asset,
             list_project_files,
             create_scene,
+            create_folder,
+            move_entry,
             get_model_subdiv,
             set_model_subdiv,
             play,

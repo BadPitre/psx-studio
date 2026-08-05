@@ -449,6 +449,16 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
     let mut project: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
 
+    // Fichier déjà dans le projet (import depuis le panneau Project) : il
+    // reste à sa place et on enregistre son chemin réel — le rangement de
+    // l'utilisateur est respecté.
+    let project_canon = project_dir.canonicalize().map_err(|e| e.to_string())?;
+    let in_project_rel = src.canonicalize().ok().and_then(|s| {
+        s.strip_prefix(&project_canon)
+            .ok()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+    });
+
     let register = |list: &mut serde_json::Value, entry: serde_json::Value, out_key: &str| {
         if !list.is_array() {
             *list = serde_json::Value::Array(Vec::new());
@@ -465,16 +475,29 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
     let result = match ext.as_str() {
         "gltf" | "glb" => {
             let file_name = format!("{id}.{ext}");
-            let dst = assets_dir.join(&file_name);
-            copy_into_assets(src, &dst)?;
-            // Buffer externe d'un .gltf : copié sous son nom D'ORIGINE (le
-            // JSON du glTF le référence par ce nom exact dans son URI).
-            if ext == "gltf" {
-                let bin = src.with_file_name(format!("{stem}.bin"));
-                if bin.exists() {
-                    copy_into_assets(&bin, &assets_dir.join(format!("{stem}.bin")))?;
+            let (dst, gltf_rel) = match &in_project_rel {
+                Some(rel) => (src.to_path_buf(), rel.clone()),
+                None => {
+                    let dst = assets_dir.join(&file_name);
+                    copy_into_assets(src, &dst)?;
+                    // Buffer externe d'un .gltf : copié sous son nom
+                    // D'ORIGINE (le JSON du glTF le référence par ce nom
+                    // exact dans son URI).
+                    if ext == "gltf" {
+                        let bin = src.with_file_name(format!("{stem}.bin"));
+                        if bin.exists() {
+                            copy_into_assets(&bin, &assets_dir.join(format!("{stem}.bin")))?;
+                        }
+                    }
+                    (dst, format!("assets/{file_name}"))
                 }
-            }
+            };
+            // Dossier où atterrit une éventuelle texture extraite : celui
+            // du glTF (l'import sur place respecte le rangement).
+            let tex_dir_rel = gltf_rel
+                .rsplit_once('/')
+                .map(|(d, _)| d.to_string())
+                .unwrap_or_else(|| "assets".into());
             let mut warnings = Vec::new();
 
             /* Texture baseColor embarquée (.glb) ou référencée (.gltf) :
@@ -497,7 +520,7 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
                     img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3);
                 }
                 tex_dims = img.dimensions();
-                img.save(assets_dir.join(format!("{id}.png")))
+                img.save(project_dir.join(&tex_dir_rel).join(format!("{id}.png")))
                     .map_err(|e| e.to_string())?;
                 let tim_out = format!("{id}.tim");
                 let tim_opts = tim::TimOptions {
@@ -515,7 +538,7 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
                 );
                 register(
                     &mut project["textures"],
-                    serde_json::json!({ "png": format!("assets/{id}.png"), "out": tim_out }),
+                    serde_json::json!({ "png": format!("{tex_dir_rel}/{id}.png"), "out": tim_out }),
                     &tim_out,
                 );
                 texture_out = Some(tim_out);
@@ -532,7 +555,7 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
             warnings.extend(report.warnings);
             register(
                 &mut project["models"],
-                serde_json::json!({ "gltf": format!("assets/{file_name}"), "out": out }),
+                serde_json::json!({ "gltf": gltf_rel, "out": out }),
                 &out,
             );
             let summary = format!(
@@ -556,8 +579,14 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
         }
         "png" => {
             let file_name = format!("{id}.png");
-            let dst = assets_dir.join(&file_name);
-            copy_into_assets(src, &dst)?;
+            let (dst, png_rel) = match &in_project_rel {
+                Some(rel) => (src.to_path_buf(), rel.clone()),
+                None => {
+                    let dst = assets_dir.join(&file_name);
+                    copy_into_assets(src, &dst)?;
+                    (dst, format!("assets/{file_name}"))
+                }
+            };
             let out = format!("{id}.tim");
             let img = image::open(&dst).map_err(|e| e.to_string())?.to_rgba8();
             let (w, h) = img.dimensions();
@@ -570,7 +599,7 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
             std::fs::write(library.join(&out), timg.write()).map_err(|e| e.to_string())?;
             register(
                 &mut project["textures"],
-                serde_json::json!({ "png": format!("assets/{file_name}"), "out": out }),
+                serde_json::json!({ "png": png_rel, "out": out }),
                 &out,
             );
             ImportedAsset {
@@ -723,7 +752,7 @@ pub struct ProjectFile {
     pub name: String,
     /// Dossier de premier niveau : "assets", "audio" ou "scenes".
     pub section: String,
-    /// "scene" | "model" | "texture" | "audio" | "buffer" | "other".
+    /// "dir" | "scene" | "model" | "texture" | "audio" | "buffer" | "other".
     pub kind: String,
     pub size: u64,
     /// Présent dans project.json. Les fichiers compagnons (.bin d'un
@@ -772,19 +801,47 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
     collect(&project["music"], None);
     collect(&project["scenes"], None);
 
-    let mut files = Vec::new();
-    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for section in ["scenes", "assets", "audio"] {
-        let dir = project_dir.join(section);
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        let mut names: Vec<_> = entries
+    // Parcours récursif : les dossiers (même vides) apparaissent, pour que
+    // l'utilisateur puisse ranger ses fichiers comme il veut.
+    fn walk(
+        dir: &Path,
+        prefix: &str,
+        section: &str,
+        registered: &std::collections::BTreeSet<String>,
+        files: &mut Vec<ProjectFile>,
+        seen: &mut std::collections::BTreeSet<String>,
+    ) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut names: Vec<(String, bool)> = entries
             .flatten()
-            .filter(|e| e.path().is_file())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    e.path().is_dir(),
+                )
+            })
             .collect();
         names.sort();
-        for name in names {
-            let rel = format!("{section}/{name}");
+        for (name, is_dir) in names {
+            // Library/ et fichiers cachés n'ont rien à faire dans le panneau.
+            if name.starts_with('.') {
+                continue;
+            }
+            let rel = format!("{prefix}/{name}");
+            if is_dir {
+                let child = dir.join(&name);
+                files.push(ProjectFile {
+                    path: rel.clone(),
+                    name,
+                    section: section.into(),
+                    kind: "dir".into(),
+                    size: 0,
+                    registered: true,
+                    exists: true,
+                });
+                walk(&child, &rel, section, registered, files, seen);
+                continue;
+            }
             let ext = std::path::Path::new(&name)
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
@@ -805,6 +862,19 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
                 path: rel,
             });
         }
+    }
+
+    let mut files = Vec::new();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for section in ["scenes", "assets", "audio"] {
+        walk(
+            &project_dir.join(section),
+            section,
+            section,
+            &registered,
+            &mut files,
+            &mut seen,
+        );
     }
 
     // Entrées de project.json dont le fichier a disparu (ex. asset supprimé
@@ -830,6 +900,123 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
     }
 
     Ok(files)
+}
+
+/// Garde-fou des chemins venus du panneau Project : relatifs, en avant,
+/// sans remonter hors du projet.
+fn check_rel_path(rel: &str) -> Result<(), String> {
+    if rel.is_empty()
+        || rel.starts_with('/')
+        || rel.contains('\\')
+        || rel.contains("..")
+        || rel.split('/').any(|seg| seg.is_empty())
+    {
+        return Err(format!("chemin invalide : {rel}"));
+    }
+    Ok(())
+}
+
+/// Crée un dossier dans le projet (menu « Créer ▸ Dossier » du panneau).
+pub fn create_folder(project_dir: &Path, parent_rel: &str, name: &str) -> Result<String, String> {
+    check_rel_path(parent_rel)?;
+    let clean: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if clean.is_empty() {
+        return Err("nom de dossier vide".into());
+    }
+    let rel = format!("{parent_rel}/{clean}");
+    let path = project_dir.join(&rel);
+    if path.exists() {
+        return Err(format!("{rel} existe déjà"));
+    }
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    Ok(rel)
+}
+
+/// Déplace un fichier du projet vers un autre dossier (drag & drop du
+/// panneau Project) et réécrit toutes les références de project.json.
+/// Le .bin compagnon d'un .gltf suit (le glTF le référence par URI
+/// relative au même dossier). Retourne le nouveau chemin relatif.
+pub fn move_entry(project_dir: &Path, from_rel: &str, to_dir_rel: &str) -> Result<String, String> {
+    check_rel_path(from_rel)?;
+    check_rel_path(to_dir_rel)?;
+    let src = project_dir.join(from_rel);
+    if !src.is_file() {
+        return Err(format!("{from_rel} n'est pas un fichier du projet"));
+    }
+    let dst_dir = project_dir.join(to_dir_rel);
+    if !dst_dir.is_dir() {
+        return Err(format!("{to_dir_rel} n'est pas un dossier du projet"));
+    }
+    let name = from_rel.rsplit('/').next().unwrap().to_string();
+    let new_rel = format!("{to_dir_rel}/{name}");
+    if new_rel == from_rel {
+        return Ok(new_rel);
+    }
+    if project_dir.join(&new_rel).exists() {
+        return Err(format!("{new_rel} existe déjà"));
+    }
+
+    std::fs::rename(&src, project_dir.join(&new_rel)).map_err(|e| format!("déplacement : {e}"))?;
+
+    // Compagnon .bin d'un .gltf : déplacé avec lui.
+    let mut moved = vec![(from_rel.to_string(), new_rel.clone())];
+    if name.to_lowercase().ends_with(".gltf") {
+        let bin_name = format!("{}.bin", &name[..name.len() - 5]);
+        let bin_from = format!("{}/{bin_name}", from_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""));
+        if project_dir.join(&bin_from).is_file() {
+            let bin_to = format!("{to_dir_rel}/{bin_name}");
+            std::fs::rename(project_dir.join(&bin_from), project_dir.join(&bin_to))
+                .map_err(|e| format!("déplacement du .bin : {e}"))?;
+            moved.push((bin_from, bin_to));
+        }
+    }
+
+    // project.json : réécrit chaque référence au chemin déplacé.
+    let json_path = project_dir.join("project.json");
+    let text = std::fs::read_to_string(&json_path)
+        .map_err(|e| format!("{} : {e}", json_path.display()))?;
+    let mut project: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+    let rewrite = |v: &mut serde_json::Value| {
+        if let Some(s) = v.as_str() {
+            let normalized = s.replace('\\', "/");
+            if let Some((_, to)) = moved.iter().find(|(from, _)| *from == normalized) {
+                *v = serde_json::Value::String(to.clone());
+            }
+        }
+    };
+    for entry in project["models"].as_array_mut().into_iter().flatten() {
+        rewrite(&mut entry["gltf"]);
+    }
+    for entry in project["textures"].as_array_mut().into_iter().flatten() {
+        rewrite(&mut entry["png"]);
+    }
+    for entry in project["sfx"].as_array_mut().into_iter().flatten() {
+        rewrite(&mut entry["wav"]);
+    }
+    for entry in project["music"].as_array_mut().into_iter().flatten() {
+        rewrite(entry);
+    }
+    for entry in project["scenes"].as_array_mut().into_iter().flatten() {
+        rewrite(entry);
+    }
+    std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&project).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(new_rel)
 }
 
 /// Crée une scène vide `scenes/<slug>.json` et l'enregistre dans
