@@ -1,0 +1,25 @@
+# Builds
+build/
+Build/
+*.exe
+*.elf
+*.bin
+*.cue
+*.map
+
+# Rust
+target/
+
+# Node / Tauri
+node_modules/
+dist/
+editor/src-tauri/target/
+
+# Caches projet
+Library/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
