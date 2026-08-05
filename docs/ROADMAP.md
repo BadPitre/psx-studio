@@ -74,14 +74,22 @@ projet (scènes, modèles 3D, textures, scripts, sons) comme la vue
 Project/Assets d'Unity — navigation par dossiers, vignettes, et à
 terme drag & drop vers la hiérarchie/le viewport.
 
-1. **Explorateur** : lister `assets/` + `scenes/` du projet ouvert
-   (Tauri fs), arbre de dossiers à gauche, grille de vignettes à droite
-2. **Vignettes** : icône par type (.gltf/.glb, .png, .vag, .json de
-   scène) puis aperçus rendus pour les modèles/textures
-3. **Actions** : double-clic = ouvrir la scène / importer l'asset,
-   menu contextuel (réimporter, subdivision, supprimer)
-4. **Drag & drop** vers la hiérarchie (instancier un modèle comme
-   entité) — dépend du 1
+1. ~~**Explorateur**~~ — **livré** : bande repliable sous le viewport,
+   sections (Scènes/Assets/Audio) avec compteurs à gauche, grille de
+   tuiles + recherche à droite. Le contenu croise le disque et
+   `project.json` : badge « non importé » (fichier présent, pas
+   enregistré) et « manquant » (enregistré, disparu du disque)
+2. **Vignettes** : icône par type pour l'instant ; aperçus rendus des
+   modèles/textures à venir (rendu offscreen avec le shader PS1)
+3. ~~**Actions**~~ — **livré** : double-clic = ouvrir la scène /
+   importer un asset non enregistré ; menu contextuel Ouvrir /
+   (Ré)importer / Rafraîchir. Restent : subdivision et retrait
+4. ~~**Menu « Créer ▸ »**~~ — **livré** au clic droit dans le vide,
+   comme Unity : Scène (nom → `scenes/<slug>.json` enregistré et
+   ouvert), sous-menu pensé extensible (prefabs, bases de données,
+   etc. viendront s'y ajouter)
+5. **Drag & drop** vers la hiérarchie (instancier un modèle comme
+   entité) — dépend du 2
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 

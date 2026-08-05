@@ -7,9 +7,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parsePsc, sceneTriangleCount, type PscScene } from "./formats/psc";
 import { Viewport, type GizmoMode } from "./viewport/Viewport";
-import { api, isTauri, onFileDrop, pickProjectDir, type ProjectInfo } from "./bridge";
+import {
+  api,
+  isTauri,
+  onFileDrop,
+  pickProjectDir,
+  type ProjectFile,
+  type ProjectInfo,
+} from "./bridge";
 import { PlayBar, PLAY_PORT } from "./PlayBar";
 import { VramPanel } from "./VramPanel";
+import { ProjectPanel } from "./ProjectPanel";
+import { ContextMenu } from "./ContextMenu";
 
 type Transform = {
   pos: [number, number, number];
@@ -97,49 +106,6 @@ function Hierarchy({
           {e.model >= 0 && (
             <span className="tree-meta">{scene.models[e.model].prims.length} tris</span>
           )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------ menu contextuel -- */
-
-function ContextMenu({
-  x,
-  y,
-  onClose,
-  actions,
-}: {
-  x: number;
-  y: number;
-  onClose: () => void;
-  actions: { label: string; shortcut?: string; onClick: () => void; danger?: boolean }[];
-}) {
-  useEffect(() => {
-    const close = () => onClose();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  return (
-    <div className="context-menu" style={{ left: x, top: y }}>
-      {actions.map((a) => (
-        <div
-          key={a.label}
-          className={`context-item ${a.danger ? "danger" : ""}`}
-          onClick={() => {
-            onClose();
-            a.onClick();
-          }}
-        >
-          <span>{a.label}</span>
-          {a.shortcut && <span className="context-shortcut">{a.shortcut}</span>}
         </div>
       ))}
     </div>
@@ -632,6 +598,7 @@ export default function App() {
 
   /* Mode projet (Tauri). */
   const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [scenePath, setScenePath] = useState<string>("");
   const [sceneDoc, setSceneDoc] = useState<SceneDoc | null>(null);
   const [entityNames, setEntityNames] = useState<string[]>([]);
@@ -769,6 +736,15 @@ export default function App() {
     [rebuild],
   );
 
+  /* Panneau Project : rafraîchit la liste disque + project.json. */
+  const refreshFiles = useCallback(async (dir: string) => {
+    try {
+      setProjectFiles(await api.listProjectFiles(dir));
+    } catch (e) {
+      setNotice(`panneau Project : ${e}`);
+    }
+  }, []);
+
   const openProject = useCallback(async () => {
     const dir = await pickProjectDir();
     if (!dir) return;
@@ -777,10 +753,44 @@ export default function App() {
       setProject(proj);
       setError("");
       if (proj.scenes.length > 0) await selectScene(proj, proj.scenes[0].path);
+      refreshFiles(dir);
     } catch (e) {
       setError(String(e));
     }
-  }, [selectScene]);
+  }, [selectScene, refreshFiles]);
+
+  /* Actions du panneau Project. */
+  const importFromPanel = useCallback(
+    async (rel: string) => {
+      if (!project) return;
+      try {
+        const imported = await api.importAsset(project.dir, `${project.dir}/${rel}`);
+        setNotice(`${imported.id} : ${imported.summary}`);
+        refreshFiles(project.dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, refreshFiles],
+  );
+
+  const createSceneFromPanel = useCallback(
+    async (name: string) => {
+      if (!project) return;
+      try {
+        const rel = await api.createScene(project.dir, name);
+        // project.json a changé : recharge la liste des scènes du menu.
+        const proj = await api.openProject(project.dir);
+        setProject(proj);
+        setNotice(`scène créée : ${rel}`);
+        await selectScene(proj, rel);
+        refreshFiles(project.dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, selectScene, refreshFiles],
+  );
 
   /* Édition d'une transform : viewport immédiat + JSON + rebuild différé. */
   const editTransform = useCallback(
@@ -1168,6 +1178,7 @@ export default function App() {
         }
       }
       setNotice(`import : ${summaries.join(" · ")}`);
+      refreshFiles(project.dir);
     }).then((fn) => (unlisten = fn));
     return () => unlisten?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1534,6 +1545,16 @@ export default function App() {
           </div>
         )}
       </main>
+      {isTauri && project && (
+        <ProjectPanel
+          files={projectFiles}
+          currentScenePath={scenePath}
+          onOpenScene={(path) => selectScene(project, path)}
+          onImport={importFromPanel}
+          onCreateScene={createSceneFromPanel}
+          onRefresh={() => refreshFiles(project.dir)}
+        />
+      )}
     </div>
   );
 }

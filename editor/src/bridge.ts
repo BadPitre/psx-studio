@@ -57,9 +57,25 @@ export async function onFileDrop(cb: (paths: string[]) => void): Promise<() => v
   });
 }
 
+/** Une entrée du panneau Project (fichier du projet croisé avec project.json). */
+export interface ProjectFile {
+  path: string;
+  name: string;
+  section: string;
+  kind: "scene" | "model" | "texture" | "audio" | "buffer" | "other";
+  size: number;
+  registered: boolean;
+  exists: boolean;
+}
+
 export const api = {
   importAsset: (projectDir: string, srcPath: string) =>
     tauriInvoke<ImportedAsset>("import_asset", { projectDir, srcPath }),
+  listProjectFiles: (projectDir: string) =>
+    tauriInvoke<ProjectFile[]>("list_project_files", { projectDir }),
+  /** Crée une scène vide enregistrée ; retourne son chemin relatif. */
+  createScene: (projectDir: string, name: string) =>
+    tauriInvoke<string>("create_scene", { projectDir, name }),
   getModelSubdiv: (projectDir: string, pmdOut: string) =>
     tauriInvoke<number | null>("get_model_subdiv", { projectDir, pmdOut }),
   /** Écrit project.json et reconvertit le modèle ; retourne un résumé. */

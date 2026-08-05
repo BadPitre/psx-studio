@@ -402,6 +402,19 @@ pub struct ImportedAsset {
     pub warnings: Vec<String>,
 }
 
+/// Copie vers assets/ en tolérant un fichier déjà à sa place (import
+/// depuis le panneau Project) : se copier sur soi-même tronque le fichier.
+fn copy_into_assets(src: &Path, dst: &Path) -> Result<(), String> {
+    if let (Ok(a), Ok(b)) = (src.canonicalize(), dst.canonicalize()) {
+        if a == b {
+            return Ok(());
+        }
+    }
+    std::fs::copy(src, dst)
+        .map(|_| ())
+        .map_err(|e| format!("copie : {e}"))
+}
+
 fn sanitize_id(stem: &str) -> String {
     let id: String = stem
         .to_lowercase()
@@ -453,14 +466,13 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
         "gltf" | "glb" => {
             let file_name = format!("{id}.{ext}");
             let dst = assets_dir.join(&file_name);
-            std::fs::copy(src, &dst).map_err(|e| format!("copie : {e}"))?;
+            copy_into_assets(src, &dst)?;
             // Buffer externe d'un .gltf : copié sous son nom D'ORIGINE (le
             // JSON du glTF le référence par ce nom exact dans son URI).
             if ext == "gltf" {
                 let bin = src.with_file_name(format!("{stem}.bin"));
                 if bin.exists() {
-                    std::fs::copy(&bin, assets_dir.join(format!("{stem}.bin")))
-                        .map_err(|e| format!("copie du .bin : {e}"))?;
+                    copy_into_assets(&bin, &assets_dir.join(format!("{stem}.bin")))?;
                 }
             }
             let mut warnings = Vec::new();
@@ -545,7 +557,7 @@ pub fn import_asset(project_dir: &Path, src: &Path) -> Result<ImportedAsset, Str
         "png" => {
             let file_name = format!("{id}.png");
             let dst = assets_dir.join(&file_name);
-            std::fs::copy(src, &dst).map_err(|e| format!("copie : {e}"))?;
+            copy_into_assets(src, &dst)?;
             let out = format!("{id}.tim");
             let img = image::open(&dst).map_err(|e| e.to_string())?.to_rgba8();
             let (w, h) = img.dimensions();
@@ -697,6 +709,177 @@ pub fn reconvert_model(project_dir: &Path, pmd_out: &str) -> Result<String, Stri
             String::new()
         }
     ))
+}
+
+/* ------------------------------------------ panneau Project (éditeur) -- */
+
+/// Une entrée du panneau Project : fichier sur disque et/ou référencé par
+/// project.json — le croisement des deux rend visibles les
+/// désynchronisations (« non importé », « manquant »).
+#[derive(serde::Serialize, Debug)]
+pub struct ProjectFile {
+    /// Chemin relatif au dossier projet, séparateurs '/'.
+    pub path: String,
+    pub name: String,
+    /// Dossier de premier niveau : "assets", "audio" ou "scenes".
+    pub section: String,
+    /// "scene" | "model" | "texture" | "audio" | "buffer" | "other".
+    pub kind: String,
+    pub size: u64,
+    /// Présent dans project.json. Les fichiers compagnons (.bin d'un
+    /// .gltf) et inconnus sont marqués enregistrés : pas de badge inutile.
+    pub registered: bool,
+    /// Faux : entrée de project.json dont le fichier a disparu du disque.
+    pub exists: bool,
+}
+
+fn kind_for(section: &str, ext: &str) -> &'static str {
+    match ext {
+        "gltf" | "glb" => "model",
+        "png" => "texture",
+        "wav" | "vag" => "audio",
+        "bin" => "buffer",
+        "json" if section == "scenes" => "scene",
+        _ => "other",
+    }
+}
+
+/// Liste le contenu du projet pour le panneau Project : les fichiers des
+/// dossiers `assets/`, `audio/` et `scenes/`, croisés avec project.json.
+pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
+    let json_path = project_dir.join("project.json");
+    let text = std::fs::read_to_string(&json_path)
+        .map_err(|e| format!("{} : {e}", json_path.display()))?;
+    let project: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+
+    // Chemins sources enregistrés (normalisés en '/').
+    let mut registered: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut collect = |value: &serde_json::Value, key: Option<&str>| {
+        for entry in value.as_array().into_iter().flatten() {
+            let path = match key {
+                Some(k) => entry[k].as_str(),
+                None => entry.as_str(),
+            };
+            if let Some(p) = path {
+                registered.insert(p.replace('\\', "/"));
+            }
+        }
+    };
+    collect(&project["models"], Some("gltf"));
+    collect(&project["textures"], Some("png"));
+    collect(&project["sfx"], Some("wav"));
+    collect(&project["music"], None);
+    collect(&project["scenes"], None);
+
+    let mut files = Vec::new();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for section in ["scenes", "assets", "audio"] {
+        let dir = project_dir.join(section);
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let mut names: Vec<_> = entries
+            .flatten()
+            .filter(|e| e.path().is_file())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        for name in names {
+            let rel = format!("{section}/{name}");
+            let ext = std::path::Path::new(&name)
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            let kind = kind_for(section, &ext);
+            let size = std::fs::metadata(dir.join(&name)).map(|m| m.len()).unwrap_or(0);
+            seen.insert(rel.clone());
+            files.push(ProjectFile {
+                name,
+                section: section.into(),
+                kind: kind.into(),
+                size,
+                // Les compagnons/inconnus ne sont pas importables : pas de badge.
+                registered: registered.contains(&rel)
+                    || kind == "buffer"
+                    || kind == "other",
+                exists: true,
+                path: rel,
+            });
+        }
+    }
+
+    // Entrées de project.json dont le fichier a disparu (ex. asset supprimé
+    // à la main) : montrées avec le badge « manquant ».
+    for rel in &registered {
+        if seen.contains(rel) || project_dir.join(rel).exists() {
+            continue;
+        }
+        let (section, name) = rel.split_once('/').unwrap_or(("", rel.as_str()));
+        let ext = std::path::Path::new(name)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        files.push(ProjectFile {
+            path: rel.clone(),
+            name: name.to_string(),
+            section: section.to_string(),
+            kind: kind_for(section, &ext).into(),
+            size: 0,
+            registered: true,
+            exists: false,
+        });
+    }
+
+    Ok(files)
+}
+
+/// Crée une scène vide `scenes/<slug>.json` et l'enregistre dans
+/// project.json (menu « Créer ▸ Scène » du panneau Project).
+pub fn create_scene(project_dir: &Path, name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("nom de scène vide".into());
+    }
+    let rel = format!("scenes/{}.json", sanitize_id(trimmed));
+    let path = project_dir.join(&rel);
+    if path.exists() {
+        return Err(format!("{rel} existe déjà"));
+    }
+
+    let doc = serde_json::json!({
+        "name": trimmed,
+        "assets": { "textures": [], "models": [] },
+        "entities": []
+    });
+    // Garantie : la scène minimale doit rester un SceneJson valide.
+    serde_json::from_value::<crate::scene::SceneJson>(doc.clone())
+        .map_err(|e| format!("scène minimale invalide : {e}"))?;
+
+    let json_path = project_dir.join("project.json");
+    let text = std::fs::read_to_string(&json_path)
+        .map_err(|e| format!("{} : {e}", json_path.display()))?;
+    let mut project: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+    if !project["scenes"].is_array() {
+        project["scenes"] = serde_json::Value::Array(Vec::new());
+    }
+    project["scenes"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::Value::String(rel.clone()));
+
+    std::fs::create_dir_all(project_dir.join("scenes")).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&project).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(rel)
 }
 
 /// Best-effort relative path from `from` dir to `to` (falls back to

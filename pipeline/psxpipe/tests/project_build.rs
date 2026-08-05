@@ -151,6 +151,59 @@ fn import_asset_registers_and_converts() {
 }
 
 #[test]
+fn list_files_crosses_disk_and_project_json() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_project(dir.path());
+
+    // Fichier présent mais pas dans project.json -> « non importé ».
+    std::fs::copy(
+        dir.path().join("assets/checker.png"),
+        dir.path().join("assets/libre.png"),
+    )
+    .unwrap();
+    // Entrée de project.json dont le fichier a disparu -> « manquant ».
+    std::fs::remove_file(dir.path().join("assets/guy.png")).unwrap();
+
+    let files = project::list_files(dir.path()).unwrap();
+    let find = |p: &str| files.iter().find(|f| f.path == p).unwrap();
+
+    let scene = find("scenes/scene0.json");
+    assert_eq!((scene.kind.as_str(), scene.registered, scene.exists), ("scene", true, true));
+    let checker = find("assets/checker.png");
+    assert_eq!((checker.kind.as_str(), checker.registered), ("texture", true));
+    assert!(checker.size > 0);
+    let libre = find("assets/libre.png");
+    assert!(!libre.registered && libre.exists);
+    let guy = find("assets/guy.png");
+    assert!(guy.registered && !guy.exists);
+    // Le .bin compagnon d'un .gltf ne porte pas de badge.
+    let bin = find("assets/house.bin");
+    assert_eq!((bin.kind.as_str(), bin.registered), ("buffer", true));
+    let wav = find("audio/sfx.wav");
+    assert_eq!((wav.kind.as_str(), wav.registered), ("audio", true));
+}
+
+#[test]
+fn create_scene_registers_and_stays_buildable() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_project(dir.path());
+
+    let rel = project::create_scene(dir.path(), "Niveau 2 !").unwrap();
+    assert_eq!(rel, "scenes/niveau_2__.json");
+    assert!(dir.path().join(&rel).exists());
+    let text = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
+    assert!(text.contains(&rel), "{text}");
+
+    // La scène vide se builde avec le projet (3 scènes désormais).
+    let report = project::build(dir.path(), false).unwrap();
+    assert_eq!(report.scenes.len(), 3);
+
+    // Doublon et nom vide : erreurs claires.
+    assert!(project::create_scene(dir.path(), "Niveau 2 !").is_err());
+    assert!(project::create_scene(dir.path(), "   ").is_err());
+}
+
+#[test]
 fn import_gltf_with_texture_extracts_and_pairs() {
     let dir = tempfile::tempdir().unwrap();
     setup_project(dir.path());

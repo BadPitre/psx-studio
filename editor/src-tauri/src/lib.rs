@@ -203,6 +203,21 @@ fn import_asset(
     psxpipe::project::import_asset(&PathBuf::from(project_dir), &PathBuf::from(src_path))
 }
 
+/// Contenu du projet pour le panneau Project (fichiers + project.json).
+#[tauri::command(async)]
+fn list_project_files(
+    project_dir: String,
+) -> Result<Vec<psxpipe::project::ProjectFile>, String> {
+    psxpipe::project::list_files(&PathBuf::from(project_dir))
+}
+
+/// Crée une scène vide et l'enregistre (menu « Créer ▸ Scène »).
+/// Retourne son chemin relatif.
+#[tauri::command(async)]
+fn create_scene(project_dir: String, name: String) -> Result<String, String> {
+    psxpipe::project::create_scene(&PathBuf::from(project_dir), &name)
+}
+
 /* ---------------------------------------------------------- play mode -- */
 
 #[tauri::command(async)]
@@ -326,6 +341,8 @@ pub fn run() {
             build_scene,
             build_project,
             import_asset,
+            list_project_files,
+            create_scene,
             get_model_subdiv,
             set_model_subdiv,
             play,

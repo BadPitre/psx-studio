@@ -120,7 +120,13 @@ de triangles — surveille l'avertissement de budget.)
   subdivision), Lumière (couleur, intensité), Caméra (FOV, distance
   d'affichage), Script (nom résolu par hash — voir §6). Le bouton
   « ＋ Ajouter un composant » liste ceux disponibles.
-- **VRAM** : bouton VRAM = carte des pages texture/CLUT réellement packées.
+- **VRAM** : bouton VRAM = carte des pages texture/CLUT réellement
+  packées, avec % d'occupation et pages libres.
+- **Panneau Project** (bande du bas, comme Unity) : tout le contenu du
+  projet — scènes, modèles, textures, audio. Double-clic pour ouvrir
+  une scène ou importer un fichier marqué « non importé » ; clic droit
+  dans le vide → **Créer ▸ Scène**. Le badge « manquant » signale une
+  entrée de `project.json` dont le fichier a disparu.
 - **▶ Play** : build incrémental + PCSX-Redux. Pendant que le jeu tourne,
   déplacer une entité (gizmo ou inspecteur) **l'écrit dans la RAM
   console** : le décor bouge dans le jeu, sans rebuild.
