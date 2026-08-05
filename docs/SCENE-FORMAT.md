@@ -113,7 +113,7 @@ et avec les framebuffers (erreur si chevauchement).
 
 | Offset | Type | Champ |
 |---|---|---|
-| 0x00 | i16×3 + pad | position locale |
+| 0x00 | i16×3 + `cam_fov` u16 | position locale ; le pad porte le FOV vertical caméra en degrés (v1.2, 0 = défaut ~74°) |
 | 0x08 | i16×3 + pad | rotation locale (unités 4096 = 360°) |
 | 0x10 | i16×3 + pad | échelle locale (4.12, 4096 = 1.0) |
 | 0x18 | u16 | parent (indice, `0xFFFF` = racine) |
@@ -148,9 +148,11 @@ live tweaking — change l'éclairage en direct. Les couleurs remplissent
 les colonnes 1-2 de la matrice couleur GTE.
 
 Côté JSON : `"light": { "color": [r, g, b] }` sur l'entité, et
-`"camera": true` pour le composant caméra (la première entité caméra
-donne la vue initiale de la scène ; les scripts peuvent reprendre la
-main).
+`"camera": true` ou `"camera": { "fov": 74 }` pour le composant caméra
+(la première entité caméra donne la vue initiale de la scène ; les
+scripts peuvent reprendre la main). Le FOV vertical est converti par le
+runtime en distance de projection GTE (`gte_SetGeomScreen`,
+h = 120/tan(fov/2) ; le défaut console h = 160 vaut ~74°).
 
 ### Blobs
 Après les tables : blobs modèles puis textures, chacun aligné sur 4.

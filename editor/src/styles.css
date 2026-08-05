@@ -125,6 +125,8 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
+.camera-props { margin: 2px 0 6px 22px; }
+
 .component-row input[type="color"] {
   width: 34px;
   height: 22px;
@@ -156,6 +158,22 @@ body {
   width: 100%;
   height: 100%;
   outline: none;
+}
+
+/* Prévisualisation de la caméra sélectionnée (picture-in-picture). */
+.viewport-pip {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 32%;
+  aspect-ratio: 4 / 3;
+  image-rendering: pixelated;
+  outline: 2px solid var(--accent);
+  border-radius: 3px;
+  background: #000;
+  display: none;
+  pointer-events: none;
+  z-index: 4;
 }
 
 .field-group { padding: 4px 12px 8px; }

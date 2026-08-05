@@ -198,6 +198,8 @@ function Inspector({
   onLightChange,
   isCamera,
   onCameraChange,
+  camFov,
+  onCamFovChange,
   focusNameSignal,
 }: {
   scene: PscScene;
@@ -217,6 +219,8 @@ function Inspector({
   onLightChange?: (color: [number, number, number] | null) => void;
   isCamera?: boolean;
   onCameraChange?: (on: boolean) => void;
+  camFov?: number | null;
+  onCamFovChange?: (fov: number | null) => void;
   focusNameSignal?: number;
 }) {
   const entity = scene.entities[selected];
@@ -355,6 +359,31 @@ function Inspector({
             />
             <span>🎥 Caméra (vue initiale de la scène)</span>
           </label>
+          {isCamera && onCamFovChange && (
+            <div className="camera-props">
+              <div className="field">
+                <label>FOV vertical (°)</label>
+                <input
+                  type="number"
+                  min={10}
+                  max={170}
+                  step={1}
+                  value={camFov ?? ""}
+                  placeholder="74 (natif PS1)"
+                  onChange={(e) => {
+                    const v = e.target.value === "" ? null : Number(e.target.value);
+                    if (v === null || (v >= 10 && v <= 170)) onCamFovChange(v);
+                  }}
+                  title="Champ de vision vertical. Le défaut console (distance de projection h = 160) vaut ~74°. Le runtime le convertit en gte_SetGeomScreen."
+                />
+              </div>
+              <div className="field-readonly">
+                sortie : 320×240 · 4:3 · near ≈ 16 unités (garde GTE) ·
+                profondeur triée par Ordering Table (pas de z-buffer) ·
+                regard le long du -Z local
+              </div>
+            </div>
+          )}
           <div className="hint" style={{ padding: "2px 0 0" }}>
             3 lumières max (GTE) : le soleil des settings + 2 entités.
           </div>
@@ -736,8 +765,22 @@ export default function App() {
       mutateDoc((doc) => {
         const entity = doc.entities?.find((e) => e.name === name);
         if (!entity) return;
-        if (on) entity.camera = true;
-        else delete entity.camera;
+        // Ne pas écraser un FOV déjà réglé en re-cochant la case.
+        if (on && !entity.camera) entity.camera = true;
+        else if (!on) delete entity.camera;
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
+  const setEntityCamFov = useCallback(
+    (fov: number | null) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity || !entity.camera) return;
+        entity.camera = fov === null ? true : { fov };
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -915,6 +958,10 @@ export default function App() {
     ((selectedJsonEntity?.light as { color?: [number, number, number] } | undefined)
       ?.color as [number, number, number] | undefined) ?? null;
   const currentCamera = Boolean(selectedJsonEntity?.camera);
+  const currentCamFov =
+    (typeof selectedJsonEntity?.camera === "object" &&
+      (selectedJsonEntity.camera as { fov?: number }).fov) ||
+    null;
   const currentModelPmd =
     (currentModelId &&
       sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||
@@ -1136,6 +1183,8 @@ export default function App() {
                 onLightChange={isTauri && sceneDoc ? setEntityLight : undefined}
                 isCamera={currentCamera}
                 onCameraChange={isTauri && sceneDoc ? setEntityCamera : undefined}
+                camFov={currentCamFov}
+                onCamFovChange={isTauri && sceneDoc ? setEntityCamFov : undefined}
                 focusNameSignal={renameFocus}
               />
             ) : (

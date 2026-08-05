@@ -23,7 +23,12 @@ export interface PscEntity {
   model: number;
   /** Composants : ENTITY_FLAG_LIGHT / ENTITY_FLAG_CAMERA. */
   flags: number;
+  /** FOV vertical caméra en degrés (0 = défaut PS1, ~74°). */
+  camFov: number;
 }
+
+/** FOV vertical de la projection PS1 native (h = 160) : 2·atan(120/160). */
+export const PS1_DEFAULT_FOV = (2 * Math.atan(120 / 160) * 180) / Math.PI;
 
 /** Lumière directionnelle portée par une entité (v1.2). */
 export interface PscLight {
@@ -105,6 +110,7 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
       parent: parent === NO_INDEX ? -1 : parent,
       model: model === NO_INDEX ? -1 : model,
       flags: data.getUint16(rec + 0x1c, true),
+      camFov: data.getUint16(rec + 6, true),
     });
   }
 

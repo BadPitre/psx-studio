@@ -18,6 +18,8 @@ export interface SceneGraph {
   lights: PscLight[];
   /** Flags par entité (composants lumière/caméra). */
   entityFlags: number[];
+  /** FOV caméra par entité (0 = défaut PS1). */
+  entityCamFov: number[];
 }
 
 function timToTexture(scene: PscScene, index: number): THREE.DataTexture | null {
@@ -143,5 +145,6 @@ export function buildSceneGraph(scene: PscScene): SceneGraph {
     lighting,
     lights: scene.lights,
     entityFlags: scene.entities.map((e) => e.flags),
+    entityCamFov: scene.entities.map((e) => e.camFov),
   };
 }

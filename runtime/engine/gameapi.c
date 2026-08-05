@@ -78,7 +78,22 @@ int Scene_ApplyCamera(void)
 	 * les modeles et les lumieres). La camera GTE (fpscam) tourne en
 	 * sens miroir sur le yaw : yaw_cam = 180° - rot.vy. */
 	Camera_Set(cam->world.t[0], cam->world.t[1], cam->world.t[2],
-		(2048 - cam->rot.vy) & 4095, cam->rot.vx);
+		(2048 - cam->rot.vy) & 4095, -cam->rot.vx);
+
+	/* FOV vertical (degres) -> distance de projection GTE :
+	 * h = 120 / tan(fov/2) = 120 * cos / sin (4.12). 0 = defaut PS1
+	 * (h = 160, soit ~74 degres). */
+	if (cam->cam_fov >= 10 && cam->cam_fov <= 170)
+	{
+		int half = ((int)cam->cam_fov * 4096) / 720; /* fov/2 en unites PS1 */
+		int s = isin(half);
+		if (s > 0)
+			gte_SetGeomScreen((120 * icos(half)) / s);
+	}
+	else
+	{
+		gte_SetGeomScreen(160);
+	}
 	return 1;
 }
 

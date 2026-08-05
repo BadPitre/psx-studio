@@ -127,15 +127,41 @@ pub struct EntityJson {
     /// Composant caméra (v1.2) : la première entité caméra donne la vue
     /// initiale de la scène. Convention unique du studio : une entité
     /// « regarde » le long de son axe -Z local (modèles, lumières,
-    /// caméras).
+    /// caméras). Accepte `true` ou `{ "fov": 74 }` (FOV vertical en
+    /// degrés ; défaut 74 ≈ la projection PS1 native, h = 160).
     #[serde(default)]
-    pub camera: bool,
+    pub camera: CameraJson,
 }
 
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct LightJson {
     pub color: [u8; 3],
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(untagged)]
+pub enum CameraJson {
+    Enabled(bool),
+    Props { fov: f32 },
+}
+
+impl Default for CameraJson {
+    fn default() -> Self {
+        CameraJson::Enabled(false)
+    }
+}
+
+impl CameraJson {
+    pub fn enabled(&self) -> bool {
+        !matches!(self, CameraJson::Enabled(false))
+    }
+    pub fn fov(&self) -> Option<f32> {
+        match self {
+            CameraJson::Props { fov } => Some(*fov),
+            CameraJson::Enabled(_) => None,
+        }
+    }
 }
 
 /// Flags d'entité (champ réservé depuis la v1).
@@ -446,7 +472,25 @@ pub fn build_with_options(
             quantize_i16(e.scale[1] * ONE_4_12 as f32, "scale.y", &e.name)?,
             quantize_i16(e.scale[2] * ONE_4_12 as f32, "scale.z", &e.name)?,
         ];
-        push_svec(&mut entities, pos);
+        // FOV caméra (v1.2) : logé dans le pad du vecteur position
+        // (u16, degrés verticaux, 0 = défaut — pad nul sur les anciens
+        // fichiers, donc rétrocompatible).
+        let cam_fov = match e.camera.fov() {
+            Some(f) => {
+                if !(10.0..=170.0).contains(&f) {
+                    return Err(format!(
+                        "entity '{}': fov {f} hors plage (10-170 degrés)",
+                        e.name
+                    ));
+                }
+                f.round() as u16
+            }
+            None => 0,
+        };
+        for c in pos {
+            entities.extend_from_slice(&c.to_le_bytes());
+        }
+        entities.extend_from_slice(&cam_fov.to_le_bytes());
         push_svec(&mut entities, rot);
         push_svec(&mut entities, scale);
         let parent = match &e.parent {
@@ -465,7 +509,7 @@ pub fn build_with_options(
         if e.light.is_some() {
             flags |= ENTITY_FLAG_LIGHT;
         }
-        if e.camera {
+        if e.camera.enabled() {
             flags |= ENTITY_FLAG_CAMERA;
         }
         entities.extend_from_slice(&flags.to_le_bytes());

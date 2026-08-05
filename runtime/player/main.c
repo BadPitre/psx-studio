@@ -162,7 +162,7 @@ static void ResetCamera(FreeCamera* cam, const Scene* scene)
 		cam->pos.vz = c->world.t[2];
 		/* L'entite regarde vers -Z local ; la fpscam est en miroir yaw. */
 		cam->yaw = (2048 - c->rot.vy) & 4095;
-		cam->pitch = c->rot.vx;
+		cam->pitch = -c->rot.vx;
 		return;
 	}
 	cam->pos.vx = 0;

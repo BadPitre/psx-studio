@@ -213,3 +213,42 @@ fn lights_table_and_camera_flags() {
     assert_eq!(h3.light_count, 2);
     assert!(report.warnings.iter().any(|w| w.contains("l3")), "{:?}", report.warnings);
 }
+
+#[test]
+fn camera_fov_in_entity_pad() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    let json = r#"{
+      "name": "cams",
+      "assets": { "textures": [], "models": [] },
+      "entities": [
+        { "name": "large", "camera": { "fov": 96 } },
+        { "name": "simple", "camera": true },
+        { "name": "rien" }
+      ]
+    }"#;
+    let p = dir.path().join("cams.json");
+    std::fs::write(&p, json).unwrap();
+    let (bytes, _) = scene::build_file(&p).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    let fov_at = |i: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + 6], bytes[rec + 7]])
+    };
+    let flags_at = |i: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + 0x1C], bytes[rec + 0x1D]])
+    };
+    assert_eq!(fov_at(0), 96);
+    assert_eq!(flags_at(0), scene::ENTITY_FLAG_CAMERA);
+    assert_eq!(fov_at(1), 0); // défaut (h = 160, ~74°)
+    assert_eq!(flags_at(1), scene::ENTITY_FLAG_CAMERA);
+    assert_eq!(fov_at(2), 0);
+    assert_eq!(flags_at(2), 0);
+
+    // FOV hors plage : erreur claire.
+    let bad = json.replace("96", "500");
+    std::fs::write(&p, bad).unwrap();
+    assert!(scene::build_file(&p).unwrap_err().contains("fov"));
+}

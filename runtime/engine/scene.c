@@ -228,6 +228,8 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 		ent->parent = (rec->parent == PSC_NO_INDEX) ? -1 : (int16_t)rec->parent;
 		ent->script = rec->script;
 		ent->flags = rec->flags;
+		/* v1.2 : le FOV camera vit dans le pad du vecteur position. */
+		ent->cam_fov = (uint16_t)rec->pos.pad;
 		ent->visible = 1;
 		ent->solid = (ent->model >= 0);
 	}

@@ -11,7 +11,12 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import { ENTITY_FLAG_CAMERA, ENTITY_FLAG_LIGHT, type PscScene } from "../formats/psc";
+import {
+  ENTITY_FLAG_CAMERA,
+  ENTITY_FLAG_LIGHT,
+  PS1_DEFAULT_FOV,
+  type PscScene,
+} from "../formats/psc";
 import { buildSceneGraph, applyEntityTransform, type SceneGraph } from "./scene3d";
 import { updateLightUniforms, PS1_RESOLUTION } from "./ps1material";
 
@@ -43,6 +48,11 @@ export interface ViewportProps {
 
 const MOVE_SPEED = 420; // unités monde / seconde
 const LOOK_SPEED = 0.0045;
+/* Les groupes vivent sous la racine miroir (scale.y = -1, monde PS1 ->
+ * three). Pour poser une caméra three sur une entité il faut conjuguer :
+ * M_three = M_groupe · S(1,-1,1) — translation intacte, orientation
+ * remise en base directe (det > 0), sinon l'image sort à l'envers. */
+const MIRROR_Y = new THREE.Matrix4().makeScale(1, -1, 1);
 
 export function Viewport({
   scene,
@@ -57,6 +67,7 @@ export function Viewport({
 }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const pipRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
     camera: THREE.PerspectiveCamera;
@@ -110,6 +121,15 @@ export function Viewport({
     resize();
     const resizeObs = new ResizeObserver(resize);
     resizeObs.observe(overlay);
+
+    /* Prévisualisation caméra (PiP) : la vue de l'entité caméra
+     * sélectionnée, rendue en vrai 320x240 pixelisé, façon Unreal. */
+    const pip = pipRef.current!;
+    const pipRenderer = new THREE.WebGLRenderer({ canvas: pip, antialias: false });
+    pipRenderer.setSize(PS1_RESOLUTION.x, PS1_RESOLUTION.y, false);
+    pipRenderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    const pipCam = new THREE.PerspectiveCamera(PS1_DEFAULT_FOV, 320 / 240, 10, 8192);
+    pipCam.matrixAutoUpdate = false;
 
     /* Gizmo de manipulation (position/rotation/échelle). Les entités
      * portent leur transform locale PS1 directement sur leur groupe :
@@ -291,21 +311,20 @@ export function Viewport({
         applyCamera();
       }
 
-      if (s.graph) {
-        // Lumière 0 = soleil des settings ; 1-2 = entités-lumières, dont
-        // la direction suit la rotation courante du groupe (gizmo,
-        // overrides) : +Z local en monde three (le miroir Y de la racine
-        // est inclus dans matrixWorld).
-        s.graph.root.updateMatrixWorld(true);
-        const t = s.graph.lighting.toward;
+      // Lumière 0 = soleil des settings ; 1-2 = entités-lumières, dont
+      // la direction suit la rotation courante du groupe (gizmo,
+      // overrides) : +Z local en monde three (le miroir Y de la racine
+      // est inclus dans matrixWorld).
+      const currentLights = (graph: SceneGraph) => {
+        const t = graph.lighting.toward;
         const lights = [
           {
             towardThree: new THREE.Vector3(t[0], -t[1], t[2]),
-            color: s.graph.lighting.color,
+            color: graph.lighting.color,
           },
         ];
-        for (const light of s.graph.lights) {
-          const group = s.graph.entityGroups[light.entity];
+        for (const light of graph.lights) {
+          const group = graph.entityGroups[light.entity];
           if (!group || lights.length >= 3) continue;
           lights.push({
             towardThree: new THREE.Vector3(0, 0, 1).transformDirection(
@@ -314,7 +333,12 @@ export function Viewport({
             color: light.color,
           });
         }
-        updateLightUniforms(s.graph.materials, s.camera, lights);
+        return lights;
+      };
+
+      if (s.graph) {
+        s.graph.root.updateMatrixWorld(true);
+        updateLightUniforms(s.graph.materials, s.camera, currentLights(s.graph));
 
         // Marqueurs de composants : suivent la transform courante.
         for (const h of s.flagHelpers) {
@@ -328,8 +352,8 @@ export function Viewport({
             );
           } else if (h.cam) {
             // Convention unique : l'entité regarde vers -Z local, comme
-            // les caméras three — matrice reprise telle quelle.
-            h.cam.matrixWorld.copy(group.matrixWorld);
+            // les caméras three (conjugaison du miroir racine).
+            h.cam.matrixWorld.copy(group.matrixWorld).multiply(MIRROR_Y);
             h.obj.matrixWorldNeedsUpdate = true;
           }
         }
@@ -337,6 +361,29 @@ export function Viewport({
       s.highlight?.update();
       s.renderer.render(s.three, s.camera);
       overlayRenderer.render(s.overlayScene, s.camera);
+
+      /* PiP : rendu depuis l'entité caméra sélectionnée. Les uniforms de
+       * lumière sont en espace vue -> les recalculer pour cette caméra
+       * (ils sont refaits pour la vue éditeur au tick suivant). */
+      const sel = liveRef.current.selected;
+      const pipActive =
+        s.graph !== null &&
+        sel >= 0 &&
+        (s.graph.entityFlags[sel] & ENTITY_FLAG_CAMERA) !== 0;
+      pip.style.display = pipActive ? "block" : "none";
+      if (pipActive && s.graph) {
+        const group = s.graph.entityGroups[sel];
+        pipCam.matrixWorld.copy(group.matrixWorld).multiply(MIRROR_Y);
+        pipCam.matrixWorldInverse.copy(pipCam.matrixWorld).invert();
+        const fov = s.graph.entityCamFov[sel] || PS1_DEFAULT_FOV;
+        if (Math.abs(pipCam.fov - fov) > 0.01) {
+          pipCam.fov = fov;
+          pipCam.updateProjectionMatrix();
+        }
+        const pipLights = currentLights(s.graph);
+        updateLightUniforms(s.graph.materials, pipCam, pipLights);
+        pipRenderer.render(s.three, pipCam);
+      }
     };
     raf = requestAnimationFrame(loop);
     return () => {
@@ -345,6 +392,7 @@ export function Viewport({
       window.removeEventListener("keyup", onSnapKey);
       resizeObs.disconnect();
       gizmo.dispose();
+      pipRenderer.dispose();
       overlayRenderer.dispose();
       renderer.dispose();
       stateRef.current = null;
@@ -401,7 +449,8 @@ export function Viewport({
         s.flagHelpers.push({ kind: "light", entity: i, obj: arrow });
       }
       if (flags & ENTITY_FLAG_CAMERA) {
-        const cam = new THREE.PerspectiveCamera(53, 4 / 3, 30, 300);
+        const fov = graph.entityCamFov[i] || PS1_DEFAULT_FOV;
+        const cam = new THREE.PerspectiveCamera(fov, 4 / 3, 30, 300);
         cam.matrixAutoUpdate = false;
         cam.updateProjectionMatrix();
         const helper = new THREE.CameraHelper(cam);
@@ -459,6 +508,13 @@ export function Viewport({
         ref={overlayRef}
         className="viewport-overlay"
         title="Gizmo : 1 déplacer · 2 rotation · 3 échelle · Ctrl = snap — Clic gauche : orbite/sélection · Clic droit tenu : caméra FPS (ZQSD, E/Espace ↑, Q ↓, Shift rapide) · Molette : avancer · Clic milieu : pan"
+      />
+      <canvas
+        ref={pipRef}
+        className="viewport-pip"
+        width={PS1_RESOLUTION.x}
+        height={PS1_RESOLUTION.y}
+        title="Vue de la caméra sélectionnée (rendu console 320x240)"
       />
     </div>
   );

@@ -527,7 +527,7 @@ pub fn scene_village_json() -> &'static str {
     { "name": "perso",   "position": [0, 0, -60],    "scale": [0.5, 0.5, 0.5], "model": "guy", "script": "player" },
     { "name": "pnj",     "position": [60, 0, 290],   "scale": [0.5, 0.5, 0.5], "model": "guy", "script": "npc" },
     { "name": "lune",    "position": [300, -260, 500], "rotation": [35, -120, 0], "light": { "color": [70, 90, 160] } },
-    { "name": "camera",  "position": [0, -200, -420], "rotation": [21, 180, 0], "camera": true }
+    { "name": "camera",  "position": [0, -200, -420], "rotation": [-21, 180, 0], "camera": true }
   ]
 }
 "#
