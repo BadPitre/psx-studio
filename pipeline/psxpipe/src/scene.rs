@@ -126,6 +126,9 @@ pub struct SceneReport {
     pub warnings: Vec<String>,
     /// VRAM packing result (requests + placements), for the map export.
     pub vram: Vec<(vram::TexRequest, vram::Placement)>,
+    /// Entity names in FILE order (after the topological sort) — lets the
+    /// editor map .psc entity indices back to JSON entities.
+    pub entity_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -493,6 +496,10 @@ pub fn build_with_options(
     report.textures = texture_blobs.len();
     report.entities = n;
     report.total_size = total_size;
+    report.entity_names = order
+        .iter()
+        .map(|&i| scene.entities[i].name.clone())
+        .collect();
     Ok((out, report))
 }
 

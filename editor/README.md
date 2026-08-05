@@ -1,16 +1,26 @@
 # editor — éditeur desktop (Phase 4)
 
-Éditeur PSX Studio. **Part 1 (actuelle)** : visionneuse/inspecteur de
-scènes `.psc` dans le navigateur — viewport « PS1 authentique », hiérarchie,
-inspecteur de transform en direct. **Part 2 (à venir)** : enveloppe Tauri,
-édition/sauvegarde des `scene.json`, import drag & drop via psxpipe,
-VRAM Viewer, bouton Play (PCSX-Redux).
+Éditeur PSX Studio : app desktop **Tauri** (React + TypeScript + Three.js)
+avec `psxpipe` en dépendance Rust directe. Mode projet (édition des
+`scene.json`, rebuild à la volée, sauvegarde) + **Play Mode** PCSX-Redux
+(build + lancement + pause/reprise/reset via l'API web de l'émulateur).
 
-## Lancer
+## Lancer (desktop)
 
 ```powershell
 cd editor
 npm install
+cargo install tauri-cli --version "^2"   # une fois
+cargo tauri dev
+```
+
+Puis « Ouvrir un projet… » → `examples/demo` (après `cargo run --example
+gen_project` dans `pipeline/`). Le bouton **▶ Play** attend `pcsx-redux`
+dans le PATH (champ à droite de la barre pour un chemin complet).
+
+## Lancer (navigateur — visionneuse seule)
+
+```powershell
 npm run dev        # http://localhost:5173
 ```
 

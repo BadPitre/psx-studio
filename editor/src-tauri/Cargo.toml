@@ -1,0 +1,22 @@
+[package]
+name = "psx-studio-editor"
+version = "0.1.0"
+description = "PSX Studio - editeur de jeux 3D pour PlayStation 1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "psx_studio_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Le pipeline est branché en dépendance directe : l'éditeur convertit et
+# packe avec exactement le même code que le CLI psxpipe.
+psxpipe = { path = "../../pipeline/psxpipe" }

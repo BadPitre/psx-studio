@@ -121,3 +121,39 @@ body {
   gap: 4px;
 }
 .empty code { color: var(--accent); }
+
+.playbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: #191b22;
+  border-bottom: 1px solid var(--panel-border);
+}
+.button.play { background: #2d5a2d; border-color: #3a7a3a; font-weight: 600; }
+.button.play:hover { background: #367036; }
+.button:disabled { opacity: 0.5; cursor: default; }
+.status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.status-dot.run { background: #4caf50; }
+.status-dot.pause { background: #ffb300; }
+.status-dot.off { background: #666; }
+.status-text { color: var(--muted); }
+.emulator-path {
+  margin-left: auto;
+  width: 220px;
+  background: #14151b;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--muted);
+  padding: 3px 8px;
+  font: inherit;
+}
+.scene-select {
+  background: #14151b;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 3px 8px;
+  font: inherit;
+}
+.muted { color: var(--muted); }

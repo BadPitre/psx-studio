@@ -9,6 +9,7 @@
 pub mod gltf_import;
 pub mod pmd;
 pub mod project;
+pub mod redux;
 pub mod quant;
 pub mod samples;
 pub mod scene;

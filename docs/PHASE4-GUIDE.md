@@ -26,17 +26,35 @@ Application **Vite + React + TypeScript + Three.js** dans `editor/` :
 
 Lancer : voir `editor/README.md` (`npm install && npm run dev`).
 
-## Part 2 — à venir (l'éditeur complet)
+## Part 2 — livrée : Tauri + édition + Play Mode
 
-1. **Enveloppe Tauri** : accès disque projet, `psxpipe` en dépendance
-   Rust directe du backend.
-2. **Édition du `scene.json` source** (pas du binaire) + sauvegarde ;
-   le `.psc` devient un artefact de build à la volée.
-3. **Prototype Play Mode** — le risque n°1 : build incrémental + lancement
-   PCSX-Redux + connexion à son API (pause/reprise, lecture mémoire).
-4. Import d'assets par drag & drop (rapports psxpipe dans l'UI),
-   **VRAM Viewer** interactif (la carte PNG de la Phase 3 devient un
-   panneau), compteur de budgets permanent.
+- **Enveloppe Tauri v2** (`editor/src-tauri`) : `psxpipe` est branché en
+  **dépendance Rust directe** — l'éditeur convertit et packe avec
+  exactement le même code que le CLI. Lancer : `cargo tauri dev` depuis
+  `editor/` (prérequis : `cargo install tauri-cli`).
+- **Mode projet** : « Ouvrir un projet » (dossier avec `project.json`),
+  sélecteur de scènes, hiérarchie avec les **vrais noms** d'entités
+  (l'ordre topologique du .psc est corrélé au JSON par le rapport de
+  build). L'inspecteur **édite le `scene.json` source** : viewport mis à
+  jour immédiatement, `.psc` reconstruit à la volée (~400 ms), bouton
+  **Enregistrer** (le backend refuse d'écrire un JSON invalide).
+- **Play Mode** : bouton **▶ Play** = build incrémental du projet +
+  lancement de PCSX-Redux (`-run -loadiso <cue> -webserver`), puis
+  pilotage par son API web : statut en direct (en cours/en pause),
+  **Pause / Reprendre / Reset** depuis l'éditeur. Les routes de l'API
+  ont été vérifiées dans les sources de PCSX-Redux, et le client HTTP
+  Rust (`psxpipe::redux`) est testé contre un faux serveur. L'API
+  d'écriture RAM (`POST /api/v1/cpu/ram/raw`) est déjà encapsulée —
+  c'est la porte d'entrée du live tweaking à venir.
+- Le mode navigateur (visionneuse .psc) reste fonctionnel sans Tauri.
+
+## Reste pour clore la Phase 4
+
+1. Import d'assets par drag & drop (rapports psxpipe dans l'UI).
+2. **VRAM Viewer** interactif (la carte de la Phase 3 en panneau).
+3. Création/suppression d'entités et de scènes depuis l'UI (aujourd'hui :
+   édition des transforms ; la structure s'édite encore dans le JSON).
+4. Live tweaking en Play Mode (écriture RAM sur la table d'entités).
 
 ## Critères de sortie de la Part 1
 

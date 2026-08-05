@@ -43,3 +43,4 @@ pipeline/samples/*.vag
 Thumbs.db
 .vscode/
 .idea/
+editor/src-tauri/gen/

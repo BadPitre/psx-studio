@@ -1,10 +1,13 @@
-// PSX Studio — éditeur, Phase 4 (part 1) : visionneuse/inspecteur de
-// scènes .psc avec viewport PS1 authentique. L'édition du JSON source et
-// l'intégration Tauri (Play Mode PCSX-Redux) arrivent ensuite.
+// PSX Studio — éditeur, Phase 4.
+// Mode navigateur : visionneuse de .psc (drag & drop).
+// Mode Tauri (desktop) : projet complet — édition des scene.json avec
+// rebuild à la volée via psxpipe, sauvegarde, et Play Mode PCSX-Redux.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parsePsc, sceneTriangleCount, type PscScene } from "./formats/psc";
 import { Viewport } from "./viewport/Viewport";
+import { api, isTauri, pickProjectDir, type ProjectInfo } from "./bridge";
+import { PlayBar } from "./PlayBar";
 
 type Transform = {
   pos: [number, number, number];
@@ -16,14 +19,15 @@ type Transform = {
 
 function Hierarchy({
   scene,
+  names,
   selected,
   onSelect,
 }: {
   scene: PscScene;
+  names: string[];
   selected: number;
   onSelect: (i: number) => void;
 }) {
-  // Profondeur par entité (les parents précèdent toujours les enfants).
   const depths = useMemo(() => {
     const d: number[] = [];
     scene.entities.forEach((e, i) => {
@@ -43,7 +47,7 @@ function Hierarchy({
           onClick={() => onSelect(i)}
         >
           <span className="tree-icon">{e.model >= 0 ? "▣" : "○"}</span>
-          entité {i}
+          {names[i] ?? `entité ${i}`}
           {e.model >= 0 && (
             <span className="tree-meta">{scene.models[e.model].prims.length} tris</span>
           )}
@@ -90,11 +94,13 @@ function Vec3Field({
 
 function Inspector({
   scene,
+  name,
   selected,
   transform,
   onChange,
 }: {
   scene: PscScene;
+  name: string;
   selected: number;
   transform: Transform;
   onChange: (t: Transform) => void;
@@ -104,7 +110,7 @@ function Inspector({
   const toUnits = (deg: number) => Math.round((deg / 360) * 4096);
   return (
     <div className="panel">
-      <div className="panel-title">Inspecteur — entité {selected}</div>
+      <div className="panel-title">Inspecteur — {name}</div>
       <div className="field-group">
         <div className="field-group-title">Transform</div>
         <Vec3Field
@@ -142,8 +148,10 @@ function Inspector({
         )}
       </div>
       <div className="hint">
-        Position en unités monde (+Y vers le bas). Les éditions sont
-        appliquées en direct au viewport (non sauvegardées — Phase 4 suite).
+        Position en unités monde (+Y vers le bas).{" "}
+        {isTauri
+          ? "Les éditions modifient le scene.json — Enregistrer pour écrire sur disque."
+          : "Éditions locales au viewport (mode visionneuse)."}
       </div>
     </div>
   );
@@ -158,6 +166,14 @@ export default function App() {
   const [overrides, setOverrides] = useState<Map<number, Transform>>(new Map());
   const [error, setError] = useState<string>("");
 
+  /* Mode projet (Tauri). */
+  const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [scenePath, setScenePath] = useState<string>("");
+  const [sceneDoc, setSceneDoc] = useState<Record<string, unknown> | null>(null);
+  const [entityNames, setEntityNames] = useState<string[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const rebuildTimer = useRef<number>(0);
+
   const loadBuffer = useCallback((name: string, buffer: ArrayBuffer) => {
     try {
       setScene(parsePsc(buffer));
@@ -170,15 +186,100 @@ export default function App() {
     }
   }, []);
 
-  /* Scène de démo servie par vite (editor/public), si présente. */
+  /* Rebuild du .psc depuis le JSON (mode projet). */
+  const rebuild = useCallback(
+    async (doc: Record<string, unknown>, path: string, dir: string) => {
+      try {
+        const built = await api.buildScene(dir, path, JSON.stringify(doc));
+        const bytes = new Uint8Array(built.psc);
+        setScene(parsePsc(bytes.buffer));
+        setEntityNames(built.entity_names);
+        setOverrides(new Map());
+        setError(built.warnings.join(" · "));
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [],
+  );
+
+  const selectScene = useCallback(
+    async (proj: ProjectInfo, path: string) => {
+      try {
+        const text = await api.loadScene(proj.dir, path);
+        const doc = JSON.parse(text) as Record<string, unknown>;
+        setScenePath(path);
+        setSceneDoc(doc);
+        setSelected(-1);
+        setDirty(false);
+        setFileName(path);
+        await rebuild(doc, path, proj.dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [rebuild],
+  );
+
+  const openProject = useCallback(async () => {
+    const dir = await pickProjectDir();
+    if (!dir) return;
+    try {
+      const proj = await api.openProject(dir);
+      setProject(proj);
+      setError("");
+      if (proj.scenes.length > 0) await selectScene(proj, proj.scenes[0].path);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [selectScene]);
+
+  /* Édition d'une transform : viewport immédiat + JSON + rebuild différé. */
+  const editTransform = useCallback(
+    (index: number, t: Transform) => {
+      const next = new Map(overrides);
+      next.set(index, t);
+      setOverrides(next);
+      if (!isTauri || !sceneDoc || !project) return;
+
+      const name = entityNames[index];
+      const entities = (sceneDoc.entities as Record<string, unknown>[]) ?? [];
+      const entity = entities.find((e) => e.name === name);
+      if (!entity) return;
+      entity.position = t.pos;
+      entity.rotation = t.rot.map((u) => Math.round((u / 4096) * 3600) / 10);
+      entity.scale = t.scale;
+      setSceneDoc({ ...sceneDoc });
+      setDirty(true);
+
+      window.clearTimeout(rebuildTimer.current);
+      rebuildTimer.current = window.setTimeout(
+        () => rebuild(sceneDoc, scenePath, project.dir),
+        400,
+      );
+    },
+    [overrides, sceneDoc, project, entityNames, scenePath, rebuild],
+  );
+
+  const saveScene = useCallback(async () => {
+    if (!project || !sceneDoc) return;
+    try {
+      await api.saveScene(project.dir, scenePath, JSON.stringify(sceneDoc, null, 2) + "\n");
+      setDirty(false);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [project, sceneDoc, scenePath]);
+
+  /* Scène de démo (mode navigateur) + drag & drop. */
   useEffect(() => {
+    if (isTauri) return;
     fetch("/scene0.psc")
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject()))
       .then((buf) => loadBuffer("scene0.psc (démo)", buf))
       .catch(() => {});
   }, [loadBuffer]);
 
-  /* Drag & drop d'un .psc n'importe où dans la fenêtre. */
   useEffect(() => {
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
@@ -207,18 +308,44 @@ export default function App() {
     <div className="app">
       <header className="toolbar">
         <span className="logo">PSX STUDIO</span>
-        <label className="button">
-          Ouvrir une scène…
-          <input
-            type="file"
-            accept=".psc"
-            hidden
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) file.arrayBuffer().then((buf) => loadBuffer(file.name, buf));
-            }}
-          />
-        </label>
+        {isTauri ? (
+          <>
+            <button className="button" onClick={openProject}>
+              Ouvrir un projet…
+            </button>
+            {project && project.scenes.length > 0 && (
+              <select
+                className="scene-select"
+                value={scenePath}
+                onChange={(e) => selectScene(project, e.target.value)}
+              >
+                {project.scenes.map((s) => (
+                  <option key={s.path} value={s.path}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {project && (
+              <button className="button" onClick={saveScene} disabled={!dirty}>
+                {dirty ? "● Enregistrer" : "Enregistré"}
+              </button>
+            )}
+          </>
+        ) : (
+          <label className="button">
+            Ouvrir une scène…
+            <input
+              type="file"
+              accept=".psc"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) file.arrayBuffer().then((buf) => loadBuffer(file.name, buf));
+              }}
+            />
+          </label>
+        )}
         <span className="file-name">{fileName || "aucune scène chargée"}</span>
         {scene && (
           <span className="stats">
@@ -228,10 +355,16 @@ export default function App() {
         )}
         {error && <span className="error">{error}</span>}
       </header>
+      {isTauri && project && <PlayBar projectDir={project.dir} />}
       <main className="layout">
         {scene ? (
           <>
-            <Hierarchy scene={scene} selected={selected} onSelect={setSelected} />
+            <Hierarchy
+              scene={scene}
+              names={entityNames}
+              selected={selected}
+              onSelect={setSelected}
+            />
             <div className="viewport">
               <Viewport
                 scene={scene}
@@ -243,13 +376,10 @@ export default function App() {
             {currentTransform ? (
               <Inspector
                 scene={scene}
+                name={entityNames[selected] ?? `entité ${selected}`}
                 selected={selected}
                 transform={currentTransform}
-                onChange={(t) => {
-                  const next = new Map(overrides);
-                  next.set(selected, t);
-                  setOverrides(next);
-                }}
+                onChange={(t) => editTransform(selected, t)}
               />
             ) : (
               <div className="panel">
@@ -260,9 +390,18 @@ export default function App() {
           </>
         ) : (
           <div className="empty">
-            Glisse un fichier <code>.psc</code> ici, ou utilise « Ouvrir une scène… ».
-            <br />
-            (les scènes de démo sont dans <code>runtime/player/assets/</code>)
+            {isTauri ? (
+              <>
+                Ouvre un dossier projet (contenant <code>project.json</code>) —
+                par exemple <code>examples/demo</code>.
+              </>
+            ) : (
+              <>
+                Glisse un fichier <code>.psc</code> ici, ou utilise « Ouvrir une scène… ».
+                <br />
+                (les scènes de démo sont dans <code>runtime/player/assets/</code>)
+              </>
+            )}
           </div>
         )}
       </main>
