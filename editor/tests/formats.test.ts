@@ -94,7 +94,7 @@ describe("parsePsc sur scene1.psc (champ de cubes)", () => {
   const scene = loadScene("scene1.psc");
 
   it("charge la deuxième scène de démo", () => {
-    expect(scene.entities.length).toBe(10);
+    expect(scene.entities.length).toBe(12);
     expect(scene.background).toEqual([8, 8, 20]);
   });
 });

@@ -82,6 +82,11 @@ void Camera_Set(int32_t x, int32_t y, int32_t z, int yaw, int pitch);
  * scripts peuvent ensuite reprendre la main a chaque frame. */
 int Scene_ApplyCamera(void);
 
+/* Streaming : un script le met a 1 pour demander la bascule vers la
+ * scene prechargee (portail). La boucle de jeu consomme la demande
+ * quand le prechargement est pret. */
+extern int g_scene_switch_request;
+
 /* ------------------------------------------------------------- dialogue -- */
 /* Boite de dialogue en bas d'ecran (jusqu'a 3 lignes, separees par \n).
  * Le texte doit rester valide tant que la boite est ouverte. */

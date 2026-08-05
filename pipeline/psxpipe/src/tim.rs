@@ -77,6 +77,31 @@ impl Default for TimOptions {
 
 /// Encode an RGBA8 image into a TIM.
 /// Pixels with alpha < 128 become fully transparent (VRAM value 0x0000).
+/// Choix automatique de la profondeur : 4 bpp si l'image tient en 16
+/// couleurs (transparence comprise — l'index 0 lui est réservé), sinon
+/// 8 bpp. Moitié de VRAM gagnée sans aucune perte quand ça tient.
+pub fn auto_bpp(rgba: &[u8]) -> Bpp {
+    let mut colors: Vec<[u8; 3]> = Vec::new();
+    let mut has_transparency = false;
+    for p in rgba.chunks_exact(4) {
+        if p[3] < 128 {
+            has_transparency = true;
+        } else {
+            colors.push([p[0], p[1], p[2]]);
+        }
+        if colors.len() > 4096 {
+            break; // largement au-dessus de 16, inutile de tout lire
+        }
+    }
+    colors.sort_unstable();
+    colors.dedup();
+    if colors.len() + has_transparency as usize <= 16 {
+        Bpp::Four
+    } else {
+        Bpp::Eight
+    }
+}
+
 pub fn encode(
     rgba: &[u8],
     width: u32,

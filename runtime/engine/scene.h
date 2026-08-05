@@ -148,6 +148,16 @@ typedef struct {
  * g_scripts and fills the editor beacon. Returns 0 on success. */
 int Scene_LoadFromCd(Scene* scene, const char* path);
 
+/* Streaming : precharge un .psc en asynchrone dans l'arene inactive
+ * (la lecture CD s'etale sur le gameplay, ~0,5 s pour 160 Ko a 2x).
+ * NB : la lecture CD coupe la musique CD-DA — la relancer apres. */
+int Scene_Preload(const char* path);
+/* 1 = pret, 0 = lecture en cours, -1 = aucun prechargement / erreur. */
+int Scene_PreloadReady(void);
+/* Bascule instantanee sur la scene prechargee (parse local, zero CD).
+ * Rappeler ensuite Scene_ApplyCamera + Scene_StartScripts. */
+int Scene_ActivatePreloaded(Scene* scene);
+
 /* Recompute every entity world matrix from the local transforms (call
  * once per frame, before Scene_Draw). */
 void Scene_UpdateWorld(Scene* scene);

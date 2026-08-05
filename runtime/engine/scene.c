@@ -24,12 +24,25 @@ _Static_assert(offsetof(PscHeader, lights_offset) == 56, "v1.2 layout");
 
 /* Scene arena ------------------------------------------------------------- */
 /* All per-scene data (the raw .psc file + runtime entity array) lives here.
- * Loading a scene resets the arena: no generic allocator, no leaks. */
+ * Loading a scene resets the arena: no generic allocator, no leaks.
+ *
+ * Streaming (lot B) : DEUX arenes en bascule. La scene active vit dans
+ * l'une pendant que la suivante se precharge en asynchrone dans l'autre
+ * (CdRead ne bloque pas ; on poll CdReadSync(1) chaque frame). Le
+ * changement de scene devient un simple parse local, sans lecture CD. */
 
-#define ARENA_SIZE (1024 * 1024)
+#define ARENA_SIZE (512 * 1024)
 
-static uint8_t	arena[ARENA_SIZE] __attribute__((aligned(2048)));
+static uint8_t	arenas[2][ARENA_SIZE] __attribute__((aligned(2048)));
 static size_t	arena_used;
+static int		active_arena;
+
+/* Etat du prechargement dans l'arene inactive. */
+static struct {
+	int			busy;		/* lecture CD en cours ou terminee */
+	int			done;
+	uint32_t	size;
+} preload;
 
 static Scene*	current_scene;
 
@@ -49,7 +62,7 @@ static void* Arena_Alloc(size_t size)
 	size = (size + 3) & ~(size_t)3;
 	assert(arena_used + size <= ARENA_SIZE);
 
-	void* ptr = &arena[arena_used];
+	void* ptr = &arenas[active_arena][arena_used];
 	arena_used += size;
 	return ptr;
 }
@@ -135,16 +148,10 @@ void* Scene_ReadFileToArena(const char* path, uint32_t* size_out)
 	return data;
 }
 
-int Scene_LoadFromCd(Scene* scene, const char* path)
+/* Parse + fixup d'un .psc deja present dans l'arene active (aucune
+ * lecture CD : c'est la moitie instantanee du chargement). */
+static int Scene_Parse(Scene* scene, uint8_t* data)
 {
-	/* Invalider la balise pendant le rechargement. */
-	g_editor_beacon.magic[0] = 0;
-
-	arena_used = 0;
-	uint8_t* data = (uint8_t*)Scene_ReadFileToArena(path, 0);
-	if (!data)
-		return -1;
-
 	const PscHeader* header = (const PscHeader*)data;
 	if (memcmp(header->magic, "PSC1", 4) != 0)
 		return -3;
@@ -336,6 +343,80 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 	g_editor_beacon.magic[0] = 'P';
 
 	return 0;
+}
+
+int Scene_LoadFromCd(Scene* scene, const char* path)
+{
+	/* Invalider la balise pendant le rechargement. */
+	g_editor_beacon.magic[0] = 0;
+
+	/* Un seul laser : si un prechargement est en vol, le laisser finir
+	 * avant de lancer une lecture bloquante (puis l'abandonner). */
+	if (preload.busy && !preload.done)
+		CdReadSync(0, 0);
+	preload.busy = 0;
+	preload.done = 0;
+
+	arena_used = 0;
+	uint8_t* data = (uint8_t*)Scene_ReadFileToArena(path, 0);
+	if (!data)
+		return -1;
+	return Scene_Parse(scene, data);
+}
+
+/* Streaming (lot B) ------------------------------------------------------- */
+
+int Scene_Preload(const char* path)
+{
+	if (preload.busy)
+		return -1;
+
+	CdlFILE file;
+	if (!CdSearchFile(&file, path))
+		return -1;
+	size_t sectors = (file.size + 2047) / 2048;
+	if (sectors * 2048 > ARENA_SIZE)
+		return -2;
+
+	CdControl(CdlSetloc, &file.pos, 0);
+	CdRead((int)sectors, (uint32_t*)arenas[active_arena ^ 1], CdlModeSpeed);
+	preload.busy = 1;
+	preload.done = 0;
+	preload.size = file.size;
+	return 0;
+}
+
+int Scene_PreloadReady(void)
+{
+	if (!preload.busy)
+		return -1;
+	if (preload.done)
+		return 1;
+	int remaining = CdReadSync(1, 0);
+	if (remaining < 0)
+	{
+		preload.busy = 0;
+		return -1;
+	}
+	if (remaining == 0)
+	{
+		preload.done = 1;
+		return 1;
+	}
+	return 0;
+}
+
+int Scene_ActivatePreloaded(Scene* scene)
+{
+	if (Scene_PreloadReady() != 1)
+		return -1;
+	preload.busy = 0;
+	preload.done = 0;
+
+	g_editor_beacon.magic[0] = 0;
+	active_arena ^= 1;
+	arena_used = ((preload.size + 2047) / 2048) * 2048;
+	return Scene_Parse(scene, arenas[active_arena]);
 }
 
 /* Per-frame updates ------------------------------------------------------- */

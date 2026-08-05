@@ -84,6 +84,11 @@ void Player_Update(Entity* self)
 		}
 	}
 
+	/* Portail : franchir le bord nord du terrain demande la bascule
+	 * vers la scene prechargee (streaming, bord a ~660). */
+	if (self->pos.vz > 590)
+		g_scene_switch_request = 1;
+
 	/* Camera suiveuse : derriere et au-dessus du perso (+Y = bas). */
 	Camera_Set(self->pos.vx, self->pos.vy - CAM_UP, self->pos.vz - CAM_BACK,
 		0, 240);

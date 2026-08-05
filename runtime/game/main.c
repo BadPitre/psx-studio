@@ -122,7 +122,13 @@ int main(int argc, const char** argv)
 			g_sfx_blip = Sfx_UploadVag(vag);
 	}
 
-	int err = Scene_LoadFromCd(&scene, "\\SCENE0.PSC;1");
+	static const char* const SCENE_PATHS[] = {
+		"\\SCENE0.PSC;1",
+		"\\SCENE1.PSC;1",
+	};
+	int scene_index = 0;
+
+	int err = Scene_LoadFromCd(&scene, SCENE_PATHS[scene_index]);
 	assert(err == 0);
 	SetBackground(&ctx, &scene.background);
 	/* Entite camera de la scene = vue initiale ; les scripts (camera de
@@ -130,10 +136,38 @@ int main(int argc, const char** argv)
 	Scene_ApplyCamera();
 	Scene_StartScripts(&scene);
 
+	/* Streaming : la scene suivante se precharge pendant qu'on joue. */
+	Scene_Preload(SCENE_PATHS[scene_index ^ 1]);
+
 	for (;;)
 	{
 		Input_Update();
 		Scene_UpdateScripts(&scene);
+
+		/* Bascule demandee par un script (portail) : si la scene
+		 * suivante est prete, changement INSTANTANE — le parse est
+		 * local, aucune lecture CD, aucun ecran de chargement. */
+		if (g_scene_switch_request)
+		{
+			int ready = Scene_PreloadReady();
+			if (ready == 1)
+			{
+				g_scene_switch_request = 0;
+				DrawSync(0);
+				err = Scene_ActivatePreloaded(&scene);
+				assert(err == 0);
+				SetBackground(&ctx, &scene.background);
+				Scene_ApplyCamera();
+				Scene_StartScripts(&scene);
+				scene_index ^= 1;
+				Scene_Preload(SCENE_PATHS[scene_index ^ 1]);
+			}
+			else if (ready < 0)
+			{
+				g_scene_switch_request = 0;
+			}
+		}
+
 		Scene_UpdateWorld(&scene);
 
 		MATRIX view;

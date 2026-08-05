@@ -29,15 +29,19 @@ au gizmo, s'anime par script, se règle en live tweaking.
 
 ## Lot B — Streaming (niveau 1 : préchargement)
 
-Objectif : plus aucun écran de chargement entre scènes.
+~~Objectif : plus aucun écran de chargement entre scènes.~~ — **livré** :
 
-- deux arènes en bascule ; `CdRead` asynchrone de la scène suivante
-  pendant le gameplay (poll par frame, ~0,5 s pour 150 Ko à 2×)
-- le format y est prêt depuis la Phase 2 : une scène = un fichier
-  contigu = une lecture, sans seek
-- contrainte à gérer : un seul laser — pause de la musique CD-DA pendant
-  le préchargement (les alternatives XA/SPU sont hors lot)
-- démo : village → champ de cubes sans coupure
+- deux arènes de 512 Ko en bascule ; `Scene_Preload()` lit la scène
+  suivante en asynchrone pendant le gameplay (`CdRead` + poll
+  `CdReadSync(1)` par frame), `Scene_ActivatePreloaded()` bascule
+  instantanément (parse local, zéro lecture CD)
+- garde-fou mono-laser : un chargement bloquant attend la fin d'un
+  préchargement en vol ; la musique CD-DA reste à relancer par
+  l'appelant après toute lecture
+- démo : franchir le bord nord du village bascule sans coupure vers le
+  champ de cubes (portail via `g_scene_switch_request` posé par le
+  script player), et réciproquement — la scène suivante se re-précharge
+  aussitôt
 - **Niveau 2** (monde sans couture, zones adjacentes, style Soul
   Reaver) : projet ultérieur ; prérequis = packer VRAM contraint à des
   pages disjointes par zone + design de frontières

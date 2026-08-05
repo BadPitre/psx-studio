@@ -9,16 +9,20 @@
   "assets": {
     "textures": [
       { "id": "checker_tex", "tim": "checker.tim" },
-      { "id": "house_tex",   "tim": "house.tim" }
+      { "id": "house_tex",   "tim": "house.tim" },
+      { "id": "guy_tex",     "tim": "guy.tim" }
     ],
     "models": [
       { "id": "cube",   "pmd": "cube.pmd",   "texture": "checker_tex" },
       { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
-      { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" }
+      { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" },
+      { "id": "guy",    "pmd": "guy.pmd",    "texture": "guy_tex" }
     ]
   },
   "entities": [
     { "name": "sol",    "position": [0, 0, 200],     "scale": [4.5, 1.0, 4.5], "model": "ground" },
+    { "name": "perso",  "position": [0, 0, -100],    "scale": [0.5, 0.5, 0.5], "model": "guy", "script": "player" },
+    { "name": "camera", "position": [0, -200, -460], "rotation": [-21, 180, 0], "camera": true },
     { "name": "cube11", "position": [-200, -40, 80],  "rotation": [0, 15, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube12", "position": [0, -40, 80],     "rotation": [0, 30, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube13", "position": [200, -40, 80],   "rotation": [0, 45, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },

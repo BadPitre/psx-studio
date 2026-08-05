@@ -69,6 +69,8 @@ void Camera_Set(int32_t x, int32_t y, int32_t z, int yaw, int pitch)
 	cam_pitch = pitch;
 }
 
+int g_scene_switch_request;
+
 int Scene_ApplyCamera(void)
 {
 	Scene* scene = Scene_Current();
