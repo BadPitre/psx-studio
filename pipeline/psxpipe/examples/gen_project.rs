@@ -1,5 +1,7 @@
 //! Generate the source assets of the demo project (examples/demo):
-//! glTF models + PNG textures into assets/, WAV audio into audio/.
+//! glTF models + PNG textures into assets/, WAV audio into audio/,
+//! and the demo scene JSONs into scenes/ (overwritten: they must stay in
+//! sync with the sample assets — e.g. the guy model + scripts of Phase 5).
 //! The project then builds with: psxpipe build ../examples/demo
 //!
 //! Usage: cargo run --example gen_project -- [project-dir]
@@ -12,5 +14,11 @@ fn main() {
     );
     psxpipe::samples::write_all(&dir.join("assets")).expect("failed to write assets");
     psxpipe::samples::write_audio(&dir.join("audio")).expect("failed to write audio");
+    let scenes = dir.join("scenes");
+    std::fs::create_dir_all(&scenes).expect("failed to create scenes/");
+    std::fs::write(scenes.join("scene0.json"), psxpipe::samples::scene_village_json())
+        .expect("failed to write scene0.json");
+    std::fs::write(scenes.join("scene1.json"), psxpipe::samples::scene_field_json())
+        .expect("failed to write scene1.json");
     println!("demo project sources written to {}", dir.display());
 }

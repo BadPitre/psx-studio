@@ -245,7 +245,9 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 	Scene_UpdateWorld(scene);
 
 	/* Balise editeur (live tweaking) : etat coherent d'abord, magic en
-	 * dernier — l'editeur scanne le dump RAM pour la trouver. */
+	 * dernier — l'editeur scanne le dump RAM pour la trouver. Le magic
+	 * complet ne doit exister nulle part ailleurs en RAM : on ne stocke
+	 * que la queue en .rodata et le 'P' initial est ecrit tout a la fin. */
 	g_editor_beacon.version = 1;
 	g_editor_beacon.entity_size = sizeof(Entity);
 	g_editor_beacon.entities_addr = (uint32_t)scene->entities;
@@ -253,7 +255,8 @@ int Scene_LoadFromCd(Scene* scene, const char* path)
 	g_editor_beacon.pos_offset = offsetof(Entity, pos);
 	g_editor_beacon.rot_offset = offsetof(Entity, rot);
 	g_editor_beacon.scale_offset = offsetof(Entity, scale);
-	memcpy(g_editor_beacon.magic, "PSXSTUDIOBCN", 12);
+	memcpy(g_editor_beacon.magic + 1, "SXSTUDIOBCN", 11);
+	g_editor_beacon.magic[0] = 'P';
 
 	return 0;
 }

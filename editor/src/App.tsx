@@ -442,7 +442,8 @@ export default function App() {
               t.rot.map(Math.round) as [number, number, number],
               t.scale.map((s) => Math.round(s * 4096)) as [number, number, number],
             )
-            .catch(() => {}); // balise absente (boot, vieux build) : silencieux
+            .then(() => setNotice((n) => (n.startsWith("live tweak") ? "" : n)))
+            .catch((e) => setNotice(`live tweak : ${e}`));
         }, 80);
       }
 

@@ -144,28 +144,53 @@ pub struct Beacon {
 
 const BEACON_MAGIC: &[u8; 12] = b"PSXSTUDIOBCN";
 
-/// Cherche la balise dans un dump RAM complet.
-pub fn find_beacon(ram: &[u8]) -> Option<Beacon> {
-    let pos = ram
-        .windows(BEACON_MAGIC.len())
-        .position(|w| w == BEACON_MAGIC)?;
-    let b = &ram[pos..];
+/// Tente de parser une balise à cet emplacement ; None si le contenu qui
+/// suit le magic n'est pas plausible (ex. le magic apparaît ailleurs en
+/// RAM, comme un littéral dans le code du jeu).
+fn parse_beacon_at(b: &[u8]) -> Option<Beacon> {
     if b.len() < 28 {
         return None;
     }
     let u16at = |o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
-    let version = u16at(12);
-    if version != 1 {
+    if u16at(12) != 1 {
         return None;
     }
-    Some(Beacon {
+    let beacon = Beacon {
         entity_size: u16at(14),
         entities_addr: u32::from_le_bytes(b[16..20].try_into().unwrap()),
         entity_count: u16at(20),
         pos_offset: u16at(22),
         rot_offset: u16at(24),
         scale_offset: u16at(26),
-    })
+    };
+    // Sanity : la table doit pointer dans la RAM (2 Mo, adresses KSEG ou
+    // KUSEG) et les offsets tenir dans une entité de taille raisonnable.
+    let phys = beacon.entities_addr & 0x1fff_ffff;
+    let plausible = beacon.entity_size >= 28
+        && beacon.entity_size <= 1024
+        && beacon.entity_count > 0
+        && phys < 0x0020_0000
+        && beacon.pos_offset < beacon.entity_size
+        && beacon.rot_offset < beacon.entity_size
+        && beacon.scale_offset < beacon.entity_size;
+    plausible.then_some(beacon)
+}
+
+/// Cherche la balise dans un dump RAM complet. Toutes les occurrences du
+/// magic sont examinées : seule celle suivie d'un contenu valide gagne.
+pub fn find_beacon(ram: &[u8]) -> Option<Beacon> {
+    let mut start = 0;
+    while let Some(rel) = ram[start..]
+        .windows(BEACON_MAGIC.len())
+        .position(|w| w == BEACON_MAGIC)
+    {
+        let pos = start + rel;
+        if let Some(beacon) = parse_beacon_at(&ram[pos..]) {
+            return Some(beacon);
+        }
+        start = pos + 1;
+    }
+    None
 }
 
 impl ReduxClient {
@@ -327,6 +352,24 @@ mod tests {
     fn beacon_absent_or_wrong_version_is_none() {
         assert_eq!(find_beacon(&vec![0u8; 4096]), None);
         assert_eq!(find_beacon(&ram_with_beacon(64, 2)), None);
+    }
+
+    /// Le magic peut apparaître comme littéral dans le code du jeu chargé
+    /// en RAM (avant la vraie balise) : le scan doit passer outre.
+    #[test]
+    fn beacon_scan_skips_rodata_lookalikes() {
+        let mut ram = ram_with_beacon(0x8000, 1);
+        // Faux positif 1 : magic suivi de zéros (version 0).
+        ram[0x100..0x10c].copy_from_slice(BEACON_MAGIC);
+        // Faux positif 2 : version 1 mais adresse hors RAM.
+        ram[0x400..0x40c].copy_from_slice(BEACON_MAGIC);
+        ram[0x40c..0x40e].copy_from_slice(&1u16.to_le_bytes());
+        ram[0x40e..0x410].copy_from_slice(&112u16.to_le_bytes());
+        ram[0x410..0x414].copy_from_slice(&0xdead_beefu32.to_le_bytes());
+        ram[0x414..0x416].copy_from_slice(&7u16.to_le_bytes());
+
+        let b = find_beacon(&ram).expect("vraie balise non trouvée");
+        assert_eq!(b.entities_addr, 0x8003_4a20);
     }
 
     #[test]
