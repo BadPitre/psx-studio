@@ -346,6 +346,11 @@ pub fn write_all(dir: &Path) -> Result<(), String> {
     std::fs::write(dir.join("house.gltf"), house.to_gltf("House", "house.bin"))
         .map_err(|e| e.to_string())?;
 
+    let ground = plane_mesh(8);
+    std::fs::write(dir.join("ground.bin"), ground.to_bin()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("ground.gltf"), ground.to_gltf("Ground", "ground.bin"))
+        .map_err(|e| e.to_string())?;
+
     let size = 256u32;
     for (name, rgba) in [("checker.png", checker_rgba(size)), ("house.png", house_rgba(size))] {
         let img: image::RgbaImage =
@@ -353,6 +358,34 @@ pub fn write_all(dir: &Path) -> Result<(), String> {
         img.save(dir.join(name)).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Flat ground plane subdivided into an NxN grid, one full texture repeat
+/// per cell. Small cells are how PS1 games did large grounds: each cell
+/// stays under the GPU primitive size limit (1023x511), depth-sorts
+/// locally in the OT, and tiles the texture instead of stretching it.
+pub fn plane_mesh(cells: u32) -> MeshData {
+    let mut m = MeshData {
+        positions: Vec::new(),
+        normals: Vec::new(),
+        uvs: Vec::new(),
+        indices: Vec::new(),
+    };
+    let step = 2.0 / cells as f32;
+    for cz in 0..cells {
+        for cx in 0..cells {
+            let x0 = -1.0 + cx as f32 * step;
+            let z0 = -1.0 + cz as f32 * step;
+            let (x1, z1) = (x0 + step, z0 + step);
+            // CCW seen from +Y (up in glTF space).
+            m.quad(
+                [[x0, 0.0, z0], [x0, 0.0, z1], [x1, 0.0, z1], [x1, 0.0, z0]],
+                [0.0, 1.0, 0.0],
+                [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]],
+            );
+        }
+    }
+    m
 }
 
 /// Demo scene "village": textured ground slab, three houses, a chimney
@@ -372,12 +405,13 @@ pub fn scene_village_json() -> &'static str {
       { "id": "house_tex",   "tim": "house.tim" }
     ],
     "models": [
-      { "id": "cube",  "pmd": "cube.pmd",  "texture": "checker_tex" },
-      { "id": "house", "pmd": "house.pmd", "texture": "house_tex" }
+      { "id": "cube",   "pmd": "cube.pmd",   "texture": "checker_tex" },
+      { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
+      { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" }
     ]
   },
   "entities": [
-    { "name": "sol",     "position": [0, 7, 150],    "scale": [4.0, 0.05, 4.0], "model": "cube" },
+    { "name": "sol",     "position": [0, 0, 150],    "scale": [4.0, 1.0, 4.0], "model": "ground" },
     { "name": "maison1", "position": [-160, 0, 120], "rotation": [0, 35, 0],  "model": "house" },
     { "name": "cheminee", "parent": "maison1", "position": [40, -105, 25], "scale": [0.14, 0.3, 0.14], "model": "cube" },
     { "name": "maison2", "position": [170, 0, 190],  "rotation": [0, -30, 0], "model": "house" },
@@ -404,12 +438,13 @@ pub fn scene_field_json() -> &'static str {
       { "id": "house_tex",   "tim": "house.tim" }
     ],
     "models": [
-      { "id": "cube",  "pmd": "cube.pmd",  "texture": "checker_tex" },
-      { "id": "house", "pmd": "house.pmd", "texture": "house_tex" }
+      { "id": "cube",   "pmd": "cube.pmd",   "texture": "checker_tex" },
+      { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
+      { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" }
     ]
   },
   "entities": [
-    { "name": "sol",    "position": [0, 7, 200],     "scale": [4.5, 0.05, 4.5], "model": "cube" },
+    { "name": "sol",    "position": [0, 0, 200],     "scale": [4.5, 1.0, 4.5], "model": "ground" },
     { "name": "cube11", "position": [-200, -40, 80],  "rotation": [0, 15, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube12", "position": [0, -40, 80],     "rotation": [0, 30, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube13", "position": [200, -40, 80],   "rotation": [0, 45, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
@@ -432,7 +467,11 @@ pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
 
     write_all(dir)?;
 
-    for (gltf_name, pmd_name) in [("cube.gltf", "cube.pmd"), ("house.gltf", "house.pmd")] {
+    for (gltf_name, pmd_name) in [
+        ("cube.gltf", "cube.pmd"),
+        ("house.gltf", "house.pmd"),
+        ("ground.gltf", "ground.pmd"),
+    ] {
         let (pmd, _) = gltf_import::import(&dir.join(gltf_name), &Default::default())?;
         std::fs::write(dir.join(pmd_name), pmd.write()?).map_err(|e| e.to_string())?;
     }

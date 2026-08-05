@@ -14,7 +14,7 @@ fn build_village() -> Vec<u8> {
 fn village_builds_and_parses() {
     let bytes = build_village();
     let h = scene::parse_header(&bytes).unwrap();
-    assert_eq!(h.model_count, 2);
+    assert_eq!(h.model_count, 3);
     assert_eq!(h.texture_count, 2);
     assert_eq!(h.entity_count, 5);
     assert_eq!(h.total_size as usize, bytes.len());
@@ -25,8 +25,8 @@ fn village_builds_and_parses() {
 
     // Tables are contiguous and 4-aligned.
     assert_eq!(h.models_offset, 64);
-    assert_eq!(h.textures_offset, 64 + 2 * 12);
-    assert_eq!(h.entities_offset, 64 + 2 * 12 + 2 * 8);
+    assert_eq!(h.textures_offset, 64 + 3 * 12);
+    assert_eq!(h.entities_offset, 64 + 3 * 12 + 2 * 8);
     for off in [h.models_offset, h.textures_offset, h.entities_offset] {
         assert_eq!(off % 4, 0);
     }

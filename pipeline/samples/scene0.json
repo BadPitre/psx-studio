@@ -12,12 +12,13 @@
       { "id": "house_tex",   "tim": "house.tim" }
     ],
     "models": [
-      { "id": "cube",  "pmd": "cube.pmd",  "texture": "checker_tex" },
-      { "id": "house", "pmd": "house.pmd", "texture": "house_tex" }
+      { "id": "cube",   "pmd": "cube.pmd",   "texture": "checker_tex" },
+      { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
+      { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" }
     ]
   },
   "entities": [
-    { "name": "sol",     "position": [0, 7, 150],    "scale": [4.0, 0.05, 4.0], "model": "cube" },
+    { "name": "sol",     "position": [0, 0, 150],    "scale": [4.0, 1.0, 4.0], "model": "ground" },
     { "name": "maison1", "position": [-160, 0, 120], "rotation": [0, 35, 0],  "model": "house" },
     { "name": "cheminee", "parent": "maison1", "position": [40, -105, 25], "scale": [0.14, 0.3, 0.14], "model": "cube" },
     { "name": "maison2", "position": [170, 0, 190],  "rotation": [0, -30, 0], "model": "house" },

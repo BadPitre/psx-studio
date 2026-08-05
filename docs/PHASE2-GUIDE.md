@@ -99,7 +99,10 @@ mapping affine). `--cam X,Y,Z`, `--yaw`, `--pitch` pour déplacer la caméra
 |---|---|---|
 | Écran figé au boot | fichier absent de l'ISO (`CdSearchFile` échoue → assert) | vérifier `iso.xml`, noms 8.3 majuscules (`SCENE0.PSC;1`) |
 | Textures corrompues après un switch | collisions VRAM entre scènes | garder les mêmes placements TIM d'une scène à l'autre, ou re-vérifier avec `psxpipe scene` |
-| Sol qui « nage » fortement | warping affine sur polys géants — authentique PS1 | subdivision prévue Phase 6 ; en attendant, subdiviser le sol dans Blender |
+| Grands polys qui disparaissent selon l'angle/la distance | le GPU PS1 **rejette** toute primitive > 1023×511 px à l'écran | subdiviser le mesh (cf. `plane_mesh` : le sol des démos est une grille 8×8) |
+| Textures très étirées sur de grandes surfaces | 256 texels max par poly + mapping affine | grille avec une répétition de texture par cellule (même fix) |
+| Un grand poly coupe/recouvre les objets posés dessus | tri OT par Z **moyen** : un poly géant a une seule profondeur | même fix — des cellules petites se trient localement |
+| Sol qui « nage » en mouvement | warping affine — authentique PS1, atténué par la grille | subdivision dynamique prévue Phase 6 |
 | Géométrie qui clignote en traversant un objet | pas de near-clipping (v1) | prévu avec la subdivision ; éviter de rentrer dans les meshes |
 | Modèle assombri par l'échelle | — corrigé : l'éclairage utilise la rotation non-échelléé | (référence si régression) |
 
