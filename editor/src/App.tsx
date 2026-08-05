@@ -156,6 +156,39 @@ const hexToRgb = (hex: string): [number, number, number] => [
   parseInt(hex.slice(5, 7), 16),
 ];
 
+/** Carte de composant façon Unity : titre, retrait, corps. */
+function ComponentCard({
+  icon,
+  title,
+  onRemove,
+  children,
+}: {
+  icon: string;
+  title: string;
+  onRemove?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="component-card">
+      <div className="component-head">
+        <span className="component-title">
+          {icon} {title}
+        </span>
+        {onRemove && (
+          <button
+            className="component-remove"
+            onClick={onRemove}
+            title={`Retirer le composant ${title}`}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <div className="component-body">{children}</div>
+    </div>
+  );
+}
+
 function Vec3Field({
   label,
   value,
@@ -250,6 +283,13 @@ function Inspector({
   useEffect(() => setDraftScript(script ?? ""), [script, selected]);
   const [draftSubdiv, setDraftSubdiv] = useState(subdiv == null ? "" : String(subdiv));
   useEffect(() => setDraftSubdiv(subdiv == null ? "" : String(subdiv)), [subdiv, selected]);
+  /* Carte Script présente sans script enregistré (juste ajoutée). */
+  const [pendingScript, setPendingScript] = useState(false);
+  useEffect(() => setPendingScript(false), [selected]);
+  /* Menu « Ajouter un composant ». */
+  const [addComp, setAddComp] = useState<{ x: number; y: number } | null>(null);
+  const editable = Boolean(onModelChange && onLightChange && onCameraChange && onScriptChange);
+  const hasMesh = editable ? currentModelId != null : entity.model >= 0;
   /* F2 / menu « Renommer » : focus + sélection du champ nom. */
   useEffect(() => {
     if (focusNameSignal) {
@@ -301,108 +341,111 @@ function Inspector({
           onChange={(scale) => onChange({ ...transform, scale })}
         />
       </div>
-      <div className="field-group">
-        <div className="field-group-title">MeshRenderer</div>
-        {onModelChange && modelIds ? (
-          <select
-            className="scene-select model-select"
-            value={currentModelId ?? ""}
-            onChange={(e) => onModelChange(e.target.value || null)}
-          >
-            <option value="">(aucun modèle)</option>
-            {modelIds.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <div className="field-readonly">
-            {entity.model >= 0
-              ? `modèle #${entity.model} — ${scene.models[entity.model].prims.length} triangles`
-              : "aucun modèle (nœud vide)"}
-          </div>
-        )}
-        {entity.parent >= 0 && (
+      {entity.parent >= 0 && (
+        <div className="field-group">
           <div className="field-readonly">parent : entité {entity.parent}</div>
-        )}
-        {onSubdivChange && entity.model >= 0 && (
-          <div className="field">
-            <label>Subdivision anti-warping</label>
+        </div>
+      )}
+
+      {/* Composants façon Unity : une carte par composant, retirable. */}
+      {hasMesh && (
+        <ComponentCard
+          icon="▣"
+          title="MeshRenderer"
+          onRemove={onModelChange ? () => onModelChange(null) : undefined}
+        >
+          {onModelChange && modelIds ? (
             <select
               className="scene-select model-select"
-              value={draftSubdiv}
-              onChange={(e) => {
-                setDraftSubdiv(e.target.value);
-                onSubdivChange(e.target.value === "" ? null : Number(e.target.value));
-              }}
-              title="Découpe les grands triangles du modèle pour limiter la déformation affine des textures (pour les sols et grands murs). Reconvertit le modèle immédiatement."
+              value={currentModelId ?? ""}
+              onChange={(e) => onModelChange(e.target.value || null)}
             >
-              <option value="">désactivée</option>
-              <option value="64">légère (arête max 64)</option>
-              <option value="48">moyenne (arête max 48)</option>
-              <option value="32">forte (arête max 32)</option>
-              {draftSubdiv !== "" && !["64", "48", "32"].includes(draftSubdiv) && (
-                <option value={draftSubdiv}>personnalisée ({draftSubdiv})</option>
-              )}
+              {modelIds.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
             </select>
-          </div>
-        )}
-      </div>
-      {onLightChange && onCameraChange && (
-        <div className="field-group">
-          <div className="field-group-title">Composants</div>
-          <label className="component-row">
-            <input
-              type="checkbox"
-              checked={!!light}
-              onChange={(e) => onLightChange(e.target.checked ? [255, 235, 200] : null)}
-            />
-            <span>☀ Lumière directionnelle</span>
-            {light && (
-              <input
-                type="color"
-                value={rgbToHex(light)}
-                onChange={(e) => onLightChange(hexToRgb(e.target.value))}
-                title="Couleur de la lumière (la rotation de l'entité donne la direction : elle éclaire le long de son axe -Z)"
-              />
-            )}
-          </label>
-          {light && onLightIntensityChange && (
-            <div className="camera-props">
-              <div className="field">
-                <label>
-                  Intensité — {Math.round((lightIntensity ?? 1) * 100)} %
-                </label>
-                <input
-                  type="range"
-                  min={10}
-                  max={250}
-                  step={5}
-                  value={Math.round((lightIntensity ?? 1) * 100)}
-                  onChange={(e) => {
-                    const pct = Number(e.target.value);
-                    onLightIntensityChange(pct === 100 ? null : pct / 100);
-                  }}
-                  title="Multiplicateur d'intensité : la matrice couleur du GTE est en 4.12, une lumière peut dépasser 100 %"
-                />
-              </div>
-              <div className="field-readonly">
-                directionnelle GTE · par sommet (Gouraud) · pas d'ombres ·
-                direction = rotation de l'entité (-Z local)
-              </div>
+          ) : (
+            <div className="field-readonly">
+              modèle #{entity.model} —{" "}
+              {entity.model >= 0 ? scene.models[entity.model].prims.length : 0} triangles
             </div>
           )}
-          <label className="component-row">
+          {onSubdivChange && entity.model >= 0 && (
+            <div className="field">
+              <label>Subdivision anti-warping</label>
+              <select
+                className="scene-select model-select"
+                value={draftSubdiv}
+                onChange={(e) => {
+                  setDraftSubdiv(e.target.value);
+                  onSubdivChange(e.target.value === "" ? null : Number(e.target.value));
+                }}
+                title="Découpe les grands triangles du modèle pour limiter la déformation affine des textures (pour les sols et grands murs). Reconvertit le modèle immédiatement."
+              >
+                <option value="">désactivée</option>
+                <option value="64">légère (arête max 64)</option>
+                <option value="48">moyenne (arête max 48)</option>
+                <option value="32">forte (arête max 32)</option>
+                {draftSubdiv !== "" && !["64", "48", "32"].includes(draftSubdiv) && (
+                  <option value={draftSubdiv}>personnalisée ({draftSubdiv})</option>
+                )}
+              </select>
+            </div>
+          )}
+        </ComponentCard>
+      )}
+
+      {light && (
+        <ComponentCard
+          icon="☀"
+          title="Lumière directionnelle"
+          onRemove={onLightChange ? () => onLightChange(null) : undefined}
+        >
+          <div className="field color-field">
+            <label>Couleur</label>
             <input
-              type="checkbox"
-              checked={!!isCamera}
-              onChange={(e) => onCameraChange(e.target.checked)}
+              type="color"
+              value={rgbToHex(light)}
+              disabled={!onLightChange}
+              onChange={(e) => onLightChange?.(hexToRgb(e.target.value))}
+              title="La rotation de l'entité donne la direction : elle éclaire le long de son axe -Z"
             />
-            <span>🎥 Caméra (vue initiale de la scène)</span>
-          </label>
-          {isCamera && onCamFovChange && (
-            <div className="camera-props">
+          </div>
+          {onLightIntensityChange && (
+            <div className="field">
+              <label>Intensité — {Math.round((lightIntensity ?? 1) * 100)} %</label>
+              <input
+                type="range"
+                min={10}
+                max={250}
+                step={5}
+                value={Math.round((lightIntensity ?? 1) * 100)}
+                onChange={(e) => {
+                  const pct = Number(e.target.value);
+                  onLightIntensityChange(pct === 100 ? null : pct / 100);
+                }}
+                title="Multiplicateur d'intensité : la matrice couleur du GTE est en 4.12, une lumière peut dépasser 100 %"
+              />
+            </div>
+          )}
+          <div className="field-readonly">
+            directionnelle GTE · par sommet (Gouraud) · pas d'ombres ·
+            direction = rotation de l'entité (-Z local) · 3 max par scène
+            (soleil des settings + 2 entités)
+          </div>
+        </ComponentCard>
+      )}
+
+      {isCamera && (
+        <ComponentCard
+          icon="🎥"
+          title="Caméra"
+          onRemove={onCameraChange ? () => onCameraChange(false) : undefined}
+        >
+          {onCamFovChange && (
+            <>
               <div className="field">
                 <label>FOV vertical (°)</label>
                 <input
@@ -430,45 +473,96 @@ function Inspector({
                   placeholder="illimitée"
                   onChange={(e) => {
                     const v = e.target.value === "" ? null : Number(e.target.value);
-                    if (v === null || (v >= 100 && v <= 32767))
-                      onCamDrawChange?.(v);
+                    if (v === null || (v >= 100 && v <= 32767)) onCamDrawChange?.(v);
                   }}
                   title="Les entités au-delà ne sont pas dessinées (culling par objet, le « pop » maîtrisé des jeux PS1). Le far plane du PiP la simule."
                 />
               </div>
-              <div className="field-readonly">
-                sortie : 320×240 · 4:3 · near ≈ 16 unités (garde GTE) ·
-                profondeur triée par Ordering Table (pas de z-buffer) ·
-                regard le long du -Z local
-              </div>
-            </div>
+            </>
           )}
-          <div className="hint" style={{ padding: "2px 0 0" }}>
-            3 lumières max (GTE) : le soleil des settings + 2 entités.
+          <div className="field-readonly">
+            vue initiale de la scène · sortie 320×240 · 4:3 · near ≈ 16
+            unités (garde GTE) · profondeur triée par Ordering Table ·
+            regard le long du -Z local
           </div>
-        </div>
+        </ComponentCard>
       )}
-      {onScriptChange && (
-        <div className="field-group">
-          <div className="field-group-title">Script</div>
+
+      {(script != null || pendingScript) && onScriptChange && (
+        <ComponentCard
+          icon="📜"
+          title="Script"
+          onRemove={() => {
+            setPendingScript(false);
+            setDraftScript("");
+            if (script != null) onScriptChange(null);
+          }}
+        >
           <input
             className="name-input"
             value={draftScript}
-            placeholder="(aucun script)"
+            placeholder="nom du script (ex. player, npc)"
             spellCheck={false}
+            autoFocus={pendingScript && !script}
             onChange={(e) => setDraftScript(e.target.value)}
             onBlur={() => {
               const trimmed = draftScript.trim();
               if (trimmed !== (script ?? "")) onScriptChange(trimmed || null);
+              if (!trimmed && script == null) setPendingScript(false);
             }}
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-            title="Nom du script runtime (résolu par hash au chargement de la scène, ex. player, npc)"
+            title="Nom du script runtime (résolu par hash au chargement de la scène)"
           />
           <div className="hint">
             Doit correspondre à un ScriptDef enregistré dans le jeu
             (<code>g_scripts</code>).
           </div>
+        </ComponentCard>
+      )}
+
+      {editable && (
+        <div className="add-component">
+          <button
+            className="button"
+            onClick={(e) => {
+              const r = (e.target as HTMLElement).getBoundingClientRect();
+              setAddComp({ x: r.left, y: r.bottom + 4 });
+            }}
+          >
+            ＋ Ajouter un composant
+          </button>
         </div>
+      )}
+      {addComp && (
+        <ContextMenu
+          x={addComp.x}
+          y={addComp.y}
+          onClose={() => setAddComp(null)}
+          actions={[
+            ...(!hasMesh && modelIds && modelIds.length > 0
+              ? [
+                  {
+                    label: "▣ MeshRenderer",
+                    onClick: () => onModelChange?.(modelIds[0]),
+                  },
+                ]
+              : []),
+            ...(!light
+              ? [
+                  {
+                    label: "☀ Lumière directionnelle",
+                    onClick: () => onLightChange?.([255, 235, 200]),
+                  },
+                ]
+              : []),
+            ...(!isCamera
+              ? [{ label: "🎥 Caméra", onClick: () => onCameraChange?.(true) }]
+              : []),
+            ...(script == null && !pendingScript
+              ? [{ label: "📜 Script", onClick: () => setPendingScript(true) }]
+              : []),
+          ]}
+        />
       )}
       <div className="hint">
         Position en unités monde (+Y vers le bas).{" "}
@@ -1067,19 +1161,29 @@ export default function App() {
       : undefined;
   const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
   const currentScript = (selectedJsonEntity?.script as string | undefined) ?? null;
+  /* Composants : source JSON en mode projet, .psc en mode visionneuse
+     (cartes en lecture seule). */
+  const pscEntity = scene && selected >= 0 ? scene.entities[selected] : undefined;
+  const pscLight = scene?.lights.find((l) => l.entity === selected);
   const currentLight =
     ((selectedJsonEntity?.light as { color?: [number, number, number] } | undefined)
-      ?.color as [number, number, number] | undefined) ?? null;
-  const currentCamera = Boolean(selectedJsonEntity?.camera);
+      ?.color as [number, number, number] | undefined) ??
+    (pscLight ? pscLight.color : null);
+  const currentCamera =
+    Boolean(selectedJsonEntity?.camera) ||
+    (!sceneDoc && Boolean((pscEntity?.flags ?? 0) & 2));
   const camProps =
     typeof selectedJsonEntity?.camera === "object"
       ? (selectedJsonEntity.camera as { fov?: number; draw_distance?: number })
       : {};
-  const currentCamFov = camProps.fov ?? null;
-  const currentCamDraw = camProps.draw_distance ?? null;
+  const currentCamFov =
+    camProps.fov ?? ((!sceneDoc && pscEntity?.camFov) || null);
+  const currentCamDraw =
+    camProps.draw_distance ?? ((!sceneDoc && pscEntity?.camDraw) || null);
   const currentLightIntensity =
     ((selectedJsonEntity?.light as { intensity?: number } | undefined)
-      ?.intensity as number | undefined) ?? null;
+      ?.intensity as number | undefined) ??
+    (pscLight && pscLight.intensity !== 1 ? pscLight.intensity : null);
   const currentModelPmd =
     (currentModelId &&
       sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||

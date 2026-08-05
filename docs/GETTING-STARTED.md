@@ -111,8 +111,11 @@ de triangles — surveille l'avertissement de budget.)
   FPS (ZQSD, Shift rapide), molette avance. Gizmos **1/2/3**
   (déplacer/rotation/échelle), Ctrl = snap. Rendu 320×240 authentique
   (snapping de sommets, affine, Gouraud GTE).
-- **Inspecteur** : transform, modèle, **Script** (nom résolu par hash
-  dans le jeu — voir §6).
+- **Inspecteur** : philosophie Unity — une entité porte des
+  **composants** en cartes retirables (✕) : MeshRenderer (modèle +
+  subdivision), Lumière (couleur, intensité), Caméra (FOV, distance
+  d'affichage), Script (nom résolu par hash — voir §6). Le bouton
+  « ＋ Ajouter un composant » liste ceux disponibles.
 - **VRAM** : bouton VRAM = carte des pages texture/CLUT réellement packées.
 - **▶ Play** : build incrémental + PCSX-Redux. Pendant que le jeu tourne,
   déplacer une entité (gizmo ou inspecteur) **l'écrit dans la RAM

@@ -127,6 +127,40 @@ body {
 }
 .camera-props { margin: 2px 0 6px 22px; }
 
+/* Cartes de composants (philosophie Unity). */
+.component-card {
+  margin: 6px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  background: #171922;
+}
+.component-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.component-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.component-remove {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.component-remove:hover { background: #3a2530; color: #ff9c9c; }
+.component-body { padding: 6px 10px 8px; }
+.component-body .field-readonly { font-size: 11px; color: var(--muted); }
+.color-field { display: flex; align-items: center; gap: 8px; }
+.color-field label { margin: 0; }
+.add-component { padding: 8px 8px 10px; display: flex; justify-content: center; }
+
 .component-row input[type="color"] {
   width: 34px;
   height: 22px;
