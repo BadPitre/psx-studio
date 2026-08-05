@@ -69,6 +69,30 @@ enum Cmd {
         /// Output .psc file (default: input with .psc extension)
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Keep the VRAM placements baked in the TIM files instead of
+        /// packing textures automatically
+        #[arg(long)]
+        keep_vram: bool,
+        /// Write a PNG map of the packed VRAM layout
+        #[arg(long)]
+        vram_map: Option<PathBuf>,
+    },
+    /// Build a whole project into a bootable .bin/.cue (via mkpsxiso)
+    Build {
+        /// Project directory containing project.json (default: current dir)
+        #[arg(default_value = ".")]
+        project: PathBuf,
+        /// Reconvert every asset, ignoring the Library/ cache
+        #[arg(long)]
+        force: bool,
+    },
+    /// Convert a WAV file to the VAG sound format (SPU-ADPCM)
+    Wav2vag {
+        /// Input .wav file (mono/stereo, 16-bit or float PCM)
+        input: PathBuf,
+        /// Output .vag file (default: input with .vag extension)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
     /// Print header information of a .pmd, .tim or .psc file
     Info {
@@ -196,8 +220,16 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Ok(())
         }
-        Cmd::Scene { input, output } => {
-            let (bytes, report) = scene::build_file(&input)?;
+        Cmd::Scene {
+            input,
+            output,
+            keep_vram,
+            vram_map,
+        } => {
+            let options = scene::BuildOptions {
+                pack_vram: !keep_vram,
+            };
+            let (bytes, report) = scene::build_file_with_options(&input, &options)?;
             let out = output.unwrap_or_else(|| input.with_extension("psc"));
             std::fs::write(&out, &bytes).map_err(|e| format!("cannot write {}: {e}", out.display()))?;
             println!(
@@ -209,6 +241,66 @@ fn run(cli: Cli) -> Result<(), String> {
             println!(
                 "  scene '{}': {} entities, {} models, {} textures",
                 report.name, report.entities, report.models, report.textures
+            );
+            for (req, p) in &report.vram {
+                println!(
+                    "  vram: '{}' -> ({}, {}) {}x{}{}",
+                    req.label,
+                    p.x,
+                    p.y,
+                    req.words,
+                    req.height,
+                    if req.clut_entries > 0 {
+                        format!(", CLUT ({}, {})", p.clut_x, p.clut_y)
+                    } else {
+                        String::new()
+                    }
+                );
+            }
+            if let Some(map_path) = vram_map {
+                let (reqs, places): (Vec<_>, Vec<_>) = report.vram.iter().cloned().unzip();
+                psxpipe::vram::render_map(&reqs, &places)
+                    .save(&map_path)
+                    .map_err(|e| format!("cannot write {}: {e}", map_path.display()))?;
+                println!("  vram map -> {}", map_path.display());
+            }
+            for w in &report.warnings {
+                println!("  warning: {w}");
+            }
+            Ok(())
+        }
+        Cmd::Build { project, force } => {
+            let report = psxpipe::project::build(&project, force)?;
+            println!(
+                "assets: {} converted, {} cached",
+                report.converted, report.cached
+            );
+            for (i, s) in report.scenes.iter().enumerate() {
+                println!(
+                    "scene {i} '{}': {} entities, {} bytes (VRAM map: Build/vram-scene{i}.png)",
+                    s.name, s.entities, s.total_size
+                );
+            }
+            if report.mkpsxiso_ran {
+                println!("ISO built in Build/ — open the .cue in an emulator");
+            }
+            for w in &report.warnings {
+                println!("warning: {w}");
+            }
+            Ok(())
+        }
+        Cmd::Wav2vag { input, output } => {
+            let name = input
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let (vag, report) = psxpipe::vag::wav_to_vag(&input, &name)?;
+            let out = output.unwrap_or_else(|| input.with_extension("vag"));
+            std::fs::write(&out, &vag).map_err(|e| format!("cannot write {}: {e}", out.display()))?;
+            println!("{} -> {} ({} bytes)", input.display(), out.display(), vag.len());
+            println!(
+                "  {} samples at {} Hz -> {} bytes of SPU RAM",
+                report.input_samples, report.sample_rate, report.spu_bytes
             );
             for w in &report.warnings {
                 println!("  warning: {w}");

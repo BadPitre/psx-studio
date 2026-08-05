@@ -8,6 +8,8 @@
  *   D-pad left/right  turn (yaw)
  *   L1 / R1           strafe left/right
  *   Triangle / Cross  look up/down
+ *   Square            play the demo SFX (BLIP.VAG via SPU)
+ *   Select            toggle CD-DA music (track 2, if the ISO has one)
  *   Circle            load the next scene
  *   Start             reset the camera
  *
@@ -27,6 +29,8 @@
 #include <psxgpu.h>
 #include <psxgte.h>
 #include <psxpad.h>
+#include <psxspu.h>
+#include <hwregs_c.h>
 #include <inline_c.h>
 
 #include "pmd.h"
@@ -194,6 +198,84 @@ static void UpdateCamera(FreeCamera* cam, uint16_t held)
 	}
 }
 
+/* Audio ------------------------------------------------------------------- */
+
+/* First free SPU RAM address (the SPU reserves 4 KB + a dummy block). */
+#define SPU_ALLOC_START 0x1010
+
+typedef struct {
+	uint32_t	magic;			/* "VAGp" */
+	uint32_t	version;
+	uint32_t	interleave;
+	uint32_t	size;			/* big-endian, bytes */
+	uint32_t	sample_rate;	/* big-endian, Hz */
+	uint16_t	reserved[5];
+	uint16_t	channels;
+	char		name[16];
+} VagHeader;
+
+typedef struct {
+	int	addr;
+	int	sample_rate;
+	int	valid;
+} SfxSample;
+
+/* Upload a VAG read from CD to SPU RAM. The source buffer can be reused
+ * afterwards (the SPU keeps its own copy). */
+static SfxSample UploadVag(const void* data)
+{
+	SfxSample sample = {0};
+	const VagHeader* header = (const VagHeader*)data;
+
+	if (header->magic != 0x70474156)	/* "VAGp" little-endian */
+		return sample;
+
+	int size = (int)__builtin_bswap32(header->size);
+	size = (size + 63) & ~63;
+
+	SpuSetTransferMode(SPU_TRANSFER_BY_DMA);
+	SpuSetTransferStartAddr(SPU_ALLOC_START);
+	SpuWrite((const uint32_t*)(header + 1), size);
+	SpuIsTransferCompleted(SPU_TRANSFER_WAIT);
+
+	sample.addr = SPU_ALLOC_START;
+	sample.sample_rate = (int)__builtin_bswap32(header->sample_rate);
+	sample.valid = 1;
+	return sample;
+}
+
+static void PlaySfx(const SfxSample* sample)
+{
+	if (!sample->valid)
+		return;
+
+	SpuSetKey(0, 1 << 0);
+	SPU_CH_FREQ(0) = getSPUSampleRate(sample->sample_rate);
+	SPU_CH_ADDR(0) = getSPUAddr(sample->addr);
+	SPU_CH_VOL_L(0) = 0x3fff;
+	SPU_CH_VOL_R(0) = 0x3fff;
+	SPU_CH_ADSR1(0) = 0x00ff;
+	SPU_CH_ADSR2(0) = 0x0000;
+	SpuSetKey(1, 1 << 0);
+}
+
+/* CD-DA music: track 2 of the disc (track 1 is the data track). Data reads
+ * interrupt playback, so this is re-issued after a scene switch. */
+static void StartMusic(void)
+{
+	uint8_t mode = CdlModeDA | CdlModeRept;
+	uint8_t track = 2;
+	SPU_CD_VOL_L = 0x3fff;
+	SPU_CD_VOL_R = 0x3fff;
+	CdControl(CdlSetmode, &mode, 0);
+	CdControl(CdlPlay, &track, 0);
+}
+
+static void StopMusic(void)
+{
+	CdControl(CdlPause, 0, 0);
+}
+
 /* World-to-camera matrix, fpscam style: rotation from the camera angles,
  * translation = rotated negated camera position. */
 static void CameraMatrix(const FreeCamera* cam, MATRIX* view)
@@ -225,8 +307,20 @@ int main(int argc, const char** argv)
 	gte_SetGeomScreen(CENTER_X);
 
 	CdInit();
+	SpuInit();
+
+	/* Boot-time SFX upload: read the VAG into the (still empty) arena,
+	 * push it to SPU RAM, then let the scene load reuse the arena. */
+	SfxSample blip = {0};
+	{
+		uint32_t size;
+		void* vag = Scene_ReadFileToArena("\\BLIP.VAG;1", &size);
+		if (vag)
+			blip = UploadVag(vag);
+	}
 
 	int scene_index = 0;
+	int music_on = 0;
 	int err = Scene_LoadFromCd(&scene, SCENE_PATHS[scene_index]);
 	assert(err == 0);
 	SetBackground(&ctx, &scene.background);
@@ -246,12 +340,35 @@ int main(int argc, const char** argv)
 			/* Let the GPU finish the in-flight frame, then swap scenes.
 			 * The arena is reset by the load; VRAM is simply overwritten. */
 			DrawSync(0);
-			scene_index = (scene_index + 1) % SCENE_COUNT;
-			err = Scene_LoadFromCd(&scene, SCENE_PATHS[scene_index]);
-			assert(err == 0);
+			int next = (scene_index + 1) % SCENE_COUNT;
+			err = Scene_LoadFromCd(&scene, SCENE_PATHS[next]);
+			if (err == 0)
+			{
+				scene_index = next;
+			}
+			else
+			{
+				/* Missing/bad scene: fall back to the current one (the
+				 * arena was reset, so it must be reloaded). */
+				err = Scene_LoadFromCd(&scene, SCENE_PATHS[scene_index]);
+				assert(err == 0);
+			}
 			SetBackground(&ctx, &scene.background);
 			ResetCamera(&cam);
 			tri_total = Scene_TriangleCount(&scene);
+			/* The CD read stopped any CD-DA playback. */
+			if (music_on)
+				StartMusic();
+		}
+		if (pressed & PAD_SQUARE)
+			PlaySfx(&blip);
+		if (pressed & PAD_SELECT)
+		{
+			music_on ^= 1;
+			if (music_on)
+				StartMusic();
+			else
+				StopMusic();
 		}
 		if (pressed & PAD_START)
 			ResetCamera(&cam);
@@ -266,7 +383,7 @@ int main(int argc, const char** argv)
 			ctx.next_packet, &draw_buffer->buffer[BUFFER_LENGTH]);
 
 		char stats[64];
-		sprintf(stats, "SCENE %d/%d  TRIS %d  O:SUIVANTE",
+		sprintf(stats, "SCENE %d/%d  TRIS %d  O:SUIV  []:SFX",
 			scene_index + 1, SCENE_COUNT, tri_total);
 		ctx.next_packet = (uint8_t*)FntSort(&draw_buffer->ot[0],
 			ctx.next_packet, 8, 16, "PSX STUDIO - PHASE 2");

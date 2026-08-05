@@ -3,11 +3,19 @@
 CLI `psxpipe` : conversion des assets sources vers les formats console PS1.
 
 ```
+psxpipe build    [projet]  [--force]                 # projet complet -> .bin/.cue (mkpsxiso)
 psxpipe gltf2pmd <in.gltf> [-o out.pmd] [--size 128] [--flat] [--untextured] [--tex-w 256] [--tex-h 256]
 psxpipe png2tim  <in.png>  [-o out.tim] [--bpp 4|8|16] [--org-x 320] [--org-y 0] [--clut-x 320] [--clut-y 256]
-psxpipe scene    <in.json> [-o out.psc]
+psxpipe scene    <in.json> [-o out.psc] [--keep-vram] [--vram-map carte.png]
+psxpipe wav2vag  <in.wav>  [-o out.vag]
 psxpipe info     <file.pmd|file.tim|file.psc>
 ```
+
+- `build` : dossier projet (`project.json`) → ISO bootable. Conversion
+  incrémentale (cache par hash dans `Library/`), packing VRAM automatique,
+  cartes VRAM PNG, `iso.xml` + pistes CD-DA, `mkpsxiso`. Projet exemple :
+  `examples/demo/` (sources via `cargo run --example gen_project`).
+- `wav2vag` : encodeur SPU-ADPCM (SFX console), en-tête VAG standard.
 
 - `gltf2pmd` : glTF/GLB → **PMD** (spec : `docs/PMD-FORMAT.md`). Quantization
   des positions en i16, normales 4.12, UV 8 bits, déduplication, paquets GPU

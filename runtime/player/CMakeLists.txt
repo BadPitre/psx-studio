@@ -23,5 +23,5 @@ psn00bsdk_add_cd_image(
 	iso      # Target name
 	player   # Output: player.bin + player.cue
 	iso.xml
-	DEPENDS player system.cnf assets/scene0.psc assets/scene1.psc
+	DEPENDS player system.cnf assets/scene0.psc assets/scene1.psc assets/BLIP.VAG
 )

@@ -98,4 +98,10 @@ uint8_t* Scene_Draw(const Scene* scene, const MATRIX* view, uint32_t* ot,
 
 int Scene_TriangleCount(const Scene* scene);
 
+/* Read a whole CD file into the scene arena WITHOUT resetting it. The
+ * returned pointer is invalidated by the next Scene_LoadFromCd — use it
+ * before loading a scene (e.g. uploading a VAG to SPU RAM at boot).
+ * Returns NULL on error; `size_out` receives the file size in bytes. */
+void* Scene_ReadFileToArena(const char* path, uint32_t* size_out);
+
 #endif

@@ -459,6 +459,90 @@ pub fn scene_field_json() -> &'static str {
 "#
 }
 
+/// Demo SFX: a short "coin" blip (mono, 22050 Hz).
+pub fn sfx_pcm() -> Vec<i16> {
+    let rate = 22050.0f32;
+    let len = (rate * 0.18) as usize;
+    (0..len)
+        .map(|i| {
+            let t = i as f32 / rate;
+            // Rising sweep with an exponential decay.
+            let freq = 660.0 + 1400.0 * (t / 0.18);
+            let env = (1.0 - t / 0.18).powf(1.5);
+            ((t * freq * std::f32::consts::TAU).sin() * env * 14000.0) as i16
+        })
+        .collect()
+}
+
+/// Demo music: an 8-second chiptune loop (stereo, 44100 Hz) — square bass
+/// plus a triangle-wave arpeggio, CD-DA friendly.
+pub fn music_pcm() -> Vec<(i16, i16)> {
+    let rate = 44100.0f32;
+    let chords: [(f32, [f32; 3]); 4] = [
+        (110.00, [220.00, 261.63, 329.63]), // Am
+        (87.31, [174.61, 220.00, 261.63]),  // F
+        (130.81, [261.63, 329.63, 392.00]), // C
+        (98.00, [196.00, 246.94, 293.66]),  // G
+    ];
+    let chord_len = (rate * 2.0) as usize;
+    let arp_len = chord_len / 8;
+    let mut out = Vec::with_capacity(chord_len * 4);
+    for (bass, arp) in &chords {
+        for i in 0..chord_len {
+            let t = i as f32 / rate;
+            // Square bass.
+            let b = if (t * bass).fract() < 0.5 { 1.0 } else { -1.0 };
+            // Triangle arpeggio, 8 notes per chord, soft attack/decay.
+            let step = i / arp_len;
+            let note = arp[step % 3] * if step % 8 >= 6 { 2.0 } else { 1.0 };
+            let phase = (t * note).fract();
+            let tri = 4.0 * (phase - 0.5).abs() - 1.0;
+            let pos = (i % arp_len) as f32 / arp_len as f32;
+            let env = (pos * 8.0).min(1.0) * (1.0 - pos * 0.6);
+            let bass_s = b * 4500.0;
+            let mel_s = tri * env * 9000.0;
+            // Slight stereo spread: bass left-ish, melody right-ish.
+            let l = (bass_s * 0.9 + mel_s * 0.6) as i16;
+            let r = (bass_s * 0.6 + mel_s * 0.9) as i16;
+            out.push((l, r));
+        }
+    }
+    out
+}
+
+/// Write sfx.wav (mono 22050) and music.wav (stereo 44100) into `dir`.
+pub fn write_audio(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 22050,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w =
+        hound::WavWriter::create(dir.join("sfx.wav"), spec).map_err(|e| e.to_string())?;
+    for s in sfx_pcm() {
+        w.write_sample(s).map_err(|e| e.to_string())?;
+    }
+    w.finalize().map_err(|e| e.to_string())?;
+
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 44100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w =
+        hound::WavWriter::create(dir.join("music.wav"), spec).map_err(|e| e.to_string())?;
+    for (l, r) in music_pcm() {
+        w.write_sample(l).map_err(|e| e.to_string())?;
+        w.write_sample(r).map_err(|e| e.to_string())?;
+    }
+    w.finalize().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Convert the sample sources into console assets (PMD + TIM) inside `dir`,
 /// with a VRAM layout where both textures coexist:
 /// checker at (320,0) CLUT (320,256), house at (448,0) CLUT (320,257).
@@ -518,6 +602,12 @@ pub fn build_demo_scenes(
         std::fs::write(out_dir.join(psc_name), &bytes).map_err(|e| e.to_string())?;
         reports.push(report);
     }
+
+    /* Demo SFX for the player (Square button). */
+    write_audio(samples_dir)?;
+    let (vag, _) = crate::vag::wav_to_vag(&samples_dir.join("sfx.wav"), "blip")?;
+    std::fs::write(out_dir.join("BLIP.VAG"), &vag).map_err(|e| e.to_string())?;
+
     Ok(reports)
 }
 

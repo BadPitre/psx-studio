@@ -8,10 +8,13 @@
 
 pub mod gltf_import;
 pub mod pmd;
+pub mod project;
 pub mod quant;
 pub mod samples;
 pub mod scene;
 pub mod tim;
+pub mod vag;
+pub mod vram;
 
 /// 4.12 fixed-point one (GTE convention: 4096 = 1.0).
 pub const ONE_4_12: i32 = 4096;

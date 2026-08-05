@@ -71,16 +71,34 @@ fn village_embeds_valid_blobs() {
 }
 
 #[test]
-fn vram_overlap_is_rejected() {
+fn vram_overlap_rejected_without_packing() {
     let dir = tempfile::tempdir().unwrap();
     samples::build_demo_assets(dir.path()).unwrap();
-    // Both models on the SAME texture placement: duplicate checker.tim as
-    // house.tim so the two TIMs collide in VRAM.
+    // Both TIMs baked at the SAME placement: duplicate checker.tim as
+    // house.tim so they collide when auto-packing is disabled.
     std::fs::copy(dir.path().join("checker.tim"), dir.path().join("house.tim")).unwrap();
     let json_path = dir.path().join("scene0.json");
     std::fs::write(&json_path, samples::scene_village_json()).unwrap();
-    let err = scene::build_file(&json_path).unwrap_err();
+    let opts = scene::BuildOptions { pack_vram: false };
+    let err = scene::build_file_with_options(&json_path, &opts).unwrap_err();
     assert!(err.contains("VRAM overlap"), "unexpected error: {err}");
+}
+
+#[test]
+fn auto_packing_repairs_colliding_placements() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    // Same colliding input as above, but the default build repacks: the
+    // scene builds fine and the two textures get distinct placements.
+    std::fs::copy(dir.path().join("checker.tim"), dir.path().join("house.tim")).unwrap();
+    let json_path = dir.path().join("scene0.json");
+    std::fs::write(&json_path, samples::scene_village_json()).unwrap();
+    let (_, report) = scene::build_file(&json_path).unwrap();
+    assert_eq!(report.vram.len(), 2);
+    let (a, b) = (&report.vram[0].1, &report.vram[1].1);
+    assert_ne!((a.x, a.y), (b.x, b.y));
+    assert_eq!(a.x % 64, 0);
+    assert_eq!(b.x % 64, 0);
 }
 
 #[test]

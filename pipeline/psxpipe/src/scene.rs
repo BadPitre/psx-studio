@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::ONE_4_12;
+use crate::{vram, ONE_4_12};
 
 pub const MAGIC: &[u8; 4] = b"PSC1";
 pub const VERSION: u16 = 1;
@@ -124,6 +124,21 @@ pub struct SceneReport {
     pub entities: usize,
     pub total_size: usize,
     pub warnings: Vec<String>,
+    /// VRAM packing result (requests + placements), for the map export.
+    pub vram: Vec<(vram::TexRequest, vram::Placement)>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BuildOptions {
+    /// Repack textures into VRAM automatically (default). When false, the
+    /// placements baked into the TIM files are kept as-is.
+    pub pack_vram: bool,
+}
+
+impl Default for BuildOptions {
+    fn default() -> Self {
+        BuildOptions { pack_vram: true }
+    }
 }
 
 /* --------------------------------------------------------------- build -- */
@@ -175,8 +190,46 @@ fn quantize_i16(v: f32, what: &str, name: &str) -> Result<i16, String> {
     Ok(q as i16)
 }
 
+/// Parse the geometry of a TIM blob: (pixel words, height, clut entries).
+fn tim_geometry(label: &str, data: &[u8]) -> Result<(u16, u16, u16), String> {
+    if data.len() < 8 || data[0] != 0x10 || data[1..4] != [0, 0, 0] {
+        return Err(format!("{label}: not a TIM file"));
+    }
+    let u16at = |o: usize| u16::from_le_bytes([data[o], data[o + 1]]);
+    let u32at = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+    let flags = u32at(4);
+    let mut off = 8usize;
+    let mut clut_entries = 0u16;
+    if flags & 8 != 0 {
+        clut_entries = u16at(off + 8);
+        off += u32at(off) as usize;
+    }
+    Ok((u16at(off + 8), u16at(off + 10), clut_entries))
+}
+
+/// Rewrite the VRAM coordinates baked in a TIM blob.
+fn tim_set_position(data: &mut [u8], p: &vram::Placement) {
+    let flags = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    let mut off = 8usize;
+    if flags & 8 != 0 {
+        data[off + 4..off + 6].copy_from_slice(&p.clut_x.to_le_bytes());
+        data[off + 6..off + 8].copy_from_slice(&p.clut_y.to_le_bytes());
+        off += u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as usize;
+    }
+    data[off + 4..off + 6].copy_from_slice(&p.x.to_le_bytes());
+    data[off + 6..off + 8].copy_from_slice(&p.y.to_le_bytes());
+}
+
 /// Build a .psc from a parsed scene. `base_dir` resolves asset paths.
 pub fn build(scene: &SceneJson, base_dir: &Path) -> Result<(Vec<u8>, SceneReport), String> {
+    build_with_options(scene, base_dir, &BuildOptions::default())
+}
+
+pub fn build_with_options(
+    scene: &SceneJson,
+    base_dir: &Path,
+    options: &BuildOptions,
+) -> Result<(Vec<u8>, SceneReport), String> {
     let mut report = SceneReport {
         name: scene.name.clone(),
         ..Default::default()
@@ -193,6 +246,31 @@ pub fn build(scene: &SceneJson, base_dir: &Path) -> Result<(Vec<u8>, SceneReport
         let data = std::fs::read(&path)
             .map_err(|e| format!("texture '{}': cannot read {}: {e}", tex.id, path.display()))?;
         texture_blobs.push(data);
+    }
+
+    /* Automatic VRAM packing: place every texture page-aligned and rewrite
+     * the coordinates baked in the TIM blobs. */
+    if options.pack_vram {
+        let requests: Vec<vram::TexRequest> = scene
+            .assets
+            .textures
+            .iter()
+            .zip(&texture_blobs)
+            .map(|(tex, blob)| {
+                let (words, height, clut_entries) = tim_geometry(&tex.id, blob)?;
+                Ok(vram::TexRequest {
+                    label: tex.id.clone(),
+                    words,
+                    height,
+                    clut_entries,
+                })
+            })
+            .collect::<Result<_, String>>()?;
+        let placements = vram::pack(&requests)?;
+        for (blob, placement) in texture_blobs.iter_mut().zip(&placements) {
+            tim_set_position(blob, placement);
+        }
+        report.vram = requests.into_iter().zip(placements).collect();
     }
 
     let mut model_index: HashMap<&str, u16> = HashMap::new();
@@ -420,12 +498,19 @@ pub fn build(scene: &SceneJson, base_dir: &Path) -> Result<(Vec<u8>, SceneReport
 
 /// Convenience: read a scene JSON file and build the .psc next to it.
 pub fn build_file(json_path: &Path) -> Result<(Vec<u8>, SceneReport), String> {
+    build_file_with_options(json_path, &BuildOptions::default())
+}
+
+pub fn build_file_with_options(
+    json_path: &Path,
+    options: &BuildOptions,
+) -> Result<(Vec<u8>, SceneReport), String> {
     let text = std::fs::read_to_string(json_path)
         .map_err(|e| format!("cannot read {}: {e}", json_path.display()))?;
     let scene: SceneJson =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", json_path.display()))?;
     let base = json_path.parent().unwrap_or(Path::new("."));
-    build(&scene, base)
+    build_with_options(&scene, base, options)
 }
 
 /* -------------------------------------------------------------- header -- */

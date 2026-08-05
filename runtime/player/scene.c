@@ -75,20 +75,31 @@ static void MulMatVec(const MATRIX* a, const int32_t v[3], int32_t out[3])
 
 /* Loading ----------------------------------------------------------------- */
 
-int Scene_LoadFromCd(Scene* scene, const char* path)
+void* Scene_ReadFileToArena(const char* path, uint32_t* size_out)
 {
 	CdlFILE file;
 	if (!CdSearchFile(&file, path))
-		return -1;
+		return NULL;
 
-	arena_used = 0;
 	size_t sectors = (file.size + 2047) / 2048;
 	uint8_t* data = (uint8_t*)Arena_Alloc(sectors * 2048);
 
 	CdControl(CdlSetloc, &file.pos, 0);
 	CdRead(sectors, (uint32_t*)data, CdlModeSpeed);
 	if (CdReadSync(0, 0) < 0)
-		return -2;
+		return NULL;
+
+	if (size_out)
+		*size_out = file.size;
+	return data;
+}
+
+int Scene_LoadFromCd(Scene* scene, const char* path)
+{
+	arena_used = 0;
+	uint8_t* data = (uint8_t*)Scene_ReadFileToArena(path, 0);
+	if (!data)
+		return -1;
 
 	const PscHeader* header = (const PscHeader*)data;
 	if (memcmp(header->magic, "PSC1", 4) != 0)

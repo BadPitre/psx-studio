@@ -15,6 +15,7 @@
 			<file name="PLAYER.EXE"	type="data" source="player.exe" />
 			<file name="SCENE0.PSC"	type="data" source="${PROJECT_SOURCE_DIR}/assets/scene0.psc" />
 			<file name="SCENE1.PSC"	type="data" source="${PROJECT_SOURCE_DIR}/assets/scene1.psc" />
+			<file name="BLIP.VAG"	type="data" source="${PROJECT_SOURCE_DIR}/assets/BLIP.VAG" />
 			<dummy sectors="1024"/>
 		</directory_tree>
 	</track>
