@@ -78,12 +78,40 @@ body {
 .tree-meta { margin-left: auto; color: var(--muted); font-size: 11px; padding-right: 8px; }
 
 .viewport {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #101116;
   min-width: 0;
 }
+
+.gizmo-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(20, 21, 27, 0.92);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+.gizmo-bar button {
+  width: 30px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.gizmo-bar button:hover { background: #262a35; color: var(--text); }
+.gizmo-bar button.active { background: var(--select); color: var(--text); }
 .viewport-canvas {
   width: 100%;
   max-width: 960px;

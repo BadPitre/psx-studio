@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parsePsc, sceneTriangleCount, type PscScene } from "./formats/psc";
-import { Viewport } from "./viewport/Viewport";
+import { Viewport, type GizmoMode } from "./viewport/Viewport";
 import { api, isTauri, onFileDrop, pickProjectDir, type ProjectInfo } from "./bridge";
 import { PlayBar, PLAY_PORT } from "./PlayBar";
 import { VramPanel } from "./VramPanel";
@@ -324,6 +324,7 @@ export default function App() {
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
   const [viewMode, setViewMode] = useState<"scene" | "vram">("scene");
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
 
   /* Mode projet (Tauri). */
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -344,6 +345,11 @@ export default function App() {
   const onRunningChange = useCallback((running: boolean) => {
     gameRunningRef.current = running;
   }, []);
+
+  /* Pendant un drag de gizmo, les rebuilds .psc sont différés : un rebuild
+     remplace le graphe three et casserait la manipulation en cours. */
+  const gizmoDraggingRef = useRef(false);
+  const pendingRebuildRef = useRef<SceneDoc | null>(null);
 
   const loadBuffer = useCallback((name: string, buffer: ArrayBuffer) => {
     try {
@@ -458,12 +464,32 @@ export default function App() {
       setDirty(true);
 
       window.clearTimeout(rebuildTimer.current);
-      rebuildTimer.current = window.setTimeout(
-        () => rebuild(doc, scenePath, project.dir),
-        400,
-      );
+      if (gizmoDraggingRef.current) {
+        pendingRebuildRef.current = doc;
+      } else {
+        rebuildTimer.current = window.setTimeout(
+          () => rebuild(doc, scenePath, project.dir),
+          400,
+        );
+      }
     },
     [overrides, sceneDoc, project, entityNames, scenePath, rebuild],
+  );
+
+  const onGizmoDragging = useCallback(
+    (dragging: boolean) => {
+      gizmoDraggingRef.current = dragging;
+      if (!dragging && pendingRebuildRef.current && project) {
+        const doc = pendingRebuildRef.current;
+        pendingRebuildRef.current = null;
+        window.clearTimeout(rebuildTimer.current);
+        rebuildTimer.current = window.setTimeout(
+          () => rebuild(doc, scenePath, project.dir),
+          200,
+        );
+      }
+    },
+    [project, scenePath, rebuild],
   );
 
   /* Opérations d'entités (mode projet). */
@@ -577,6 +603,20 @@ export default function App() {
       doc.entities.push(clone);
     }, name);
   }, [mutateDoc, uniqueName]);
+
+  /* Raccourcis de mode gizmo (1/2/3), valables aussi en mode visionneuse. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.code === "Digit1") setGizmoMode("translate");
+      else if (e.code === "Digit2") setGizmoMode("rotate");
+      else if (e.code === "Digit3") setGizmoMode("scale");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /* Raccourcis clavier globaux (hors champs de saisie). */
   useEffect(() => {
@@ -709,7 +749,10 @@ export default function App() {
       ? overrides.get(selected) ?? {
           pos: [...scene.entities[selected].pos] as [number, number, number],
           rot: [...scene.entities[selected].rot] as [number, number, number],
-          scale: [...scene.entities[selected].scale] as [number, number, number],
+          // L'échelle 4.12 du fichier arrondie au millième (1.30004 -> 1.3).
+          scale: scene.entities[selected].scale.map(
+            (s) => Math.round(s * 1000) / 1000,
+          ) as [number, number, number],
         }
       : null;
 
@@ -816,11 +859,32 @@ export default function App() {
               <VramPanel scene={scene} />
             ) : (
               <div className="viewport">
+                <div className="gizmo-bar">
+                  {(
+                    [
+                      ["translate", "✥", "Déplacer (1)"],
+                      ["rotate", "⟳", "Rotation (2)"],
+                      ["scale", "⤢", "Échelle (3)"],
+                    ] as const
+                  ).map(([mode, icon, label]) => (
+                    <button
+                      key={mode}
+                      className={gizmoMode === mode ? "active" : ""}
+                      title={`${label} — Ctrl tenu : snap`}
+                      onClick={() => setGizmoMode(mode)}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                </div>
                 <Viewport
                   scene={scene}
                   overrides={overrides}
                   selected={selected}
                   onSelect={setSelected}
+                  gizmoMode={gizmoMode}
+                  onTransform={editTransform}
+                  onGizmoDragging={onGizmoDragging}
                 />
               </div>
             )}

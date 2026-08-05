@@ -10,9 +10,18 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import type { PscScene } from "../formats/psc";
 import { buildSceneGraph, applyEntityTransform, type SceneGraph } from "./scene3d";
 import { updateLightUniforms, PS1_RESOLUTION } from "./ps1material";
+
+export type GizmoMode = "translate" | "rotate" | "scale";
+
+type Transform = {
+  pos: [number, number, number];
+  rot: [number, number, number];
+  scale: [number, number, number];
+};
 
 export interface ViewportProps {
   scene: PscScene | null;
@@ -20,12 +29,26 @@ export interface ViewportProps {
   overrides: Map<number, { pos: [number, number, number]; rot: [number, number, number]; scale: [number, number, number] }>;
   selected: number;
   onSelect: (index: number) => void;
+  /** Mode du gizmo de manipulation (défaut : translate). */
+  gizmoMode?: GizmoMode;
+  /** Édition par gizmo : transform locale PS1 de l'entité sélectionnée. */
+  onTransform?: (index: number, t: Transform) => void;
+  /** Début/fin d'un drag de gizmo (permet de différer les rebuilds). */
+  onGizmoDragging?: (dragging: boolean) => void;
 }
 
 const MOVE_SPEED = 420; // unités monde / seconde
 const LOOK_SPEED = 0.0045;
 
-export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps) {
+export function Viewport({
+  scene,
+  overrides,
+  selected,
+  onSelect,
+  gizmoMode = "translate",
+  onTransform,
+  onGizmoDragging,
+}: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
@@ -33,7 +56,14 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
     three: THREE.Scene;
     graph: SceneGraph | null;
     highlight: THREE.BoxHelper | null;
+    gizmo: TransformControls;
   } | null>(null);
+
+  /* Callbacks/état accessibles depuis les closures d'init (une seule fois). */
+  const liveRef = useRef({ selected, onTransform, onGizmoDragging });
+  useEffect(() => {
+    liveRef.current = { selected, onTransform, onGizmoDragging };
+  });
 
   /* Init renderer + boucle + contrôles caméra (une seule fois). */
   useEffect(() => {
@@ -44,7 +74,44 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
     renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     const camera = new THREE.PerspectiveCamera(53, 320 / 240, 10, 8192);
     const three = new THREE.Scene();
-    stateRef.current = { renderer, camera, three, graph: null, highlight: null };
+
+    /* Gizmo de manipulation (position/rotation/échelle). Les entités
+     * portent leur transform locale PS1 directement sur leur groupe :
+     * on la relit telle quelle après manipulation. */
+    const gizmo = new TransformControls(camera, canvas);
+    gizmo.setSize(0.85);
+    three.add(gizmo.getHelper());
+    gizmo.addEventListener("dragging-changed", (e) => {
+      liveRef.current.onGizmoDragging?.(Boolean((e as { value: unknown }).value));
+    });
+    gizmo.addEventListener("objectChange", () => {
+      const obj = gizmo.object;
+      const live = liveRef.current;
+      if (!obj || live.selected < 0 || !live.onTransform) return;
+      const toUnits = (rad: number) => {
+        let u = Math.round((rad / (Math.PI * 2)) * 4096) % 4096;
+        if (u < 0) u += 4096;
+        return u;
+      };
+      const round3 = (x: number) => Math.round(x * 1000) / 1000;
+      live.onTransform(live.selected, {
+        pos: [Math.round(obj.position.x), Math.round(obj.position.y), Math.round(obj.position.z)],
+        rot: [toUnits(obj.rotation.x), toUnits(obj.rotation.y), toUnits(obj.rotation.z)],
+        scale: [round3(obj.scale.x), round3(obj.scale.y), round3(obj.scale.z)],
+      });
+    });
+    /* Ctrl tenu : snap (10 unités, 15°, 0.1). */
+    const onSnapKey = (e: KeyboardEvent) => {
+      if (e.key !== "Control") return;
+      const down = e.type === "keydown";
+      gizmo.translationSnap = down ? 10 : null;
+      gizmo.rotationSnap = down ? Math.PI / 12 : null;
+      gizmo.scaleSnap = down ? 0.1 : null;
+    };
+    window.addEventListener("keydown", onSnapKey);
+    window.addEventListener("keyup", onSnapKey);
+
+    stateRef.current = { renderer, camera, three, graph: null, highlight: null, gizmo };
 
     /* État caméra : position + regard (yaw/pitch), pivot d'orbite à
      * distance `dist` devant la caméra. */
@@ -78,6 +145,11 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
     canvas.tabIndex = 0; // focus clavier
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("pointerdown", (e) => {
+      // Le gizmo a priorité : survol d'un axe ou drag en cours.
+      if (gizmo.dragging || gizmo.axis) {
+        canvas.focus();
+        return;
+      }
       dragButton = e.button;
       moved = false;
       canvas.setPointerCapture(e.pointerId);
@@ -183,17 +255,27 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener("keydown", onSnapKey);
+      window.removeEventListener("keyup", onSnapKey);
+      gizmo.dispose();
       renderer.dispose();
       stateRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* Mode du gizmo. */
+  useEffect(() => {
+    stateRef.current?.gizmo.setMode(gizmoMode);
+  }, [gizmoMode]);
+
   /* (Re)construction du graphe quand la scène change. */
   useEffect(() => {
     const s = stateRef.current;
     if (!s) return;
+    s.gizmo.detach();
     s.three.clear();
+    s.three.add(s.gizmo.getHelper()); // clear() l'a retiré
     s.graph = null;
     s.highlight = null;
     if (!scene) return;
@@ -228,6 +310,12 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
       const helper = new THREE.BoxHelper(s.graph.entityGroups[selected], 0xffcc00);
       s.three.add(helper);
       s.highlight = helper;
+      // Attacher le gizmo (sans churn pendant un drag : même groupe = no-op).
+      if (s.gizmo.object !== s.graph.entityGroups[selected]) {
+        s.gizmo.attach(s.graph.entityGroups[selected]);
+      }
+    } else {
+      s.gizmo.detach();
     }
   }, [scene, overrides, selected]);
 
@@ -237,7 +325,7 @@ export function Viewport({ scene, overrides, selected, onSelect }: ViewportProps
       className="viewport-canvas"
       width={PS1_RESOLUTION.x}
       height={PS1_RESOLUTION.y}
-      title="Clic gauche : orbite/sélection · Clic droit tenu : caméra FPS (ZQSD, E/Espace ↑, Q ↓, Shift rapide) · Molette : avancer · Clic milieu : pan"
+      title="Gizmo : 1 déplacer · 2 rotation · 3 échelle · Ctrl = snap — Clic gauche : orbite/sélection · Clic droit tenu : caméra FPS (ZQSD, E/Espace ↑, Q ↓, Shift rapide) · Molette : avancer · Clic milieu : pan"
     />
   );
 }
