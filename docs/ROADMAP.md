@@ -104,18 +104,21 @@ terme drag & drop vers la hiérarchie/le viewport.
    modèle (et sa texture appariée) est ajouté aux assets de la scène si
    besoin, l'entité est nommée et sélectionnée, annulable au Ctrl+Z
 
-## Lot E — Système UI (Canvas + widgets, façon UMG)
+## Lot E — Système UI (Canvas + widgets, façon uGUI Unity)
 
-Composer HUD, menus et dialogues comme dans Unreal : un Canvas 320×240,
-des widgets ancrés (image, texte, jauge, bouton), un mode d'édition
-visuel, un format binaire `.PUI` + polices bitmap `.fnt`, un runtime
-`Ui_Draw` en tête d'OT et une navigation au D-pad (pas de souris sur
-PS1 : le focus est un concept de premier ordre).
+Composer HUD, menus et dialogues comme avec l'UI de Unity : un Canvas
+320×240, des widgets portés par un **RectTransform** fidèle (ancres
+min/max libres + presets, pivot, étirement), des **Layout Groups**
+verticaux/horizontaux qui rangent leurs enfants, l'Image *Filled* pour
+les jauges, un mode d'édition visuel, un format binaire `.PUI` +
+polices bitmap `.fnt`, un runtime `Ui_Draw` en tête d'OT et une
+navigation au D-pad (pas de souris sur PS1 : le focus est un concept
+de premier ordre).
 
 **Spec complète : [`UI-SYSTEM.md`](UI-SYSTEM.md)** — 4 jalons :
-fondations (format + runtime + HUD de démo), mode Canvas éditeur,
-interactif (jauges/boutons/focus/API scripts), confort (9-slice,
-animations).
+fondations (format + RectTransform + runtime + HUD de démo), Layout
+Groups + mode Canvas éditeur, interactif (boutons/focus/API scripts),
+confort (Grid Layout, 9-slice, animations).
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 
