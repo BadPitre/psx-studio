@@ -119,10 +119,18 @@ table UI dans les réservés) + polices bitmap `.fnt`, runtime `Ui_Draw`
 en tête d'OT, navigation au D-pad (pas de souris sur PS1 : le focus
 est un concept de premier ordre).
 
-**Spec complète : [`UI-SYSTEM.md`](UI-SYSTEM.md)** — 4 jalons :
+Un canvas se sauvegarde aussi en **Prefab** réutilisable entre les
+scènes (même schéma d'entités, inliné dans le `.psc` au build — la
+console ne connaît pas les prefabs), édité isolément en **Prefab
+Mode** avec fil d'Ariane, instancié en bleu dans la hiérarchie ou par
+drag depuis le panneau Project. Mécanisme générique : les prefabs 3D
+l'utiliseront plus tard.
+
+**Spec complète : [`UI-SYSTEM.md`](UI-SYSTEM.md)** — 5 jalons :
 fondations (format v1.3 + RectTransform + runtime + HUD de démo),
-Layout Groups + édition visuelle, interactif (boutons/focus/API
-scripts), confort (Grid Layout, 9-slice, live tweaking).
+Layout Groups + Sliced/Tiled + édition visuelle, prefabs UI + Prefab
+Mode, interactif (boutons/focus/API scripts), confort (Grid Layout,
+fill radial, live tweaking, overrides avancés).
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 

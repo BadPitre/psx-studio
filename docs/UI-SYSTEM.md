@@ -6,14 +6,17 @@
 > hiérarchie ; les éléments UI sont des **entités enfants** portant des
 > **composants** (RectTransform, Image, Text, Button, Layout Group)
 > édités dans la même hiérarchie et le même inspecteur à cartes que le
-> reste — pas d'asset UI séparé, pas d'éditeur à part.
+> reste. Et comme dans Unity, un canvas peut être **sauvegardé en
+> Prefab** — réutilisable dans d'autres scènes, édité isolément en
+> **Prefab Mode** (son propre viewport).
 > Ce document est la spec de référence ; rien n'est encore implémenté.
 
 ## 1. Philosophie (ce qui fait « Unity »)
 
-- **Pas de fichier UI dédié** : les widgets sont des entités du
-  `scene.json`, sauvegardés et buildés avec la scène, nommés et
-  hiérarchisés dans le panneau Hiérarchie existant.
+- **Pas de format UI à part** : les widgets sont des entités — dans le
+  `scene.json` d'une scène, ou dans un prefab (même schéma d'entités,
+  §7) — nommés et hiérarchisés dans le panneau Hiérarchie existant, et
+  compilés dans le `.psc` avec le reste.
 - **Tout est composant** : une entité sous un Canvas porte un
   `RectTransform` (qui **remplace** sa carte Transform 3D dans
   l'inspecteur, comme dans Unity) plus des composants au choix —
@@ -27,6 +30,9 @@
   passer le viewport en surimpression 2D au pixel (le canvas rendu
   par-dessus la 3D, comme Unity affiche l'UI dans la Scene View), avec
   déplacement/redimensionnement à la souris.
+- **Prefabs** : un canvas (ou n'importe quel sous-arbre d'entités UI)
+  se sauvegarde en **Prefab** réutilisable — instancié dans plusieurs
+  scènes, édité isolément en **Prefab Mode** ; voir §7.
 
 ## 2. Ce que la PS1 sait faire (et pas faire)
 
@@ -230,7 +236,44 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
 - **Live tweaking** : les widgets étant des entités, la balise RAM
   existante s'étend naturellement aux RectTransforms (jalon 4).
 
-## 7. Éditeur (les panneaux existants, pas un éditeur à part)
+## 7. Prefabs UI (réutiliser entre les scènes)
+
+Comme dans Unity, un canvas ne vit **pas forcément dans une scène** :
+il peut être sauvegardé en **Prefab** et réutilisé partout.
+
+- **Fichier** : `prefabs/<nom>.json` — le même schéma d'entités que le
+  `scene.json` (un sous-arbre avec une racine, ici typiquement un
+  canvas), plus ses besoins d'assets (textures, polices). Un prefab se
+  crée depuis la hiérarchie : clic droit sur un canvas →
+  « Sauvegarder comme prefab » — ou depuis le panneau Project :
+  « Créer ▸ Prefab UI » (le sous-menu Créer l'attendait).
+- **Instance dans une scène** : une entité-référence
+  `{ "name": "hud", "prefab": "prefabs/hud.json" }`. Dans la
+  hiérarchie, l'instance apparaît **en bleu** (convention Unity) avec
+  son contenu en lecture seule ; modifier le prefab met à jour toutes
+  les scènes qui l'utilisent.
+- **Résolution au build** : psxpipe **inline** le sous-arbre du prefab
+  dans le `.psc` de chaque scène qui l'instancie (entités aplaties,
+  assets fusionnés/dédupliqués). **La console ne connaît pas les
+  prefabs** — le runtime voit des entités UI ordinaires, le format
+  v1.3 ne change pas. Tout le mécanisme est éditeur + pipeline.
+- **Prefab Mode** (édition isolée, son propre viewport) : double-clic
+  sur le prefab dans le panneau Project (ou sur une instance dans la
+  hiérarchie) → l'éditeur bascule en mode isolé, comme Unity : le
+  viewport ne montre **que** le prefab (fond damier neutre ou la scène
+  estompée derrière), la hiérarchie ne montre que son sous-arbre, un
+  **fil d'Ariane** (`scène ‹ hud.prefab`) ramène à la scène.
+  Sauvegarder écrit le fichier prefab ; toutes les instances suivent.
+- **Overrides d'instance (v1 minimal)** : l'instance peut surcharger
+  l'état `actif` de sa racine et son ordre dans la hiérarchie — pas de
+  surcharge par enfant en v1 (noté en question ouverte, comme le
+  « revert/apply » de Unity).
+
+Le mécanisme (fichier d'entités + inline au build + mode isolé) est
+volontairement **générique** : les prefabs 3D (une maison + ses
+torches) l'utiliseront tel quel plus tard.
+
+## 8. Éditeur (les panneaux existants, pas un éditeur à part)
 
 - **Hiérarchie** : les entités UI y sont, sous leur Canvas — icônes
   dédiées (▦ canvas, 🖼 image, 🅰 text, 🔘 button, ☰ layout). Le menu
@@ -253,21 +296,26 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
   hiérarchie. Ctrl+Z/Y, copier/coller, dupliquer : la mécanique undo
   existante, rien de neuf.
 - **Panneau Project** : les polices apparaissent (section Assets,
-  vignette de l'atlas), « Créer ▸ » n'a rien de neuf — l'UI se crée
-  par la hiérarchie, comme dans Unity.
+  vignette de l'atlas) et les prefabs ont leur section (vignette =
+  aperçu du canvas rendu) — double-clic = **Prefab Mode**, glisser un
+  prefab dans la hiérarchie = l'instancier. « Créer ▸ Prefab UI »
+  rejoint le sous-menu Créer.
 
-## 8. Pipeline
+## 9. Pipeline
 
 - `project.json` gagne `"fonts": [{ "png": "assets/police.png", "out": "main.fnt" }]` ;
 - `psxpipe font2fnt police.png -o main.fnt --cell 8x12` ;
-- le build de scène embarque la table UI + chaînes + polices dans le
-  `.psc` (cache incrémental inchangé) ; les TIM d'UI passent par le
+- le build de scène **inline d'abord les prefabs référencés** (assets
+  fusionnés et dédupliqués), puis embarque la table UI + chaînes +
+  polices dans le `.psc` (cache incrémental : un prefab modifié
+  invalide les scènes qui l'instancient) ; les TIM d'UI passent par le
   packer VRAM (l'auto-4bpp fait le bon choix pour des atlas d'icônes) ;
 - `gen_project` ajoute une police de démo et, au village : un HUD
-  (vie en Image *Filled* + score) et un menu pause en layout vertical
-  sur fond *Sliced*.
+  (vie en Image *Filled* + score) **en prefab instancié dans les deux
+  scènes** — la preuve du mécanisme — et un menu pause en layout
+  vertical sur fond *Sliced*.
 
-## 9. Jalons de livraison
+## 10. Jalons de livraison
 
 1. **Fondations** : SceneFormat v1.3 (table UI + `.fnt`, writer Rust,
    parsers TS/C, tests croisés — les 4 types d'image dans le format
@@ -281,13 +329,19 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
    viewport, cartes RectTransform/Image (sélecteur d'Image Type +
    poignées de border)/Text dans l'inspecteur, manipulation 2D à la
    souris, groupe UI dans le menu « ＋ ».
-3. **Interactif** : Button + focus D-pad (navigation automatique dans
+3. **Prefabs UI + Prefab Mode** : fichier `prefabs/*.json`, inline au
+   build (assets dédupliqués, cache invalidé en cascade),
+   entité-référence + instance bleue en hiérarchie, édition isolée
+   avec fil d'Ariane, « Créer ▸ Prefab UI », le HUD de démo partagé
+   entre les deux scènes.
+4. **Interactif** : Button + focus D-pad (navigation automatique dans
    les layouts), API scripts (`Ui_Get` + setters), le dialogue de démo
    migré en canvas (fond *Sliced*).
-4. **Confort** (au besoin) : Grid Layout, Content Size Fitter, fill
-   radial, live tweaking des RectTransforms via la balise RAM.
+5. **Confort** (au besoin) : Grid Layout, Content Size Fitter, fill
+   radial, live tweaking des RectTransforms via la balise RAM,
+   overrides d'instance par enfant (apply/revert à la Unity).
 
-## 10. Questions ouvertes (à trancher en implémentant)
+## 11. Questions ouvertes (à trancher en implémentant)
 
 - Chaînes accentuées : UTF-8 translittéré vers le charset de la police
   à la conversion (probable), ou charset 8 bits fixe ?
@@ -300,8 +354,11 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
 - `expand` des layouts : faut-il aussi « control child size » complet
   (le layout impose la taille sur l'axe principal) comme Unity, ou
   seulement l'axe croisé en v1 ?
+- Overrides d'instance de prefab : v1 se limite à actif/ordre de la
+  racine — jusqu'où aller ensuite (par enfant, apply/revert, variants
+  de prefab) sans réinventer toute la complexité Unity ?
 
-## 11. Règles (rappel projet)
+## 12. Règles (rappel projet)
 
 Comme tout changement de format : spec + writer Rust + parser TS +
 runtime C + tests bougent ensemble ; chaque jalon se conclut par une
