@@ -209,14 +209,23 @@ non vides, forçables). Charset v1 : ASCII 32-126 + accents français
 /* Appelé par Scene_Draw après la 3D : primitives des canvas actifs en OT[0]. */
 uint8_t* Ui_Draw(Scene* scene, uint32_t* ot, uint8_t* packet, uint8_t* limit);
 
-/* Les widgets SONT des entités : on les retrouve comme les autres. */
-Entity*  Scene_FindByName(Scene* scene, const char* name);   /* existe déjà via scripts */
-UiWidget* Ui_Get(Scene* scene, Entity* e);                   /* composants UI de l'entité */
+/* Les widgets SONT des entités de la scène courante (engine.h — les
+ * scripts s'attachent au canvas et retrouvent leurs widgets par la
+ * hiérarchie, cf. scripts hud/dialogue/pause de la démo). */
+uint8_t Ui_Components(const Entity* e);          /* masque UI_COMP_*, 0 = pas un widget */
+int     Ui_ImageType(const Entity* e);           /* 0 simple, 1 sliced, 2 tiled, 3 filled */
 
-void Ui_SetText(UiWidget* w, const char* text);   /* chaîne dynamique (buffer par widget) */
-void Ui_SetFill(UiWidget* w, int amount_412);     /* images Filled (jauges) */
-void Ui_SetActive(UiWidget* w, int active);       /* montrer/cacher (canvas compris) */
-void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
+void Ui_SetText(const Entity* e, const char* s); /* chaîne remplacée (buffer du script) */
+void Ui_SetFill(const Entity* e, int amount_412);/* images Filled (jauges) */
+void Ui_SetActive(const Entity* e, int active);  /* montrer/cacher (canvas compris) */
+void Ui_SetTint(const Entity* e, uint8_t r, uint8_t g, uint8_t b);
+
+/* Focus D-pad : navigation géométrique entre boutons visibles ; le
+ * moteur surligne le focalisé, le jeu décide quoi faire de X/O. */
+void    Ui_FocusInit(void);
+int     Ui_FocusMove(int dx, int dy);
+Entity* Ui_Focused(void);
+void    Ui_FocusClear(void);
 ```
 
 - **Résolution des rects** : une passe descendante par frame, parents
@@ -224,15 +233,20 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
   rect parent (multiplications + `>> 12`), puis les Layout Groups
   **écrasent** les rects de leurs enfants — mêmes règles que
   l'éditeur, au bit près.
-- **Focus** : `Ui_FocusInit/Ui_FocusMove(dir)/Ui_Focused()` — la
-  navigation D-pad suit les voisins du format (calculés par l'éditeur
-  géométriquement — automatiques dans un layout —, forçables). Le jeu
-  décide quoi faire de X/O : le moteur expose l'état, il ne capture
-  pas l'input.
+- **Focus** : `Ui_FocusInit/Ui_FocusMove(dx, dy)/Ui_Focused()` — la
+  navigation D-pad est **géométrique au runtime** (le bouton visible le
+  plus proche dans la direction demandée, rects de la dernière frame) ;
+  pas de table de voisins dans le format en v1. Le moteur surligne le
+  bouton focalisé (TILE semi-transparente derrière) ; le jeu décide
+  quoi faire de X/O : le moteur expose l'état, il ne capture pas
+  l'input.
 - **Scripts** : les scripts d'entité existants pilotent l'UI par l'API
-  (barre de vie : `Ui_SetFill`, pause : `Ui_SetActive`) — pas de
-  nouveau système d'événements en v1. Le dialogue de démo
-  (`Dialog_Show`) migrera vers un canvas à terme.
+  (barre de vie : `Ui_SetFill` dans le script `hud`, pause :
+  `Ui_SetActive` + focus dans `pause`) — pas de nouveau système
+  d'événements en v1. Le dialogue de démo est rendu par le script
+  `dialogue` (canvas Sliced + `Ui_SetText`) ; le fallback
+  `Dialog_Draw` s'efface quand un tel canvas se déclare
+  (`Dialog_UiCanvas(1)` dans son Start).
 - **Live tweaking** : les widgets étant des entités, la balise RAM
   existante s'étend naturellement aux RectTransforms (jalon 4).
 
@@ -339,9 +353,16 @@ torches) l'utiliseront tel quel plus tard.
    entité-référence + instance bleue en hiérarchie, édition isolée
    avec fil d'Ariane, « Créer ▸ Prefab UI », le HUD de démo partagé
    entre les deux scènes.
-4. **Interactif** : Button + focus D-pad (navigation automatique dans
-   les layouts), API scripts (`Ui_Get` + setters), le dialogue de démo
-   migré en canvas (fond *Sliced*).
+4. ~~**Interactif**~~ — **livré** : composant `button` (bit 3) dans
+   toute la pile, focus D-pad au runtime (`Ui_FocusInit/Move/Focused`,
+   navigation géométrique entre boutons visibles, surlignage
+   semi-transparent du focalisé), `Ui_SetText` (chaîne remplacée par
+   widget), API scripts sans `Scene*` (`Ui_Components`, `Ui_ImageType`,
+   setters sur la scène courante) ; démo branchée au gameplay : jauge
+   de vie pilotée par le script `hud` (marcher fatigue, souffler
+   régénère, parler requinque), **menu pause** à boutons
+   (START/D-pad/X, scripts `pause`), **dialogue migré en canvas**
+   Sliced (script `dialogue`, fallback `Dialog_Draw` effacé).
 5. **Confort** (au besoin) : Grid Layout, Content Size Fitter, fill
    radial, live tweaking des RectTransforms via la balise RAM,
    overrides d'instance par enfant (apply/revert à la Unity).

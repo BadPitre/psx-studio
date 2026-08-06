@@ -146,6 +146,14 @@ de triangles — surveille l'avertissement de budget.)
 - **▶ Play** : build incrémental + PCSX-Redux. Pendant que le jeu tourne,
   déplacer une entité (gizmo ou inspecteur) **l'écrit dans la RAM
   console** : le décor bouge dans le jeu, sans rebuild.
+- **UI interactive** (démo village) : la jauge de vie du HUD est
+  branchée au gameplay (marcher fatigue, souffler régénère, parler au
+  PNJ requinque), **START** ouvre un menu pause à boutons — D-pad pour
+  déplacer le focus (surligné), X pour activer, REPRENDRE/QUITTER — et
+  le dialogue est un canvas UI de la scène (éditable comme le reste).
+  Côté code : composant Button (menu ＋ → Bouton UI), scripts
+  `hud`/`pause`/`dialogue` dans `runtime/game/scripts/` comme modèles,
+  API `Ui_*` dans `engine.h`.
 
 ## 6. Écrire du gameplay
 

@@ -16,6 +16,17 @@ extern SfxSample g_sfx_blip;
 #define CAM_BACK		340
 #define CAM_UP			200
 
+/* Sante 4.12 (4096 = pleine) : marcher fatigue, souffler regenere,
+ * parler au PNJ requinque — la jauge Filled du HUD la suit (script hud). */
+#define HEALTH_MAX		4096
+#define HEALTH_MIN		400
+#define HEALTH_DRAIN	6
+#define HEALTH_REGEN	3
+
+int g_player_health = HEALTH_MAX;
+/* Menu pause ouvert (script pause) : le monde est fige. */
+extern int g_ui_pause_open;
+
 static Entity* npc;
 
 /* Orientation du perso selon la direction de marche (8 directions).
@@ -50,6 +61,10 @@ void Player_Update(Entity* self)
 	uint16_t held = Input_Held();
 	uint16_t pressed = Input_Pressed();
 
+	/* Menu pause ouvert (script pause) : le monde est fige. */
+	if (g_ui_pause_open)
+		held = pressed = 0;
+
 	/* Dialogue ouvert : X ferme, et on ne bouge pas. */
 	if (Dialog_IsOpen())
 	{
@@ -71,9 +86,20 @@ void Player_Update(Entity* self)
 			if (facing >= 0)
 				self->rot.vy = (int16_t)facing;
 			Physics_MoveAndSlide(self, dx, dz);
+			/* Courir fatigue : la jauge du HUD descend... */
+			g_player_health -= HEALTH_DRAIN;
+			if (g_player_health < HEALTH_MIN)
+				g_player_health = HEALTH_MIN;
+		}
+		else if (g_player_health < HEALTH_MAX)
+		{
+			/* ...souffler regenere. */
+			g_player_health += HEALTH_REGEN;
+			if (g_player_health > HEALTH_MAX)
+				g_player_health = HEALTH_MAX;
 		}
 
-		/* Parler au PNJ. */
+		/* Parler au PNJ (et se faire requinquer). */
 		if (npc && (pressed & PAD_CROSS) &&
 			Entity_Dist2XZ(self, npc) < TALK_DIST * TALK_DIST)
 		{
@@ -81,6 +107,7 @@ void Player_Update(Entity* self)
 				"BIENVENUE A CROUTON-SUR-MIE,\n"
 				"LE PLUS BEAU VILLAGE DE LA PS1.");
 			Sfx_Play(&g_sfx_blip);
+			g_player_health = HEALTH_MAX;
 		}
 	}
 

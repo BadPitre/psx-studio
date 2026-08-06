@@ -16,7 +16,7 @@ fn village_builds_and_parses() {
     let h = scene::parse_header(&bytes).unwrap();
     assert_eq!(h.model_count, 4);
     assert_eq!(h.texture_count, 3);
-    assert_eq!(h.entity_count, 18);
+    assert_eq!(h.entity_count, 29);
     assert_eq!(h.total_size as usize, bytes.len());
     assert_eq!(h.background, [24, 32, 56]);
 
@@ -164,14 +164,15 @@ fn scripts_table_and_entity_refs() {
     assert_eq!(script_ref(2), 2); // npc
     assert_eq!(script_ref(3), 2); // npc (partage)
 
-    // Le village de démo embarque les scripts player et npc.
+    // Le village de démo embarque player/npc + les scripts UI (hud,
+    // dialogue, pause).
     let (bytes2, _) = scene::build_file(&{
         let p = dir.path().join("s2.json");
         std::fs::write(&p, samples::scene_village_json()).unwrap();
         p
     })
     .unwrap();
-    assert_eq!(scene::parse_header(&bytes2).unwrap().script_count, 3);
+    assert_eq!(scene::parse_header(&bytes2).unwrap().script_count, 6);
 }
 
 #[test]
@@ -346,7 +347,7 @@ fn point_lights_flag_and_radius() {
 fn ui_table_fonts_and_strings() {
     let bytes = build_village();
     let h = scene::parse_header(&bytes).unwrap();
-    assert_eq!(h.ui_count, 8);
+    assert_eq!(h.ui_count, 19);
     assert_eq!(h.font_count, 1);
 
     let ui = scene::parse_ui(&bytes, &h);
@@ -377,6 +378,18 @@ fn ui_table_fonts_and_strings() {
     let info = psxpipe::fnt::parse(fnt).unwrap();
     assert_eq!((info.cell_w, info.cell_h), (6, 8));
     assert_eq!(psxpipe::fnt::advances(fnt)[(b'I' - 32) as usize], 5);
+
+    // Jalon 4 : le canvas dialogue est inactif, ses lignes sont des
+    // chaines vides (remplies par Ui_SetText), et les boutons du menu
+    // pause portent le composant button (bit 3) en plus du texte.
+    assert_eq!(ui[8].components & (1 << 0), 1 << 0); // dialogue canvas
+    assert_eq!(ui[8].components & (1 << 5), 0); // inactif
+    let l1_start = strings + ui[10].data as usize;
+    assert_eq!(bytes[l1_start], 0); // dlg_l1 : chaine vide
+    let btn = &ui[17]; // btn_reprendre
+    assert_eq!(btn.components & (1 << 3), 1 << 3);
+    assert_eq!(btn.components & (1 << 2), 1 << 2);
+    assert_eq!(ui[18].components & (1 << 3), 1 << 3); // btn_quitter
 }
 
 #[test]

@@ -17,6 +17,9 @@
       { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
       { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" },
       { "id": "guy",    "pmd": "guy.pmd",    "texture": "guy_tex" }
+    ],
+    "fonts": [
+      { "id": "main", "fnt": "main.fnt" }
     ]
   },
   "entities": [
@@ -31,6 +34,19 @@
     { "name": "cube23", "position": [200, -40, 280],  "rotation": [0, 75, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube31", "position": [-200, -40, 480], "rotation": [0, 10, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube32", "position": [0, -40, 480],    "rotation": [0, 25, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
-    { "name": "cube33", "position": [200, -40, 480],  "rotation": [0, 40, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" }
+    { "name": "cube33", "position": [200, -40, 480],  "rotation": [0, 40, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "hud", "canvas": true },
+    { "name": "vie_fond", "parent": "hud",
+      "rect": { "anchor_min": [0, 0], "anchor_max": [0, 0], "pivot": [0, 0],
+                "position": [8, 8], "size": [70, 12] },
+      "image": { "color": [10, 12, 24] } },
+    { "name": "vie", "parent": "vie_fond",
+      "rect": { "anchor_min": [0, 0], "anchor_max": [1, 1],
+                "position": [2, 2], "size": [2, 2] },
+      "image": { "color": [200, 40, 40], "type": "filled", "fill": "horizontal", "amount": 0.75 } },
+    { "name": "zone", "parent": "hud",
+      "rect": { "anchor_min": [1, 0], "anchor_max": [1, 0], "pivot": [1, 0],
+                "position": [-8, 8], "size": [140, 10] },
+      "text": { "font": "main", "text": "CHAMP DE CUBES", "align": "right" } }
   ]
 }

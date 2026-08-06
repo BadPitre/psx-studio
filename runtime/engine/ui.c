@@ -35,7 +35,26 @@ static uint8_t	visible[SCENE_MAX_UI];
 /* Curseur d'empilement par Layout Group (offset sur l'axe principal). */
 static int16_t	layout_cursor[SCENE_MAX_UI];
 /* Etat mutable par widget (setters) : amount/actif/teinte vivent dans
- * les enregistrements de l'arene, directement (memoire ordinaire). */
+ * les enregistrements de l'arene, directement (memoire ordinaire).
+ * Les chaines remplacees (Ui_SetText) et le focus vivent ici. */
+static const char*	text_override[SCENE_MAX_UI];
+static int			focus = -1;
+/* 1 : un canvas de la scene rend le dialogue (le fallback s'efface). */
+static int			dialog_canvas;
+
+void Ui_Reset(void)
+{
+	memset(text_override, 0, sizeof(text_override));
+	focus = -1;
+	dialog_canvas = 0;
+}
+
+int Dialog_UiCanvas(int present)
+{
+	if (present >= 0)
+		dialog_canvas = present;
+	return dialog_canvas;
+}
 
 static const PscUiRec* find_rec(const Scene* scene, int entity, int* index_out)
 {
@@ -56,12 +75,36 @@ const PscUiRec* Ui_Get(const Scene* scene, const Entity* e)
 	return find_rec(scene, (int)(e - scene->entities), 0);
 }
 
+/* Enregistrement (mutable) + index d'une entite de la scene courante. */
+static PscUiRec* rec_of(const Entity* e, int* index_out)
+{
+	Scene* scene = Scene_Current();
+	if (!scene || !e)
+		return 0;
+	return (PscUiRec*)find_rec(scene, (int)(e - scene->entities), index_out);
+}
+
+uint8_t Ui_Components(const Entity* e)
+{
+	const PscUiRec* rec = rec_of(e, 0);
+	return rec ? rec->components : 0;
+}
+
+int Ui_ImageType(const Entity* e)
+{
+	const PscUiRec* rec = rec_of(e, 0);
+	if (!rec || !(rec->components & UI_COMP_IMAGE))
+		return -1;
+	return rec->flags & 0x3;
+}
+
 /* Les setters ecrivent dans l'arene (les enregistrements sont mutables
  * au meme titre que les transforms d'entites). */
-void Ui_SetFill(const Scene* scene, const Entity* e, int amount_412)
+void Ui_SetFill(const Entity* e, int amount_412)
 {
-	PscUiRec* rec = (PscUiRec*)Ui_Get(scene, e);
-	if (!rec)
+	PscUiRec* rec = rec_of(e, 0);
+	/* data porte l'offset de chaine des textes : ne toucher que Filled. */
+	if (!rec || !(rec->components & UI_COMP_IMAGE) || (rec->flags & 0x3) != 3)
 		return;
 	if (amount_412 < 0)
 		amount_412 = 0;
@@ -70,9 +113,9 @@ void Ui_SetFill(const Scene* scene, const Entity* e, int amount_412)
 	rec->data = (uint16_t)amount_412;
 }
 
-void Ui_SetActive(const Scene* scene, const Entity* e, int active)
+void Ui_SetActive(const Entity* e, int active)
 {
-	PscUiRec* rec = (PscUiRec*)Ui_Get(scene, e);
+	PscUiRec* rec = rec_of(e, 0);
 	if (!rec)
 		return;
 	if (active)
@@ -81,15 +124,115 @@ void Ui_SetActive(const Scene* scene, const Entity* e, int active)
 		rec->components &= ~UI_COMP_ACTIVE;
 }
 
-void Ui_SetTint(const Scene* scene, const Entity* e, uint8_t r, uint8_t g,
-	uint8_t b)
+void Ui_SetTint(const Entity* e, uint8_t r, uint8_t g, uint8_t b)
 {
-	PscUiRec* rec = (PscUiRec*)Ui_Get(scene, e);
+	PscUiRec* rec = rec_of(e, 0);
 	if (!rec)
 		return;
 	rec->color[0] = r;
 	rec->color[1] = g;
 	rec->color[2] = b;
+}
+
+void Ui_SetText(const Entity* e, const char* text)
+{
+	int i;
+	PscUiRec* rec = rec_of(e, &i);
+	if (!rec || !(rec->components & UI_COMP_TEXT))
+		return;
+	text_override[i] = text;
+}
+
+/* ------------------------------------------------------------- focus -- */
+/* Visibilite reelle d'un widget : son bit actif ET ceux de toute sa
+ * chaine de parents (un canvas cache masque le sous-arbre). */
+static int rec_visible(const Scene* scene, int i)
+{
+	const PscUiRec* rec = &scene->ui[i];
+	if (!(rec->components & UI_COMP_ACTIVE))
+		return 0;
+	int16_t p = scene->entities[rec->entity].parent;
+	while (p >= 0)
+	{
+		int pi;
+		if (find_rec(scene, p, &pi) &&
+			!(scene->ui[pi].components & UI_COMP_ACTIVE))
+			return 0;
+		p = scene->entities[p].parent;
+	}
+	return 1;
+}
+
+void Ui_FocusClear(void)
+{
+	focus = -1;
+}
+
+void Ui_FocusInit(void)
+{
+	Scene* scene = Scene_Current();
+	focus = -1;
+	if (!scene)
+		return;
+	for (int i = 0; i < scene->ui_count; i++)
+	{
+		if ((scene->ui[i].components & UI_COMP_BUTTON) &&
+			rec_visible(scene, i))
+		{
+			focus = i;
+			return;
+		}
+	}
+}
+
+int Ui_FocusMove(int dx, int dy)
+{
+	Scene* scene = Scene_Current();
+	if (!scene)
+		return 0;
+	if (focus < 0)
+	{
+		Ui_FocusInit();
+		return focus >= 0;
+	}
+	/* Candidat : bouton visible situe dans la direction demandee, le plus
+	 * proche du centre du bouton focalise (rects de la derniere frame —
+	 * la passe 1 les resout meme pour les widgets caches). */
+	int cx = resolved[focus].x + resolved[focus].w / 2;
+	int cy = resolved[focus].y + resolved[focus].h / 2;
+	int best = -1;
+	int32_t best_d2 = 0;
+	for (int i = 0; i < scene->ui_count; i++)
+	{
+		if (i == focus || !(scene->ui[i].components & UI_COMP_BUTTON) ||
+			!rec_visible(scene, i))
+			continue;
+		int ix = resolved[i].x + resolved[i].w / 2;
+		int iy = resolved[i].y + resolved[i].h / 2;
+		if ((dx > 0 && ix <= cx) || (dx < 0 && ix >= cx) ||
+			(dy > 0 && iy <= cy) || (dy < 0 && iy >= cy))
+			continue;
+		int32_t ddx = ix - cx;
+		int32_t ddy = iy - cy;
+		int32_t d2 = ddx * ddx + ddy * ddy;
+		if (best < 0 || d2 < best_d2)
+		{
+			best = i;
+			best_d2 = d2;
+		}
+	}
+	if (best < 0)
+		return 0;
+	focus = best;
+	return 1;
+}
+
+Entity* Ui_Focused(void)
+{
+	Scene* scene = Scene_Current();
+	if (!scene || focus < 0 || focus >= scene->ui_count)
+		return 0;
+	return &scene->entities[scene->ui[focus].entity];
 }
 
 /* Resolution d'un axe du RectTransform (semantique Unity) : ancres 4.12
@@ -332,7 +475,8 @@ uint8_t* Ui_Draw(const Scene* scene, uint32_t* ot, uint8_t* packet,
 		if ((rec->components & UI_COMP_TEXT) && rec->asset < scene->font_count)
 		{
 			const UiFont* font = &scene->fonts[rec->asset];
-			const char* s = scene->ui_strings + rec->data;
+			const char* s = text_override[i] ? text_override[i]
+				: scene->ui_strings + rec->data;
 			int x = r.x;
 			int y = r.y;
 
@@ -372,6 +516,22 @@ uint8_t* Ui_Draw(const Scene* scene, uint32_t* ot, uint8_t* packet,
 				addPrim(&ot[0], tp);
 				packet += sizeof(DR_TPAGE);
 			}
+		}
+
+		/* Bouton focalise : barre de surlignage semi-transparente derriere
+		 * ses primitives (ajoutee apres = dessinee avant, addPrim insere
+		 * en tete). */
+		if (i == focus && (rec->components & UI_COMP_BUTTON) &&
+			packet + sizeof(TILE) <= packet_limit)
+		{
+			TILE* hl = (TILE*)packet;
+			setTile(hl);
+			setSemiTrans(hl, 1);
+			setXY0(hl, r.x - 2, r.y - 2);
+			setWH(hl, r.w + 4, r.h + 4);
+			setRGB0(hl, 70, 76, 120);
+			addPrim(&ot[0], hl);
+			packet += sizeof(TILE);
 		}
 	}
 

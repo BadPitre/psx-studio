@@ -94,6 +94,46 @@ extern int g_scene_switch_request;
 void	Dialog_Show(const char* text);
 int		Dialog_IsOpen(void);
 void	Dialog_Close(void);
+/* Texte courant (NULL si fermee) — pour un rendu custom (canvas UI). */
+const char* Dialog_Text(void);
+/* Un canvas UI de la scene rend le dialogue (script "dialogue" : passer 1
+ * dans son Start) : le fallback Dialog_Draw s'efface. Remis a 0 a chaque
+ * chargement de scene. -1 = lire l'etat sans le changer. */
+int		Dialog_UiCanvas(int present);
+
+/* ------------------------------------------------------------------- UI -- */
+/* Les widgets UI (SceneFormat v1.3) SONT des entites de la scene
+ * courante : on les retrouve comme les autres (index, script attache).
+ * Setters silencieux si l'entite n'a pas le composant vise. */
+
+#define UI_COMP_CANVAS	(1 << 0)
+#define UI_COMP_IMAGE	(1 << 1)
+#define UI_COMP_TEXT	(1 << 2)
+#define UI_COMP_BUTTON	(1 << 3)
+#define UI_COMP_LAYOUT	(1 << 4)
+#define UI_COMP_ACTIVE	(1 << 5)
+
+/* Masque UI_COMP_* de l'entite (0 = pas un widget). */
+uint8_t	Ui_Components(const Entity* e);
+/* Type d'image : 0 simple, 1 sliced, 2 tiled, 3 filled, -1 sans image. */
+int		Ui_ImageType(const Entity* e);
+/* Remplissage d'une image Filled, 0..4096 (jauges). */
+void	Ui_SetFill(const Entity* e, int amount_412);
+/* Montre/cache un widget (un canvas cache masque tout son sous-arbre). */
+void	Ui_SetActive(const Entity* e, int active);
+void	Ui_SetTint(const Entity* e, uint8_t r, uint8_t g, uint8_t b);
+/* Remplace la chaine d'un widget texte. Le pointeur doit rester valide
+ * (buffer du script) ; NULL = retour a la chaine de la scene. */
+void	Ui_SetText(const Entity* e, const char* text);
+
+/* Focus D-pad : navigation geometrique entre les boutons visibles
+ * (UI_COMP_BUTTON). Le moteur surligne le bouton focalise au dessin ;
+ * le jeu decide quoi faire de X/O. */
+void	Ui_FocusInit(void);				/* premier bouton visible */
+void	Ui_FocusClear(void);
+/* dx/dy dans -1/0/+1 (axes ecran, +y vers le bas). 1 si le focus a bouge. */
+int		Ui_FocusMove(int dx, int dy);
+Entity*	Ui_Focused(void);				/* NULL si aucun */
 
 /* ------------------------------------------------------------- physique -- */
 /* Deplace l'entite en glissant contre les AABB (axes monde) des autres

@@ -146,8 +146,14 @@ instances en **bleu** 🧩 dans la hiérarchie, enfants en lecture seule,
 carte Prefab dans l'inspecteur ; **Prefab Mode** : ouverture isolée
 d'un prefab depuis le panneau Project ou l'inspecteur, fil d'Ariane
 `‹ scène 🧩 prefab`, sauvegarde = toutes les scènes suivent),
-puis interactif (boutons/focus/API scripts), confort (Grid Layout,
-fill radial, live tweaking, overrides avancés).
+~~jalon 4 (interactif)~~ — **livré** (composant `button` bit 3 dans
+toute la pile ; focus D-pad au runtime : navigation géométrique entre
+boutons visibles + surlignage du focalisé ; `Ui_SetText` et API
+scripts sur la scène courante ; démo branchée : jauge de vie pilotée
+par script, menu pause à boutons START/D-pad/X, dialogue migré en
+canvas Sliced),
+reste : confort (Grid Layout, fill radial, live tweaking des
+RectTransforms, overrides d'instance avancés).
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 

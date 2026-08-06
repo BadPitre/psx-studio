@@ -14,11 +14,20 @@ void Npc_Start(Entity* self);
 void Npc_Update(Entity* self);
 void Torche_Start(Entity* self);
 void Torche_Update(Entity* self);
+void Hud_Start(Entity* self);
+void Hud_Update(Entity* self);
+void Dialogue_Start(Entity* self);
+void Dialogue_Update(Entity* self);
+void Pause_Start(Entity* self);
+void Pause_Update(Entity* self);
 
 const ScriptDef g_scripts[] = {
-	{ "player", Player_Start, Player_Update },
-	{ "npc",    Npc_Start,    Npc_Update },
-	{ "torche", Torche_Start, Torche_Update },
+	{ "player",   Player_Start,   Player_Update },
+	{ "npc",      Npc_Start,      Npc_Update },
+	{ "torche",   Torche_Start,   Torche_Update },
+	{ "hud",      Hud_Start,      Hud_Update },
+	{ "dialogue", Dialogue_Start, Dialogue_Update },
+	{ "pause",    Pause_Start,    Pause_Update },
 };
 
 const int g_script_count = sizeof(g_scripts) / sizeof(g_scripts[0]);

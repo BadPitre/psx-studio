@@ -123,6 +123,11 @@ void Dialog_Show(const char* text)
 	dialog_text = text;
 }
 
+const char* Dialog_Text(void)
+{
+	return dialog_text;
+}
+
 int Dialog_IsOpen(void)
 {
 	return dialog_text != 0;
@@ -135,7 +140,9 @@ void Dialog_Close(void)
 
 uint8_t* Dialog_Draw(uint32_t* ot, uint8_t* packet)
 {
-	if (!dialog_text)
+	/* Un canvas UI de la scene (script "dialogue") rend deja la boite :
+	 * le fallback historique s'efface. */
+	if (!dialog_text || Dialog_UiCanvas(-1))
 		return packet;
 
 	/* Fond semi-transparent, au-dessus de la 3D (index 1, le texte de la

@@ -653,6 +653,29 @@ function UiCards({
           </div>
         </ComponentCard>
       )}
+      {ui.button === true && (
+        <ComponentCard icon="🔘" title="Button" onRemove={() => mutate((e) => delete e.button)}>
+          <div className="field-readonly">
+            Focusable au D-pad (navigation géométrique automatique). Le
+            runtime surligne le bouton focalisé ; les scripts lisent
+            Ui_Focused() et décident de l'action (X/O).
+          </div>
+        </ComponentCard>
+      )}
+      {ui.button !== true && ui.canvas !== true && (
+        <div className="add-component">
+          <button
+            className="button"
+            onClick={() =>
+              mutate((e) => {
+                e.button = true;
+              })
+            }
+          >
+            ＋ Button
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -1476,21 +1499,23 @@ export default function App() {
      couleur chaude) ou caméra (recul + regard vers l'origine, la scène
      dans le cadre). */
   const addEntity = useCallback(
-    (kind: "empty" | "light" | "camera" | "canvas" | "uiimage" | "uitext" | "vlist" | "hlist") => {
-      const base = { light: "lumiere", camera: "camera", canvas: "canvas", uiimage: "image", uitext: "texte", vlist: "liste", hlist: "liste" }[
+    (kind: "empty" | "light" | "camera" | "canvas" | "uiimage" | "uitext" | "uibutton" | "vlist" | "hlist") => {
+      const base = { light: "lumiere", camera: "camera", canvas: "canvas", uiimage: "image", uitext: "texte", uibutton: "bouton", vlist: "liste", hlist: "liste" }[
         kind as string
       ] ?? "entite";
       const name = uniqueName(base);
-      /* Image/Texte UI : sous le canvas sélectionné, sinon le premier. */
-      const uiParent =
-        kind === "uiimage" || kind === "uitext" || kind === "vlist" || kind === "hlist"
-          ? ((selected >= 0 &&
-              sceneDoc?.entities?.find(
-                (e) => e.name === entityNames[selected] && (e.canvas === true || e.rect),
-              )?.name) ||
-            (sceneDoc?.entities?.find((e) => e.canvas === true)?.name as string | undefined))
-          : undefined;
-      if ((kind === "uiimage" || kind === "uitext" || kind === "vlist" || kind === "hlist") && !uiParent) {
+      const isUiChild =
+        kind === "uiimage" || kind === "uitext" || kind === "uibutton" ||
+        kind === "vlist" || kind === "hlist";
+      /* Widget UI : sous le canvas sélectionné, sinon le premier. */
+      const uiParent = isUiChild
+        ? ((selected >= 0 &&
+            sceneDoc?.entities?.find(
+              (e) => e.name === entityNames[selected] && (e.canvas === true || e.rect),
+            )?.name) ||
+          (sceneDoc?.entities?.find((e) => e.canvas === true)?.name as string | undefined))
+        : undefined;
+      if (isUiChild && !uiParent) {
         setError("Ajoute d'abord un Canvas (menu ＋ → Canvas UI).");
         return;
       }
@@ -1532,7 +1557,7 @@ export default function App() {
               ...(kind === "vlist" ? { expand_w: true } : { expand_h: true }),
             },
           });
-        } else if (kind === "uitext") {
+        } else if (kind === "uitext" || kind === "uibutton") {
           // La police "main" doit exister dans les assets de la scène
           // (convertie en Library/main.fnt par le build du projet).
           const assets = (doc.assets ?? (doc.assets = {})) as Record<string, unknown>;
@@ -1541,12 +1566,22 @@ export default function App() {
           if (!fonts.some((f) => f.id === "main")) {
             fonts.push({ id: "main", fnt: "main.fnt" });
           }
-          doc.entities.push({
-            name,
-            parent: uiParent,
-            rect: { anchor_min: [0.5, 0.5], anchor_max: [0.5, 0.5], size: [80, 10] },
-            text: { font: "main", text: "TEXTE" },
-          });
+          doc.entities.push(
+            kind === "uibutton"
+              ? {
+                  name,
+                  parent: uiParent,
+                  rect: { anchor_min: [0.5, 0.5], anchor_max: [0.5, 0.5], size: [80, 14] },
+                  text: { font: "main", text: "BOUTON", align: "center" },
+                  button: true,
+                }
+              : {
+                  name,
+                  parent: uiParent,
+                  rect: { anchor_min: [0.5, 0.5], anchor_max: [0.5, 0.5], size: [80, 10] },
+                  text: { font: "main", text: "TEXTE" },
+                },
+          );
         } else {
           doc.entities.push({ name, position: [0, 0, 0] });
         }
@@ -2272,6 +2307,7 @@ export default function App() {
                   { label: "▦ Canvas UI", onClick: () => addEntity("canvas") },
                   { label: "🖼 Image UI", onClick: () => addEntity("uiimage") },
                   { label: "🅰 Texte UI", onClick: () => addEntity("uitext") },
+                  { label: "🔘 Bouton UI", onClick: () => addEntity("uibutton") },
                   { label: "☰ Liste verticale UI", onClick: () => addEntity("vlist") },
                   { label: "☷ Liste horizontale UI", onClick: () => addEntity("hlist") },
                   { label: "☀ Lumière directionnelle", onClick: () => addEntity("light") },
@@ -2490,7 +2526,8 @@ export default function App() {
                   (selectedJsonEntity.canvas === true ||
                     selectedJsonEntity.rect ||
                     selectedJsonEntity.image ||
-                    selectedJsonEntity.text)
+                    selectedJsonEntity.text ||
+                    selectedJsonEntity.button === true)
                     ? selectedJsonEntity
                     : null
                 }

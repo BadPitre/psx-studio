@@ -21,7 +21,7 @@ describe("parsePsc sur scene0.psc (village)", () => {
   it("lit l'en-tête et les réglages de scène", () => {
     expect(scene.models.length).toBe(4);
     expect(scene.textures.length).toBe(3);
-    expect(scene.entities.length).toBe(18);
+    expect(scene.entities.length).toBe(29);
     expect(scene.background).toEqual([24, 32, 56]);
     // Le vecteur lumière pointe vers la source (Y négatif = vers le haut).
     expect(scene.lightToward[1]).toBeLessThan(-0.4);
@@ -77,9 +77,10 @@ describe("parsePsc sur scene0.psc (village)", () => {
     scene.entities.forEach((e, i) => {
       if (e.parent >= 0) expect(e.parent).toBeLessThan(i);
     });
-    // La cheminée (parentée à une maison) + les 3 widgets UI sous le hud.
+    // La cheminée (parentée à une maison) + les widgets UI sous leurs
+    // canvas (HUD, dialogue, menu pause).
     const children = scene.entities.filter((e) => e.parent >= 0);
-    expect(children.length).toBe(8);
+    expect(children.length).toBe(17);
     // Le sol a une échelle 4 en X/Z.
     const sol = scene.entities[0];
     expect(sol.scale[0]).toBeCloseTo(4.0, 2);
@@ -97,7 +98,7 @@ describe("parsePsc sur scene0.psc — table UI (v1.3)", () => {
 
   it("lit les widgets, la police et les chaînes", () => {
     // hud (canvas) + vie_fond + vie (filled) + zone (texte).
-    expect(scene.ui.length).toBe(8);
+    expect(scene.ui.length).toBe(19);
     expect(scene.fontCount).toBe(1);
     const [hud, fond, vie, zone] = scene.ui;
     expect(hud.components & 1).toBe(1);
@@ -122,6 +123,14 @@ describe("parsePsc sur scene0.psc — table UI (v1.3)", () => {
     expect(liste.components & (1 << 4)).toBe(1 << 4);
     expect(liste.uv).toEqual([4, 4, 4, 4]);
     expect(liste.extra).toBe(4);
+    // Jalon 4 : canvas dialogue inactif, boutons du menu pause (bit 3).
+    const dialogue = scene.ui[8];
+    expect(dialogue.components & (1 << 0)).toBe(1 << 0);
+    expect(dialogue.components & (1 << 5)).toBe(0);
+    const btn = scene.ui[17];
+    expect(btn.components & (1 << 3)).toBe(1 << 3);
+    expect(btn.text).toBe("REPRENDRE");
+    expect(scene.ui[18].text).toBe("QUITTER");
   });
 });
 

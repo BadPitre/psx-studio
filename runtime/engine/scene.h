@@ -73,12 +73,7 @@ typedef struct {
 	uint8_t		border[4];		/* marges 9-slice */
 } PscUiRec;
 
-#define UI_COMP_CANVAS	(1 << 0)
-#define UI_COMP_IMAGE	(1 << 1)
-#define UI_COMP_TEXT	(1 << 2)
-#define UI_COMP_BUTTON	(1 << 3)
-#define UI_COMP_LAYOUT	(1 << 4)
-#define UI_COMP_ACTIVE	(1 << 5)
+/* Masques UI_COMP_* : dans engine.h (partages avec les scripts). */
 
 #define SCENE_MAX_UI		48
 #define SCENE_MAX_FONTS		4
@@ -232,14 +227,11 @@ int Scene_TriangleCount(const Scene* scene);
 uint8_t* Ui_Draw(const Scene* scene, uint32_t* ot, uint8_t* packet,
 	uint8_t* packet_limit);
 
-/* Composants UI d'une entite (NULL si elle n'en a pas). */
+/* Composants UI d'une entite (NULL si elle n'en a pas). Les setters
+ * scripts (Ui_SetFill, Ui_SetText, focus...) sont dans engine.h. */
 const PscUiRec* Ui_Get(const Scene* scene, const Entity* e);
-/* Remplissage d'une image Filled, 0..4096 (jauges). */
-void Ui_SetFill(const Scene* scene, const Entity* e, int amount_412);
-/* Montre/cache un widget (un canvas cache masque tout son sous-arbre). */
-void Ui_SetActive(const Scene* scene, const Entity* e, int active);
-void Ui_SetTint(const Scene* scene, const Entity* e, uint8_t r, uint8_t g,
-	uint8_t b);
+/* Oublie l'etat mutable UI (textes remplaces, focus) — au parse de scene. */
+void Ui_Reset(void);
 
 /* Read a whole CD file into the scene arena WITHOUT resetting it. */
 void* Scene_ReadFileToArena(const char* path, uint32_t* size_out);

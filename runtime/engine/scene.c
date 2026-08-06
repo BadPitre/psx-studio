@@ -324,6 +324,7 @@ static int Scene_Parse(Scene* scene, uint8_t* data)
 	/* UI (v1.3) : la table suit les lumieres (alignee 4), puis les
 	 * polices puis les chaines. Les atlas de police sont uploades comme
 	 * les textures. */
+	Ui_Reset();
 	scene->ui_count = 0;
 	scene->font_count = 0;
 	if (header->ui_count > 0 && header->lights_offset != 0)
