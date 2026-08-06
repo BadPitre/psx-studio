@@ -815,6 +815,7 @@ fn kind_for(section: &str, ext: &str) -> &'static str {
         "wav" | "vag" => "audio",
         "bin" => "buffer",
         "json" if section == "scenes" => "scene",
+        "json" if section == "prefabs" => "prefab",
         _ => "other",
     }
 }
@@ -906,6 +907,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
                 // Les compagnons/inconnus ne sont pas importables : pas de badge.
                 registered: registered.contains_key(&rel)
                     || kind == "buffer"
+                    || kind == "prefab"
                     || kind == "other",
                 exists: true,
                 out: registered.get(&rel).cloned().flatten(),
@@ -916,7 +918,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
 
     let mut files = Vec::new();
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for section in ["scenes", "assets", "audio"] {
+    for section in ["scenes", "assets", "audio", "prefabs"] {
         walk(
             &project_dir.join(section),
             section,
@@ -1069,6 +1071,28 @@ pub fn move_entry(project_dir: &Path, from_rel: &str, to_dir_rel: &str) -> Resul
     .map_err(|e| e.to_string())?;
 
     Ok(new_rel)
+}
+
+/// Sauvegarde un prefab (sous-arbre d'entités + assets, même schéma que
+/// le scene.json) dans `prefabs/<slug>.json`. Retourne le chemin relatif.
+pub fn save_prefab(project_dir: &Path, name: &str, contents: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("nom de prefab vide".into());
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(contents).map_err(|e| format!("prefab invalide : {e}"))?;
+    if !value["entities"].is_array() {
+        return Err("prefab invalide : pas de tableau \"entities\"".into());
+    }
+    let rel = format!("prefabs/{}.json", sanitize_id(trimmed));
+    std::fs::create_dir_all(project_dir.join("prefabs")).map_err(|e| e.to_string())?;
+    std::fs::write(
+        project_dir.join(&rel),
+        serde_json::to_string_pretty(&value).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(rel)
 }
 
 /// Crée une scène vide `scenes/<slug>.json` et l'enregistre dans

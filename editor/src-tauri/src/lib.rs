@@ -218,6 +218,12 @@ fn create_scene(project_dir: String, name: String) -> Result<String, String> {
     psxpipe::project::create_scene(&PathBuf::from(project_dir), &name)
 }
 
+/// Sauvegarde un prefab (drag hiérarchie -> panneau Project).
+#[tauri::command(async)]
+fn save_prefab(project_dir: String, name: String, contents: String) -> Result<String, String> {
+    psxpipe::project::save_prefab(&PathBuf::from(project_dir), &name, &contents)
+}
+
 /// Crée un dossier (menu « Créer ▸ Dossier ») ; retourne son chemin relatif.
 #[tauri::command(async)]
 fn create_folder(project_dir: String, parent: String, name: String) -> Result<String, String> {
@@ -368,6 +374,7 @@ pub fn run() {
             list_project_files,
             create_scene,
             create_folder,
+            save_prefab,
             move_entry,
             read_library_file,
             get_model_subdiv,

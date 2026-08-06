@@ -48,6 +48,7 @@ function Hierarchy({
   onAdd,
   onContextMenu,
   onModelDrop,
+  onPrefabDrop,
 }: {
   scene: PscScene;
   names: string[];
@@ -58,6 +59,8 @@ function Hierarchy({
   onContextMenu?: (i: number, x: number, y: number) => void;
   /** Drop d'un modèle du panneau Project : instancier (à l'origine). */
   onModelDrop?: (out: string) => void;
+  /** Drop d'un prefab du panneau Project : l'instancier dans la scène. */
+  onPrefabDrop?: (rel: string) => void;
 }) {
   const depths = useMemo(() => {
     const d: number[] = [];
@@ -92,6 +95,12 @@ function Hierarchy({
         if (onModelDrop && out) {
           e.preventDefault();
           onModelDrop(out);
+          return;
+        }
+        const prefab = e.dataTransfer.getData("text/psx-prefab");
+        if (onPrefabDrop && prefab) {
+          e.preventDefault();
+          onPrefabDrop(prefab);
         }
       }}
     >
@@ -122,6 +131,10 @@ function Hierarchy({
           key={i}
           className={`tree-item ${selected === i ? "selected" : ""}`}
           style={{ paddingLeft: 8 + depths[i] * 16 }}
+          draggable
+          onDragStart={(ev) =>
+            ev.dataTransfer.setData("text/psx-entity", names[i] ?? String(i))
+          }
           onClick={() => onSelect(i)}
           onContextMenu={(ev) => {
             if (!onContextMenu) return;
@@ -1449,6 +1462,110 @@ export default function App() {
     }, name);
   }, [mutateDoc, uniqueName, selected, entityNames]);
 
+  /* Prefab : glisser une entité de la hiérarchie vers le panneau Project
+     sauvegarde son sous-arbre (et les assets qu'il référence) dans
+     prefabs/<nom>.json ; glisser un prefab vers la hiérarchie l'instancie
+     (v1 : copie — le lien vivant viendra avec le Prefab Mode). */
+  const createPrefabFromEntity = useCallback(
+    async (entityName: string) => {
+      if (!project || !sceneDoc) return;
+      const all = sceneDoc.entities ?? [];
+      const root = all.find((e) => e.name === entityName);
+      if (!root) return;
+      const picked = new Set<string>([entityName]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const e of all) {
+          if (e.parent && picked.has(e.parent as string) && !picked.has(e.name as string)) {
+            picked.add(e.name as string);
+            grew = true;
+          }
+        }
+      }
+      const entities = all
+        .filter((e) => picked.has(e.name as string))
+        .map((e) => structuredClone(e));
+      delete entities.find((e) => e.name === entityName)?.parent;
+      // Assets référencés par le sous-arbre (modèles + leur texture, polices).
+      const modelIds = new Set(entities.map((e) => e.model).filter(Boolean));
+      const models = (sceneDoc.assets?.models ?? []).filter((m) => modelIds.has(m.id));
+      const texIds = new Set(models.map((m) => m.texture).filter(Boolean));
+      const textures = (sceneDoc.assets?.textures ?? []).filter((t) => texIds.has(t.id));
+      const fontIds = new Set(
+        entities
+          .map((e) => (e.text as { font?: string } | undefined)?.font)
+          .filter(Boolean),
+      );
+      const fonts = ((sceneDoc.assets as Record<string, unknown>)?.fonts as
+        | { id: string; fnt: string }[]
+        | undefined ?? []).filter((f) => fontIds.has(f.id));
+      const prefab = { name: entityName, assets: { models, textures, fonts }, entities };
+      try {
+        const rel = await api.savePrefab(project.dir, entityName, JSON.stringify(prefab));
+        setNotice(`prefab sauvegardé : ${rel} (${entities.length} entité${entities.length > 1 ? "s" : ""})`);
+        refreshFiles(project.dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, sceneDoc, refreshFiles],
+  );
+
+  const instantiatePrefab = useCallback(
+    async (rel: string) => {
+      if (!project || !sceneDoc) return;
+      try {
+        const prefab = JSON.parse(await api.loadScene(project.dir, rel)) as SceneDoc;
+        const pEntities = (prefab.entities ?? []).map((e) => structuredClone(e));
+        if (!pEntities.length) return;
+        // Renommage unique de tout le sous-arbre + remap des parents.
+        const rename = new Map<string, string>();
+        const taken = new Set(sceneDoc.entities?.map((e) => e.name as string) ?? []);
+        for (const e of pEntities) {
+          let name = e.name as string;
+          let n = 2;
+          while (taken.has(name)) name = `${e.name}-${n++}`;
+          taken.add(name);
+          rename.set(e.name as string, name);
+          e.name = name;
+        }
+        for (const e of pEntities) {
+          if (e.parent && rename.has(e.parent as string)) e.parent = rename.get(e.parent as string);
+        }
+        const rootName = pEntities[0].name as string;
+        mutateDoc((doc) => {
+          doc.assets = doc.assets ?? {};
+          doc.assets.models = doc.assets.models ?? [];
+          doc.assets.textures = doc.assets.textures ?? [];
+          const da = doc.assets as Record<string, unknown>;
+          for (const m of prefab.assets?.models ?? []) {
+            if (!doc.assets!.models!.some((x) => x.id === m.id)) doc.assets!.models!.push(m);
+          }
+          for (const t of prefab.assets?.textures ?? []) {
+            if (!doc.assets!.textures!.some((x) => x.id === t.id)) doc.assets!.textures!.push(t);
+          }
+          const pf = (prefab.assets as Record<string, unknown>)?.fonts as
+            | { id: string }[]
+            | undefined;
+          if (pf?.length) {
+            if (!Array.isArray(da.fonts)) da.fonts = [];
+            for (const f of pf) {
+              if (!(da.fonts as { id: string }[]).some((x) => x.id === f.id))
+                (da.fonts as unknown[]).push(f);
+            }
+          }
+          doc.entities = doc.entities ?? [];
+          doc.entities.push(...pEntities);
+        }, rootName);
+        setNotice(`prefab instancié : ${rootName}`);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, sceneDoc, mutateDoc],
+  );
+
   /* Instanciation d'un modèle du panneau Project (drop viewport = à la
      position visée au sol, drop hiérarchie = à l'origine). Le modèle est
      ajouté aux assets de la scène s'il n'y est pas, avec sa texture
@@ -1962,6 +2079,7 @@ export default function App() {
               onModelDrop={
                 isTauri && sceneDoc ? (out) => addModelEntity(out, [0, 0, 0]) : undefined
               }
+              onPrefabDrop={isTauri && sceneDoc ? instantiatePrefab : undefined}
             />
             {addMenu && (
               <ContextMenu
@@ -2191,6 +2309,7 @@ export default function App() {
           onRefresh={() => refreshFiles(project.dir)}
           onClearLogs={() => setLogs([])}
           getThumb={getThumb}
+          onCreatePrefab={isTauri && sceneDoc ? createPrefabFromEntity : undefined}
         />
       )}
     </div>

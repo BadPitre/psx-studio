@@ -62,7 +62,7 @@ export interface ProjectFile {
   path: string;
   name: string;
   section: string;
-  kind: "dir" | "scene" | "model" | "texture" | "audio" | "buffer" | "other";
+  kind: "dir" | "scene" | "prefab" | "model" | "texture" | "audio" | "buffer" | "other";
   size: number;
   registered: boolean;
   exists: boolean;
@@ -78,6 +78,9 @@ export const api = {
   /** Crée une scène vide enregistrée ; retourne son chemin relatif. */
   createScene: (projectDir: string, name: string) =>
     tauriInvoke<string>("create_scene", { projectDir, name }),
+  /** Sauvegarde un prefab (JSON d'entités + assets) ; retourne son chemin. */
+  savePrefab: (projectDir: string, name: string, contents: string) =>
+    tauriInvoke<string>("save_prefab", { projectDir, name, contents }),
   createFolder: (projectDir: string, parent: string, name: string) =>
     tauriInvoke<string>("create_folder", { projectDir, parent, name }),
   /** Déplace un fichier vers un dossier et met à jour project.json. */

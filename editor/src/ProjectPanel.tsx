@@ -47,6 +47,7 @@ export interface LogEntry {
 
 const ROOTS: { id: string; label: string }[] = [
   { id: "scenes", label: "Scènes" },
+  { id: "prefabs", label: "Prefabs" },
   { id: "assets", label: "Assets" },
   { id: "audio", label: "Audio" },
 ];
@@ -54,6 +55,7 @@ const ROOTS: { id: string; label: string }[] = [
 const ICONS: Record<ProjectFile["kind"], string> = {
   dir: "📁",
   scene: "🎬",
+  prefab: "🧩",
   model: "▣",
   texture: "🖼",
   audio: "♪",
@@ -83,6 +85,7 @@ export function ProjectPanel({
   onRefresh,
   onClearLogs,
   getThumb,
+  onCreatePrefab,
 }: {
   files: ProjectFile[];
   logs: LogEntry[];
@@ -99,6 +102,8 @@ export function ProjectPanel({
   onClearLogs: () => void;
   /** Aperçu rendu d'une tuile (null : icône). */
   getThumb?: (f: ProjectFile) => Promise<string | null>;
+  /** Drop d'une entité de la hiérarchie : sauvegarder en prefab. */
+  onCreatePrefab?: (entityName: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [tab, setTab] = useState<"project" | "console">("project");
@@ -195,6 +200,11 @@ export function ProjectPanel({
       e.preventDefault();
       e.stopPropagation();
       setDropTarget("");
+      const entity = e.dataTransfer.getData("text/psx-entity");
+      if (entity && onCreatePrefab) {
+        onCreatePrefab(entity);
+        return;
+      }
       const from = e.dataTransfer.getData("text/psx-path");
       if (from && from !== dir && !dir.startsWith(from + "/")) onMove(from, dir);
     },
@@ -375,6 +385,9 @@ export function ProjectPanel({
                   // la hiérarchie pour être instancié en entité.
                   if (f.kind === "model" && f.registered && f.out) {
                     e.dataTransfer.setData("text/psx-model", f.out);
+                  }
+                  if (f.kind === "prefab") {
+                    e.dataTransfer.setData("text/psx-prefab", f.path);
                   }
                 }}
                 onDoubleClick={() => activate(f)}
