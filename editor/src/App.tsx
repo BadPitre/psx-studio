@@ -17,6 +17,7 @@ import {
 } from "./bridge";
 import { PlayBar, PLAY_PORT } from "./PlayBar";
 import { VramPanel } from "./VramPanel";
+import { UiCanvasPanel } from "./UiCanvasPanel";
 import { ProjectPanel, type LogEntry } from "./ProjectPanel";
 import { ContextMenu } from "./ContextMenu";
 import { thumbFor } from "./thumbs";
@@ -857,7 +858,7 @@ export default function App() {
   const [overrides, setOverrides] = useState<Map<number, Transform>>(new Map());
   const [error, setError] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
-  const [viewMode, setViewMode] = useState<"scene" | "vram">("scene");
+  const [viewMode, setViewMode] = useState<"scene" | "ui" | "vram">("scene");
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [dither, setDither] = useState(true);
   const [culling, setCulling] = useState(false);
@@ -1751,12 +1752,23 @@ export default function App() {
           </label>
         )}
         {scene && (
-          <button
-            className="button"
-            onClick={() => setViewMode(viewMode === "scene" ? "vram" : "scene")}
-          >
-            {viewMode === "scene" ? "VRAM" : "Scène"}
-          </button>
+          <span className="view-tabs">
+            {(
+              [
+                ["scene", "Scène"],
+                ["ui", "Canvas"],
+                ["vram", "VRAM"],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                className={`button ${viewMode === mode ? "active-view" : ""}`}
+                onClick={() => setViewMode(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
         )}
         <span className="file-name">{fileName || "aucune scène chargée"}</span>
         {scene && (
@@ -1827,6 +1839,29 @@ export default function App() {
             )}
             {viewMode === "vram" ? (
               <VramPanel scene={scene} />
+            ) : viewMode === "ui" ? (
+              <UiCanvasPanel
+                scene={scene}
+                selected={selected}
+                onSelect={setSelected}
+                onMoveWidget={
+                  isTauri && sceneDoc
+                    ? (entityIndex, dx, dy) => {
+                        const name = entityNames[entityIndex];
+                        mutateDoc((doc) => {
+                          const e = doc.entities?.find((x) => x.name === name);
+                          if (!e) return;
+                          const rect = (e.rect ?? {}) as Record<string, unknown>;
+                          const pos = Array.isArray(rect.position)
+                            ? (rect.position as number[])
+                            : [0, 0];
+                          rect.position = [pos[0] + dx, pos[1] + dy];
+                          e.rect = rect;
+                        }, name);
+                      }
+                    : undefined
+                }
+              />
             ) : (
               <div className="viewport">
                 <div className="gizmo-bar">
