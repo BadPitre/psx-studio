@@ -149,6 +149,9 @@ pub struct EntityJson {
     /// Absent = défaut console : solide si l'entité a un modèle.
     #[serde(default)]
     pub solid: Option<bool>,
+    /// Composant Character Controller (v1.4) : perso jouable sans code.
+    #[serde(default)]
+    pub controller: ControllerJson,
     /* Composants UI (v1.3, docs/UI-SYSTEM.md) — philosophie uGUI : le
      * canvas est une entité, ses enfants portent RectTransform + Image/
      * Text/Button/Layout. */
@@ -330,6 +333,74 @@ impl CameraJson {
     }
 }
 
+/// Character Controller (v1.4) : déplacement au D-pad avec collisions,
+/// orientation 8 directions, caméra suiveuse optionnelle — le tout sans
+/// écrire de C (exécuté par Controller_Tick du runtime). Accepte `true`
+/// (défauts) ou `{ "speed": 5, "camera": true, "camera_back": 340,
+/// "camera_up": 200 }`. Les paramètres logent dans les pads d'entité :
+/// une entité contrôleur ne peut être ni caméra ni lumière.
+#[derive(Deserialize, Clone)]
+#[serde(untagged)]
+pub enum ControllerJson {
+    Enabled(bool),
+    Props {
+        /// Vitesse de marche en unités monde par frame (défaut 5).
+        #[serde(default)]
+        speed: Option<f32>,
+        /// Caméra suiveuse (défaut true) : false = le jeu gère sa caméra.
+        #[serde(default)]
+        camera: Option<bool>,
+        /// Recul de la caméra derrière le perso (unités, défaut 340).
+        #[serde(default)]
+        camera_back: Option<f32>,
+        /// Hauteur de la caméra au-dessus du perso (unités, défaut 200).
+        #[serde(default)]
+        camera_up: Option<f32>,
+    },
+}
+
+impl Default for ControllerJson {
+    fn default() -> Self {
+        ControllerJson::Enabled(false)
+    }
+}
+
+impl ControllerJson {
+    pub fn enabled(&self) -> bool {
+        !matches!(self, ControllerJson::Enabled(false))
+    }
+    fn prop(&self, pick: fn(&Self) -> Option<f32>) -> Option<f32> {
+        pick(self)
+    }
+    pub fn speed(&self) -> f32 {
+        self.prop(|c| match c {
+            ControllerJson::Props { speed, .. } => *speed,
+            ControllerJson::Enabled(_) => None,
+        })
+        .unwrap_or(5.0)
+    }
+    pub fn camera(&self) -> bool {
+        match self {
+            ControllerJson::Props { camera, .. } => camera.unwrap_or(true),
+            ControllerJson::Enabled(_) => true,
+        }
+    }
+    pub fn camera_back(&self) -> f32 {
+        self.prop(|c| match c {
+            ControllerJson::Props { camera_back, .. } => *camera_back,
+            ControllerJson::Enabled(_) => None,
+        })
+        .unwrap_or(340.0)
+    }
+    pub fn camera_up(&self) -> f32 {
+        self.prop(|c| match c {
+            ControllerJson::Props { camera_up, .. } => *camera_up,
+            ControllerJson::Enabled(_) => None,
+        })
+        .unwrap_or(200.0)
+    }
+}
+
 /// Flags d'entité (champ réservé depuis la v1).
 pub const ENTITY_FLAG_LIGHT: u16 = 1 << 0;
 pub const ENTITY_FLAG_CAMERA: u16 = 1 << 1;
@@ -341,6 +412,10 @@ pub const ENTITY_FLAG_LIGHT_POINT: u16 = 1 << 2;
 pub const ENTITY_FLAG_SOLID: u16 = 1 << 4;
 /// ...ou traversable malgré un modèle (bit 5) : décor purement visuel.
 pub const ENTITY_FLAG_NOT_SOLID: u16 = 1 << 5;
+/// Character Controller (v1.4, bit 6) : ses paramètres logent dans les
+/// pads d'entité (vitesse dans pos.pad, recul caméra dans rot.pad,
+/// hauteur caméra dans scale.pad) — exclusif avec caméra et lumière.
+pub const ENTITY_FLAG_CONTROLLER: u16 = 1 << 6;
 /// v1.3 : l'entité porte des composants UI (voir la table UI).
 pub const ENTITY_FLAG_UI: u16 = 1 << 3;
 
@@ -777,69 +852,115 @@ pub fn build_with_options(
             quantize_i16(e.scale[1] * ONE_4_12 as f32, "scale.y", &e.name)?,
             quantize_i16(e.scale[2] * ONE_4_12 as f32, "scale.z", &e.name)?,
         ];
+        // Les pads des trois vecteurs dépendent du rôle de l'entité — un
+        // contrôleur y loge ses paramètres, d'où l'exclusivité avec
+        // caméra et lumière (validée plus bas, erreur claire).
+        let is_controller = e.controller.enabled();
+        if is_controller && (e.camera.enabled() || e.light.is_some()) {
+            return Err(format!(
+                "entité '{}': un Character Controller ne peut pas aussi être \
+                 caméra ou lumière (les pads d'entité portent ses paramètres)",
+                e.name
+            ));
+        }
         // FOV caméra (v1.2) : logé dans le pad du vecteur position
         // (u16, degrés verticaux, 0 = défaut — pad nul sur les anciens
-        // fichiers, donc rétrocompatible).
-        let cam_fov = match e.camera.fov() {
-            Some(f) => {
-                if !(10.0..=170.0).contains(&f) {
-                    return Err(format!(
-                        "entity '{}': fov {f} hors plage (10-170 degrés)",
-                        e.name
-                    ));
-                }
-                f.round() as u16
+        // fichiers, donc rétrocompatible). Contrôleur : vitesse de marche.
+        let pos_pad = if is_controller {
+            let s = e.controller.speed();
+            if !(1.0..=64.0).contains(&s) {
+                return Err(format!(
+                    "entité '{}': speed {s} hors plage (1-64 unités/frame)",
+                    e.name
+                ));
             }
-            None => 0,
+            s.round() as u16
+        } else {
+            match e.camera.fov() {
+                Some(f) => {
+                    if !(10.0..=170.0).contains(&f) {
+                        return Err(format!(
+                            "entity '{}': fov {f} hors plage (10-170 degrés)",
+                            e.name
+                        ));
+                    }
+                    f.round() as u16
+                }
+                None => 0,
+            }
         };
         for c in pos {
             entities.extend_from_slice(&c.to_le_bytes());
         }
-        entities.extend_from_slice(&cam_fov.to_le_bytes());
+        entities.extend_from_slice(&pos_pad.to_le_bytes());
         // Distance d'affichage caméra : pad du vecteur rotation (0 = infini).
-        let cam_draw = match e.camera.draw_distance() {
-            Some(d) => {
-                if !(100.0..=32767.0).contains(&d) {
-                    return Err(format!(
-                        "entity '{}': draw_distance {d} hors plage (100-32767 unités)",
-                        e.name
-                    ));
-                }
-                d.round() as u16
+        // Contrôleur : recul de la caméra suiveuse (0 = pas de suivi).
+        let rot_pad = if is_controller {
+            let b = if e.controller.camera() { e.controller.camera_back() } else { 0.0 };
+            if !(0.0..=8192.0).contains(&b) {
+                return Err(format!(
+                    "entité '{}': camera_back {b} hors plage (0-8192 unités)",
+                    e.name
+                ));
             }
-            None => 0,
+            b.round() as u16
+        } else {
+            match e.camera.draw_distance() {
+                Some(d) => {
+                    if !(100.0..=32767.0).contains(&d) {
+                        return Err(format!(
+                            "entity '{}': draw_distance {d} hors plage (100-32767 unités)",
+                            e.name
+                        ));
+                    }
+                    d.round() as u16
+                }
+                None => 0,
+            }
         };
         for c in rot {
             entities.extend_from_slice(&c.to_le_bytes());
         }
-        entities.extend_from_slice(&cam_draw.to_le_bytes());
+        entities.extend_from_slice(&rot_pad.to_le_bytes());
         // Rayon de lumière ponctuelle : pad du vecteur échelle (0 sinon).
-        let light_radius = match &e.light {
-            Some(l) if l.is_point() => {
-                let r = l.radius.unwrap_or(600.0);
-                if !(64.0..=8192.0).contains(&r) {
-                    return Err(format!(
-                        "entity '{}': radius {r} hors plage (64-8192 unités)",
-                        e.name
-                    ));
-                }
-                r.round() as u16
+        // Contrôleur : hauteur de la caméra suiveuse.
+        let scale_pad = if is_controller {
+            let u = if e.controller.camera() { e.controller.camera_up() } else { 0.0 };
+            if !(0.0..=8192.0).contains(&u) {
+                return Err(format!(
+                    "entité '{}': camera_up {u} hors plage (0-8192 unités)",
+                    e.name
+                ));
             }
-            Some(l) => {
-                if l.radius.is_some() {
-                    report.warnings.push(format!(
-                        "entité '{}' : radius ignoré (lumière directionnelle)",
-                        e.name
-                    ));
+            u.round() as u16
+        } else {
+            match &e.light {
+                Some(l) if l.is_point() => {
+                    let r = l.radius.unwrap_or(600.0);
+                    if !(64.0..=8192.0).contains(&r) {
+                        return Err(format!(
+                            "entity '{}': radius {r} hors plage (64-8192 unités)",
+                            e.name
+                        ));
+                    }
+                    r.round() as u16
                 }
-                0
+                Some(l) => {
+                    if l.radius.is_some() {
+                        report.warnings.push(format!(
+                            "entité '{}' : radius ignoré (lumière directionnelle)",
+                            e.name
+                        ));
+                    }
+                    0
+                }
+                None => 0,
             }
-            None => 0,
         };
         for c in scale {
             entities.extend_from_slice(&c.to_le_bytes());
         }
-        entities.extend_from_slice(&light_radius.to_le_bytes());
+        entities.extend_from_slice(&scale_pad.to_le_bytes());
         let parent = match &e.parent {
             Some(p) => pos_to_sorted[name_to_pos[p.as_str()]],
             None => NO_INDEX,
@@ -882,6 +1003,9 @@ pub fn build_with_options(
             Some(true) => flags |= ENTITY_FLAG_SOLID,
             Some(false) => flags |= ENTITY_FLAG_NOT_SOLID,
             None => {}
+        }
+        if is_controller {
+            flags |= ENTITY_FLAG_CONTROLLER;
         }
         if e.light.is_some() && e.camera.enabled() {
             report.warnings.push(format!(

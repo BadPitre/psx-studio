@@ -106,6 +106,11 @@ typedef struct {
  * traversable (decor visuel). Sans bit : solide si modele. */
 #define ENTITY_FLAG_SOLID		(1 << 4)
 #define ENTITY_FLAG_NOT_SOLID	(1 << 5)
+/* Character Controller (v1.4) : deplacement D-pad + collisions + camera
+ * suiveuse sans script — parametres dans les pads d'entite (exclusif
+ * avec camera et lumiere) : vitesse dans cam_fov, recul camera dans
+ * cam_draw (0 = pas de suivi), hauteur camera dans light_radius. */
+#define ENTITY_FLAG_CONTROLLER	(1 << 6)
 
 #define SCENE_MAX_ENTITY_LIGHTS	2
 #define SCENE_MAX_POINT_LIGHTS	4

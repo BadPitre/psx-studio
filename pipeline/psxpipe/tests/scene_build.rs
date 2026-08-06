@@ -479,3 +479,48 @@ fn solid_override_flags() {
         0
     );
 }
+
+#[test]
+fn controller_flag_and_pads() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    let json = r#"{
+      "name": "ctrl",
+      "assets": { "textures": [], "models": [{ "id": "cube", "pmd": "cube.pmd" }] },
+      "entities": [
+        { "name": "hero",  "model": "cube",
+          "controller": { "speed": 7, "camera_back": 400, "camera_up": 180 } },
+        { "name": "hero2", "model": "cube",
+          "controller": { "camera": false } }
+      ]
+    }"#;
+    let json_path = dir.path().join("s.json");
+    std::fs::write(&json_path, json).unwrap();
+    let (bytes, _) = scene::build_file(&json_path).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    // Les parametres logent dans les pads : pos.pad (vitesse) a 0x06,
+    // rot.pad (recul camera) a 0x0E, scale.pad (hauteur) a 0x16.
+    let pad = |i: usize, off: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + off], bytes[rec + off + 1]])
+    };
+    let flags = |i: usize| pad(i, 0x1C);
+    assert_eq!(
+        flags(0) & scene::ENTITY_FLAG_CONTROLLER,
+        scene::ENTITY_FLAG_CONTROLLER
+    );
+    assert_eq!((pad(0, 0x06), pad(0, 0x0E), pad(0, 0x16)), (7, 400, 180));
+    // Defauts : vitesse 5, camera suiveuse coupee -> recul/hauteur 0.
+    assert_eq!((pad(1, 0x06), pad(1, 0x0E), pad(1, 0x16)), (5, 0, 0));
+
+    // Un controleur ne peut pas aussi etre camera ou lumiere (les pads
+    // d'entite portent ses parametres).
+    let bad = json.replace(
+        r#""controller": { "camera": false }"#,
+        r#""controller": true, "camera": true"#,
+    );
+    std::fs::write(&json_path, bad).unwrap();
+    let err = scene::build_file(&json_path).unwrap_err();
+    assert!(err.contains("Controller"), "unexpected error: {err}");
+}

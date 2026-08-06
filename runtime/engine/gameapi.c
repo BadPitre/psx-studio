@@ -178,6 +178,70 @@ uint8_t* Dialog_Draw(uint32_t* ot, uint8_t* packet)
 	return packet;
 }
 
+/* Character Controller ----------------------------------------------------
+ * Composant sans code : les entites flaguees ENTITY_FLAG_CONTROLLER
+ * marchent au D-pad (collisions AABB, orientation 8 directions) avec une
+ * camera suiveuse optionnelle — parametres poses par l'editeur dans les
+ * pads d'entite (cf. macros Controller_* d'engine.h). */
+
+/* Orientation du perso selon la direction de marche (8 directions).
+ * Le modele fait face a -Z ; 4096 = un tour. */
+static int ControllerFacing(int dx, int dz)
+{
+	if (dz > 0)
+	{
+		if (dx > 0) return 2048 + 512;
+		if (dx < 0) return 2048 - 512;
+		return 2048;
+	}
+	if (dz < 0)
+	{
+		if (dx > 0) return 4096 - 512;
+		if (dx < 0) return 512;
+		return 0;
+	}
+	if (dx > 0) return 3072;
+	if (dx < 0) return 1024;
+	return -1;
+}
+
+void Controller_Tick(int frozen)
+{
+	Scene* scene = Scene_Current();
+	if (!scene || frozen || Dialog_IsOpen())
+		return;
+
+	uint16_t held = Input_Held();
+	for (int i = 0; i < scene->entity_count; i++)
+	{
+		Entity* e = &scene->entities[i];
+		if (!(e->flags & ENTITY_FLAG_CONTROLLER))
+			continue;
+
+		int speed = (int)Controller_Speed(e);
+		int dx = 0;
+		int dz = 0;
+		if (held & PAD_UP)    dz += speed;
+		if (held & PAD_DOWN)  dz -= speed;
+		if (held & PAD_LEFT)  dx -= speed;
+		if (held & PAD_RIGHT) dx += speed;
+
+		if (dx != 0 || dz != 0)
+		{
+			int facing = ControllerFacing(dx, dz);
+			if (facing >= 0)
+				e->rot.vy = (int16_t)facing;
+			Physics_MoveAndSlide(e, dx, dz);
+		}
+
+		/* Camera suiveuse : derriere et au-dessus (+Y = bas), meme
+		 * cadrage que le script player de la demo. */
+		if (Controller_CamBack(e) != 0 || Controller_CamUp(e) != 0)
+			Camera_Set(e->pos.vx, e->pos.vy - Controller_CamUp(e),
+				e->pos.vz - Controller_CamBack(e), 0, 240);
+	}
+}
+
 /* Physique ---------------------------------------------------------------- */
 
 int32_t Entity_Dist2XZ(const Entity* a, const Entity* b)

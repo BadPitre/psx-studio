@@ -66,6 +66,15 @@ Conventions :
   invisible ; `false` rend un décor traversable. Encodé dans les flags
   d'entité : bit 4 = solide forcé, bit 5 = traversable forcé (un
   runtime ancien ignore ces bits et garde le défaut).
+- `controller` (v1.4, optionnel) : composant **Character Controller**
+  — perso jouable sans code (D-pad + collisions + orientation
+  8 directions + caméra suiveuse, exécuté par `Controller_Tick` du
+  runtime, gelé pendant pause/dialogue). `true` (défauts) ou
+  `{ "speed": 5, "camera": true, "camera_back": 340,
+  "camera_up": 200 }`. Encodage : flag bit 6 + paramètres dans les
+  pads d'entité (vitesse dans pos.pad, recul caméra dans rot.pad —
+  0 = pas de suivi —, hauteur dans scale.pad) → **exclusif avec les
+  composants caméra et lumière** (erreur claire au build).
 - `prefab` (éditeur/pipeline, optionnel) : chemin d'un
   `prefabs/<nom>.json` (même schéma, une seule racine). Le build
   **inline** son sous-arbre à la place de l'entité : la racine prend

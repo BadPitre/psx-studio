@@ -135,6 +135,19 @@ void	Ui_FocusClear(void);
 int		Ui_FocusMove(int dx, int dy);
 Entity*	Ui_Focused(void);				/* NULL si aucun */
 
+/* -------------------------------------------------- character controller -- */
+/* Composant sans code (flag ENTITY_FLAG_CONTROLLER) : deplacement au
+ * D-pad avec collisions, orientation 8 directions, camera suiveuse
+ * optionnelle. Parametres poses par l'editeur dans les pads d'entite. */
+
+#define Controller_Speed(e)		((e)->cam_fov)		/* unites/frame */
+#define Controller_CamBack(e)	((e)->cam_draw)		/* 0 = pas de suivi */
+#define Controller_CamUp(e)		((e)->light_radius)
+
+/* A appeler chaque frame par la boucle de jeu, avant le rendu.
+ * frozen != 0 (menu pause...) : les controleurs ne bougent pas. */
+void Controller_Tick(int frozen);
+
 /* ------------------------------------------------------------- physique -- */
 /* Deplace l'entite en glissant contre les AABB (axes monde) des autres
  * entites solides. Y est ignore (deplacement au sol). */

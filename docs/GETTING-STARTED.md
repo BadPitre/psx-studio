@@ -119,11 +119,15 @@ de triangles — surveille l'avertissement de budget.)
   **composants** en cartes retirables (✕) : MeshRenderer (modèle +
   subdivision), **Collider (AABB)** — boîte du modèle × échelle pour
   les collisions ; sur une entité vide, un **mur invisible** 64×64
-  unités × échelle —, Lumière (couleur, intensité), Caméra (FOV,
-  distance d'affichage), Script (nom résolu par hash — voir §6 ; le
-  sous-menu propose les scripts de la démo, dont `player` le
-  contrôleur). Le bouton « ＋ Ajouter un composant » liste ceux
-  disponibles.
+  unités × échelle —, **Character Controller** — un perso jouable
+  **sans écrire de C** : marche au D-pad avec collisions et
+  orientation 8 directions, vitesse et caméra suiveuse (recul,
+  hauteur) réglables dans l'inspecteur, gelé pendant le menu pause et
+  les dialogues ; exclusif avec Caméra/Lumière —, Lumière (couleur,
+  intensité), Caméra (FOV, distance d'affichage), Script (nom résolu
+  par hash — voir §6 ; le sous-menu propose les scripts de la démo,
+  dont `player` le contrôleur complet avec dialogue et santé). Le
+  bouton « ＋ Ajouter un composant » liste ceux disponibles.
 - **VRAM** : bouton VRAM = carte des pages texture/CLUT réellement
   packées, avec % d'occupation et pages libres.
 - **Panneau Project** (bande du bas, comme Unity) : tout le contenu du

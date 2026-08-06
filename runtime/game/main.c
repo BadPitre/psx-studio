@@ -22,6 +22,9 @@
 
 #include "engine.h"
 #include "gameapi.h"
+
+/* Menu pause ouvert (script pause) : gele aussi les Character Controllers. */
+extern int g_ui_pause_open;
 #include "scene.h"
 #include "sfx.h"
 
@@ -143,6 +146,9 @@ int main(int argc, const char** argv)
 	{
 		Input_Update();
 		Scene_UpdateScripts(&scene);
+		/* Character Controllers (composant sans code) : apres les
+		 * scripts, geles quand le menu pause est ouvert. */
+		Controller_Tick(g_ui_pause_open);
 
 		/* Bascule demandee par un script (portail) : si la scene
 		 * suivante est prete, changement INSTANTANE — le parse est

@@ -709,6 +709,8 @@ function Inspector({
   onCamDrawChange,
   solid,
   onSolidChange,
+  controller,
+  onControllerChange,
   uiJson,
   onUiMutate,
   focusNameSignal,
@@ -745,6 +747,21 @@ function Inspector({
   /** Collider AABB effectif (défaut console : solide si modèle). */
   solid?: boolean;
   onSolidChange?: (on: boolean) => void;
+  /** Character Controller : props normalisées (null = absent). */
+  controller?: {
+    speed?: number;
+    camera?: boolean;
+    camera_back?: number;
+    camera_up?: number;
+  } | null;
+  onControllerChange?: (
+    c: {
+      speed?: number;
+      camera?: boolean;
+      camera_back?: number;
+      camera_up?: number;
+    } | null,
+  ) => void;
   /** Composants UI (v1.3) de l'entité (JSON brut) — mode projet. */
   uiJson?: Record<string, unknown> | null;
   onUiMutate?: (mut: (e: Record<string, unknown>) => void, histKey?: string) => void;
@@ -1025,6 +1042,80 @@ function Inspector({
         </ComponentCard>
       )}
 
+      {controller && (
+        <ComponentCard
+          icon="🕹"
+          title="Character Controller"
+          onRemove={onControllerChange ? () => onControllerChange(null) : undefined}
+        >
+          <div className="field">
+            <label>Vitesse (unités / frame)</label>
+            <input
+              type="number"
+              min={1}
+              max={64}
+              step={1}
+              value={controller.speed ?? 5}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (v >= 1 && v <= 64)
+                  onControllerChange?.({ ...controller, speed: v });
+              }}
+            />
+          </div>
+          <label className="component-row">
+            <input
+              type="checkbox"
+              checked={controller.camera !== false}
+              onChange={(e) =>
+                onControllerChange?.({ ...controller, camera: e.target.checked })
+              }
+            />
+            caméra suiveuse
+          </label>
+          {controller.camera !== false && (
+            <>
+              <div className="field">
+                <label>Recul caméra (unités)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={8192}
+                  step={10}
+                  value={controller.camera_back ?? 340}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (v >= 0 && v <= 8192)
+                      onControllerChange?.({ ...controller, camera_back: v });
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label>Hauteur caméra (unités)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={8192}
+                  step={10}
+                  value={controller.camera_up ?? 200}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (v >= 0 && v <= 8192)
+                      onControllerChange?.({ ...controller, camera_up: v });
+                  }}
+                />
+              </div>
+            </>
+          )}
+          <div className="field-readonly">
+            Perso jouable sans code : D-pad + collisions AABB +
+            orientation 8 directions. Gelé pendant le menu pause et les
+            dialogues. Exclusif avec Caméra et Lumière (les paramètres
+            partagent leurs octets).
+          </div>
+        </ComponentCard>
+      )}
+
       {solid && (
         <ComponentCard
           icon="🧊"
@@ -1111,6 +1202,14 @@ function Inspector({
                   {
                     label: "🧊 Collider (AABB)",
                     onClick: () => onSolidChange(true),
+                  },
+                ]
+              : []),
+            ...(!controller && !isCamera && !light && onControllerChange
+              ? [
+                  {
+                    label: "🕹 Character Controller",
+                    onClick: () => onControllerChange({}),
                   },
                 ]
               : []),
@@ -1891,8 +1990,9 @@ export default function App() {
         if (!entity) return;
         if (color) {
           entity.light = { color };
-          // Lumière et caméra sont exclusives : une entité a un seul rôle.
+          // Lumière, caméra et contrôleur sont exclusifs : un seul rôle.
           delete entity.camera;
+          delete entity.controller;
         } else {
           delete entity.light;
         }
@@ -1911,8 +2011,11 @@ export default function App() {
         // Ne pas écraser un FOV déjà réglé en re-cochant la case.
         if (on && !entity.camera) entity.camera = true;
         else if (!on) delete entity.camera;
-        // Lumière et caméra sont exclusives : une entité a un seul rôle.
-        if (on) delete entity.light;
+        // Lumière, caméra et contrôleur sont exclusifs : un seul rôle.
+        if (on) {
+          delete entity.light;
+          delete entity.controller;
+        }
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -1930,6 +2033,37 @@ export default function App() {
         const hasModel = entity.model != null;
         if (on === hasModel) delete entity.solid;
         else entity.solid = on;
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
+  /* Character Controller : JSON minimal — défauts retirés, objet vide
+     replié en `true`. Exclusif avec caméra et lumière (les pads
+     d'entité portent ses paramètres). */
+  const setEntityController = useCallback(
+    (c: { speed?: number; camera?: boolean; camera_back?: number; camera_up?: number } | null) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity) return;
+        if (c === null) {
+          delete entity.controller;
+          return;
+        }
+        delete entity.camera;
+        delete entity.light;
+        const min: Record<string, unknown> = {};
+        if (c.speed !== undefined && c.speed !== 5) min.speed = c.speed;
+        if (c.camera === false) min.camera = false;
+        if (c.camera !== false) {
+          if (c.camera_back !== undefined && c.camera_back !== 340)
+            min.camera_back = c.camera_back;
+          if (c.camera_up !== undefined && c.camera_up !== 200)
+            min.camera_up = c.camera_up;
+        }
+        entity.controller = Object.keys(min).length > 0 ? min : true;
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -2217,6 +2351,19 @@ export default function App() {
     (currentModelId &&
       sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||
     null;
+  /* Character Controller : `true` (défauts) normalisé en objet vide. */
+  const rawController = selectedJsonEntity?.controller;
+  const currentController =
+    rawController === true
+      ? {}
+      : rawController && typeof rawController === "object"
+        ? (rawController as {
+            speed?: number;
+            camera?: boolean;
+            camera_back?: number;
+            camera_up?: number;
+          })
+        : null;
   /* Collider effectif : override JSON (projet) ou bits 4/5 des flags
      (.psc, visionneuse), sinon le défaut console — solide si modèle. */
   const currentSolid = sceneDoc
@@ -2614,6 +2761,10 @@ export default function App() {
                 }
                 solid={currentSolid}
                 onSolidChange={isTauri && sceneDoc ? setEntitySolid : undefined}
+                controller={currentController}
+                onControllerChange={
+                  isTauri && sceneDoc ? setEntityController : undefined
+                }
                 prefabSource={selectedPrefabSource}
                 onOpenPrefab={isTauri && sceneDoc ? openPrefab : undefined}
                 uiJson={
