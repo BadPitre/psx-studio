@@ -559,3 +559,12 @@ body {
 }
 .view-tabs { display: inline-flex; gap: 2px; }
 .button.active-view { background: var(--select); }
+
+/* Poignée de redimensionnement vertical du panneau Project/Console. */
+.project-resize {
+  height: 5px;
+  margin-top: -3px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.project-resize:hover { background: var(--select); }

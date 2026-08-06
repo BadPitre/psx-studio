@@ -32,6 +32,8 @@ typedef struct
 /* Rects resolus + visibilite de la frame courante. */
 static UiRect	resolved[SCENE_MAX_UI];
 static uint8_t	visible[SCENE_MAX_UI];
+/* Curseur d'empilement par Layout Group (offset sur l'axe principal). */
+static int16_t	layout_cursor[SCENE_MAX_UI];
 /* Etat mutable par widget (setters) : amount/actif/teinte vivent dans
  * les enregistrements de l'arene, directement (memoire ordinaire). */
 
@@ -129,24 +131,61 @@ uint8_t* Ui_Draw(const Scene* scene, uint32_t* ot, uint8_t* packet,
 	if (n <= 0)
 		return packet;
 
-	/* Passe 1 : rects + visibilite (parents d'abord, ordre du fichier). */
+	/* Passe 1 : rects + visibilite (parents d'abord, ordre du fichier).
+	 * Un parent Layout Group ECRASE le rect de ses enfants : empilement
+	 * sur son axe (padding + spacing), alignement sur l'axe croise —
+	 * comme un Vertical/Horizontal Layout Group Unity. */
 	for (int i = 0; i < n; i++)
 	{
 		const PscUiRec* rec = &scene->ui[i];
 		UiRect parent = { 0, 0, SCREEN_W, SCREEN_H };
 		uint8_t parent_visible = 1;
+		const PscUiRec* parent_rec = 0;
+		int pi = -1;
 		int16_t parent_entity = scene->entities[rec->entity].parent;
 
-		if (parent_entity >= 0)
+		layout_cursor[i] = 0;
+		if (parent_entity >= 0 && find_rec(scene, parent_entity, &pi) && pi < i)
 		{
-			int pi;
-			if (find_rec(scene, parent_entity, &pi) && pi < i)
-			{
-				parent = resolved[pi];
-				parent_visible = visible[pi];
-			}
+			parent = resolved[pi];
+			parent_visible = visible[pi];
+			parent_rec = &scene->ui[pi];
 		}
 		visible[i] = parent_visible && (rec->components & UI_COMP_ACTIVE);
+
+		if (parent_rec && (parent_rec->components & UI_COMP_LAYOUT))
+		{
+			/* Zone de contenu = parent moins padding (uv du layout). */
+			int cx = parent.x + parent_rec->uv[0];
+			int cy = parent.y + parent_rec->uv[1];
+			int cw = parent.w - parent_rec->uv[0] - parent_rec->uv[2];
+			int ch = parent.h - parent_rec->uv[1] - parent_rec->uv[3];
+			int horizontal = parent_rec->flags & (1 << 4);
+			int w = (parent_rec->flags & (1 << 5)) && !horizontal
+				? cw : rec->size[0];
+			int h = (parent_rec->flags & (1 << 6)) && horizontal
+				? ch : rec->size[1];
+			int align = parent_rec->border[0];
+
+			if (horizontal)
+			{
+				resolved[i].x = (int16_t)(cx + layout_cursor[pi]);
+				/* Alignement vertical : ligne de la grille 3x3. */
+				resolved[i].y = (int16_t)(cy + ((align / 3) * (ch - h)) / 2);
+				layout_cursor[pi] += w + (int16_t)parent_rec->extra;
+			}
+			else
+			{
+				resolved[i].y = (int16_t)(cy + layout_cursor[pi]);
+				/* Alignement horizontal : colonne de la grille 3x3. */
+				resolved[i].x = (int16_t)(cx + ((align % 3) * (cw - w)) / 2);
+				layout_cursor[pi] += h + (int16_t)parent_rec->extra;
+			}
+			resolved[i].w = (int16_t)w;
+			resolved[i].h = (int16_t)h;
+			continue;
+		}
+
 		resolve_axis(parent.x, parent.w, rec->anchor_min[0], rec->anchor_max[0],
 			rec->pivot[0], rec->pos[0], rec->size[0],
 			&resolved[i].x, &resolved[i].w);

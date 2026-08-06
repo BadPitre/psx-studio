@@ -551,7 +551,17 @@ pub fn scene_village_json() -> &'static str {
     { "name": "zone", "parent": "hud",
       "rect": { "anchor_min": [1, 0], "anchor_max": [1, 0], "pivot": [1, 0],
                 "position": [-8, 8], "size": [140, 10] },
-      "text": { "font": "main", "text": "VILLAGE", "align": "right" } }
+      "text": { "font": "main", "text": "VILLAGE", "align": "right" } },
+    { "name": "aide", "parent": "hud",
+      "rect": { "anchor_min": [0, 1], "anchor_max": [0, 1], "pivot": [0, 1],
+                "position": [8, -8], "size": [104, 36] },
+      "image": { "color": [10, 12, 24] },
+      "layout": { "axis": "vertical", "padding": [4, 4, 4, 4], "spacing": 4,
+                  "child_align": "top-left", "expand_w": true } },
+    { "name": "aide1", "parent": "aide", "rect": { "size": [0, 8] },
+      "text": { "font": "main", "text": "X : PARLER" } },
+    { "name": "aide2", "parent": "aide", "rect": { "size": [0, 8] },
+      "text": { "font": "main", "text": "PAVE : BOUGER" } }
   ]
 }
 "#

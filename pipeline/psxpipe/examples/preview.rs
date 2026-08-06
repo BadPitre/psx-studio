@@ -422,17 +422,41 @@ fn draw_ui(img: &mut image::RgbaImage, data: &[u8]) {
 
     let mut rects = vec![(0i32, 0i32, 0i32, 0i32); ui.len()];
     let mut vis = vec![true; ui.len()];
+    let mut cursor = vec![0i32; ui.len()];
     for i in 0..ui.len() {
         let rec = &ui[i];
         let (mut parent, mut pvis) = ((0, 0, W as i32, H as i32), true);
+        let mut parent_ui: Option<usize> = None;
         let pe = parent_of(rec.entity as usize);
         if pe >= 0 {
             if let Some(pi) = ui[..i].iter().position(|r| r.entity as i32 == pe) {
                 parent = rects[pi];
                 pvis = vis[pi];
+                parent_ui = Some(pi);
             }
         }
         vis[i] = pvis && rec.components & (1 << 5) != 0;
+        // Parent Layout Group : empilement + alignement (parite ui.c).
+        if let Some(pi) = parent_ui {
+            let pr = &ui[pi];
+            if pr.components & (1 << 4) != 0 {
+                let (cx, cy) = (parent.0 + pr.uv[0] as i32, parent.1 + pr.uv[1] as i32);
+                let cw = parent.2 - pr.uv[0] as i32 - pr.uv[2] as i32;
+                let ch = parent.3 - pr.uv[1] as i32 - pr.uv[3] as i32;
+                let horizontal = pr.flags & (1 << 4) != 0;
+                let w = if pr.flags & (1 << 5) != 0 && !horizontal { cw } else { rec.size[0] as i32 };
+                let h = if pr.flags & (1 << 6) != 0 && horizontal { ch } else { rec.size[1] as i32 };
+                let align = pr.border[0] as i32;
+                if horizontal {
+                    rects[i] = (cx + cursor[pi], cy + (align / 3) * (ch - h) / 2, w, h);
+                    cursor[pi] += w + pr.extra as i32;
+                } else {
+                    rects[i] = (cx + (align % 3) * (cw - w) / 2, cy + cursor[pi], w, h);
+                    cursor[pi] += h + pr.extra as i32;
+                }
+                continue;
+            }
+        }
         let (x, w) = axis(parent.0, parent.2, rec.anchors[0], rec.anchors[2], rec.anchors[4], rec.pos[0], rec.size[0]);
         let (y, hh) = axis(parent.1, parent.3, rec.anchors[1], rec.anchors[3], rec.anchors[5], rec.pos[1], rec.size[1]);
         rects[i] = (x, y, w, hh);

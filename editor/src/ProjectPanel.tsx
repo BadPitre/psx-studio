@@ -102,6 +102,10 @@ export function ProjectPanel({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [tab, setTab] = useState<"project" | "console">("project");
+  /* Hauteur redimensionnable (poignée du bord haut), mémorisée. */
+  const [height, setHeight] = useState(() =>
+    Number(localStorage.getItem("projectPanelHeight")) || 218,
+  );
   const [selectedDir, setSelectedDir] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["scenes", "assets", "audio"]));
   const [search, setSearch] = useState("");
@@ -240,7 +244,28 @@ export function ProjectPanel({
   };
 
   return (
-    <div className={`project-panel ${collapsed ? "collapsed" : ""}`}>
+    <div
+      className={`project-panel ${collapsed ? "collapsed" : ""}`}
+      style={collapsed ? undefined : { height }}
+    >
+      <div
+        className="project-resize"
+        title="Glisser pour redimensionner"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+          setCollapsed(false);
+        }}
+        onPointerMove={(e) => {
+          if (!(e.target as HTMLElement).hasPointerCapture(e.pointerId)) return;
+          const h = Math.min(
+            Math.max(window.innerHeight - e.clientY, 96),
+            Math.round(window.innerHeight * 0.7),
+          );
+          setHeight(h);
+        }}
+        onPointerUp={() => localStorage.setItem("projectPanelHeight", String(height))}
+      />
       <div className="project-tabs">
         <button className="project-collapse" onClick={() => setCollapsed(!collapsed)}>
           {collapsed ? "▸" : "▾"}

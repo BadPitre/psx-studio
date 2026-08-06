@@ -956,10 +956,29 @@ pub fn build_with_options(
             if layout.expand_h {
                 uflags |= 1 << 6;
             }
-            // Packing provisoire (le rendu des layouts arrive au jalon 2) :
-            // spacing + padding uniforme.
-            extra = (layout.spacing.clamp(0, 255) as u16)
-                | ((layout.padding[0].clamp(0, 255) as u16) << 8);
+            // Un layout n'a ni sprite ni 9-slice : ses champs uv/border
+            // portent padding [g, h, d, b] et alignement des enfants.
+            extra = layout.spacing.clamp(0, 255) as u16;
+            for (k, p) in layout.padding.iter().enumerate() {
+                uv[k] = (*p).clamp(0, 255) as u8;
+            }
+            border[0] = match layout.child_align.as_deref() {
+                None | Some("top-left") => 0,
+                Some("top-center") => 1,
+                Some("top-right") => 2,
+                Some("middle-left") => 3,
+                Some("middle-center") => 4,
+                Some("middle-right") => 5,
+                Some("bottom-left") => 6,
+                Some("bottom-center") => 7,
+                Some("bottom-right") => 8,
+                Some(other) => {
+                    return Err(format!(
+                        "entité '{}': child_align '{other}' inconnu",
+                        e.name
+                    ))
+                }
+            };
         }
 
         // Un canvas sans rect explicite couvre tout l'écran (ancres

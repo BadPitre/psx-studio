@@ -16,7 +16,7 @@ fn village_builds_and_parses() {
     let h = scene::parse_header(&bytes).unwrap();
     assert_eq!(h.model_count, 4);
     assert_eq!(h.texture_count, 3);
-    assert_eq!(h.entity_count, 14);
+    assert_eq!(h.entity_count, 17);
     assert_eq!(h.total_size as usize, bytes.len());
     assert_eq!(h.background, [24, 32, 56]);
 
@@ -343,7 +343,7 @@ fn point_lights_flag_and_radius() {
 fn ui_table_fonts_and_strings() {
     let bytes = build_village();
     let h = scene::parse_header(&bytes).unwrap();
-    assert_eq!(h.ui_count, 4);
+    assert_eq!(h.ui_count, 7);
     assert_eq!(h.font_count, 1);
 
     let ui = scene::parse_ui(&bytes, &h);

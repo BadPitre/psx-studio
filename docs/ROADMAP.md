@@ -132,9 +132,14 @@ l'utiliseront plus tard.
 dérivés des réservés ; font2fnt + police de démo 5×7 ; Ui_Draw en
 OT[0] : rects 4.12, aplats, Image Filled, texte aligné ; HUD village
 et champ ; parsers TS/C + previewer en parité, testés),
-Layout Groups + Sliced/Tiled + édition visuelle, prefabs UI + Prefab
-Mode, interactif (boutons/focus/API scripts), confort (Grid Layout,
-fill radial, live tweaking, overrides avancés).
+jalon 2 **en cours** (livré : calque HUD du viewport, mode Canvas
+dédié — vue séparée, fond damier, sélection + déplacement souris —,
+cartes RectTransform/Canvas/Image/Text, menu ＋ UI, conversion auto de
+Library/, resize du panneau Project, **Layout Groups**
+verticaux/horizontaux dans toute la pile avec la boîte d'aide de démo ;
+reste : Sliced/Tiled), puis prefabs UI + Prefab Mode, interactif
+(boutons/focus/API scripts), confort (Grid Layout, fill radial, live
+tweaking, overrides avancés).
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 

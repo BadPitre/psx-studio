@@ -36,18 +36,49 @@ export function resolveUiRects(scene: PscScene): { rects: Rect[]; visible: boole
     return [start, hi - size - start];
   };
 
+  // Curseur d'empilement par Layout Group (parité avec engine/ui.c).
+  const cursor: number[] = new Array(scene.ui.length).fill(0);
   scene.ui.forEach((rec, i) => {
     let parent: Rect = { x: 0, y: 0, w: W, h: H };
     let parentVisible = true;
+    let pi = -1;
     const parentEntity = scene.entities[rec.entity]?.parent ?? -1;
     if (parentEntity >= 0) {
-      const pi = scene.ui.findIndex((r) => r.entity === parentEntity);
+      pi = scene.ui.findIndex((r) => r.entity === parentEntity);
       if (pi >= 0 && pi < i) {
         parent = rects[pi];
         parentVisible = visible[pi];
-      }
+      } else pi = -1;
     }
     visible.push(parentVisible && (rec.components & (1 << 5)) !== 0);
+
+    const parentRec = pi >= 0 ? scene.ui[pi] : null;
+    if (parentRec && parentRec.components & (1 << 4)) {
+      // Parent Layout Group : empilement + alignement, ancres ignorées.
+      const [pl, pt, pr, pb] = parentRec.uv;
+      const cx = parent.x + pl;
+      const cy = parent.y + pt;
+      const cw = parent.w - pl - pr;
+      const ch = parent.h - pt - pb;
+      const horizontal = (parentRec.flags & (1 << 4)) !== 0;
+      const w = parentRec.flags & (1 << 5) && !horizontal ? cw : rec.size[0];
+      const h = parentRec.flags & (1 << 6) && horizontal ? ch : rec.size[1];
+      const align = parentRec.border[0];
+      let x: number;
+      let y: number;
+      if (horizontal) {
+        x = cx + cursor[pi];
+        y = cy + Math.floor((Math.floor(align / 3) * (ch - h)) / 2);
+        cursor[pi] += w + parentRec.extra;
+      } else {
+        y = cy + cursor[pi];
+        x = cx + Math.floor(((align % 3) * (cw - w)) / 2);
+        cursor[pi] += h + parentRec.extra;
+      }
+      rects.push({ x, y, w, h });
+      return;
+    }
+
     const [x, w] = axis(parent.x, parent.w, rec.anchorMin[0], rec.anchorMax[0], rec.pivot[0], rec.position[0], rec.size[0]);
     const [y, h] = axis(parent.y, parent.h, rec.anchorMin[1], rec.anchorMax[1], rec.pivot[1], rec.position[1], rec.size[1]);
     rects.push({ x, y, w, h });
