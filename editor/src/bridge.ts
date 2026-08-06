@@ -98,6 +98,9 @@ export const api = {
     tauriInvoke<void>("save_scene", { projectDir, scenePath, contents }),
   buildScene: (projectDir: string, scenePath: string, contents: string) =>
     tauriInvoke<BuiltScene>("build_scene", { projectDir, scenePath, contents }),
+  /** Build complet du projet (conversion des assets dans Library/). */
+  buildProject: (projectDir: string) =>
+    tauriInvoke<BuildSummary>("build_project", { projectDir }),
   play: (projectDir: string, emulatorPath: string | null, port: number) =>
     tauriInvoke<BuildSummary>("play", { projectDir, emulatorPath, port }),
   reduxStatus: (port: number) => tauriInvoke<boolean>("redux_status", { port }),

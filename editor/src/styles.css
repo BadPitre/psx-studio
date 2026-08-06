@@ -185,6 +185,17 @@ body {
   height: 100%;
   image-rendering: pixelated;
 }
+/* Calque UI 320x240 (HUD de la scène), entre le rendu 3D et le calque
+ * d'édition — pixelisé comme la console, jamais interactif. */
+.viewport-ui {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
 /* Calque d'édition net (gizmo, surlignage) au-dessus du rendu PS1. */
 .viewport-overlay {
   position: absolute;
@@ -506,3 +517,25 @@ body {
 .viewport-stack { overflow: hidden; }
 .viewport { overflow: hidden; min-height: 0; }
 .project-panel { position: relative; z-index: 20; }
+
+/* Grille de presets d'ancres du RectTransform (3x3 + étirer). */
+.anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 26px);
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.anchor-grid button, .anchor-stretch button {
+  height: 22px;
+  background: #14151b;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.anchor-grid button:hover, .anchor-stretch button:hover {
+  background: var(--select);
+  color: var(--text);
+}
+.anchor-stretch { margin-bottom: 8px; }
+.anchor-stretch button { padding: 0 10px; }

@@ -3,6 +3,7 @@
 
 import { parsePmd, type PmdModel } from "./pmd";
 import { parseTim, type TimTexture } from "./tim";
+import { parseFnt, type FntFont } from "./fnt";
 
 export const NO_INDEX = 0xffff;
 
@@ -60,7 +61,8 @@ export interface PscScene {
   lights: PscLight[];
   /** Widgets UI (v1.3) dans l'ordre du fichier (parents d'abord). */
   ui: PscUiWidget[];
-  /** Polices bitmap embarquées (v1.3). */
+  /** Polices bitmap embarquées (v1.3), décodées. */
+  fonts: FntFont[];
   fontCount: number;
 }
 
@@ -170,11 +172,17 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
   // Table UI (v1.3) : suit les lumières (alignée 4), puis les polices
   // puis les chaînes — offsets dérivés, comme le runtime.
   const ui: PscUiWidget[] = [];
+  const fonts: FntFont[] = [];
   const uiCount = data.getUint16(18, true);
   const fontCount = data.getUint16(62, true);
   if (uiCount > 0 && lightsOffset > 0) {
     const uiOffset = (lightsOffset + lightCount * 6 + 3) & ~3;
     const stringsOffset = uiOffset + uiCount * 40 + fontCount * 8;
+    for (let i = 0; i < fontCount; i++) {
+      const entry = uiOffset + uiCount * 40 + i * 8;
+      const off = data.getUint32(entry, true);
+      fonts.push(parseFnt(new DataView(data.buffer, data.byteOffset + off)));
+    }
     for (let i = 0; i < uiCount; i++) {
       const rec = uiOffset + i * 40;
       const frac = (o: number) => data.getUint16(rec + o, true) / 4096;
@@ -233,6 +241,7 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
     entities,
     lights,
     ui,
+    fonts,
     fontCount,
   };
 }

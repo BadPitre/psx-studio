@@ -73,6 +73,15 @@ export function Viewport({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const pipRef = useRef<HTMLCanvasElement>(null);
+  const uiRef = useRef<HTMLCanvasElement>(null);
+
+  /* Calque UI (v1.3) : les canvas de la scène rendus au pixel 320x240
+   * par-dessus la 3D, comme sur console. Redessiné à chaque rebuild. */
+  useEffect(() => {
+    const ctx = uiRef.current?.getContext("2d");
+    if (!ctx || !scene) return;
+    import("./uiOverlay").then(({ drawUi }) => drawUi(ctx, scene));
+  }, [scene]);
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
     camera: THREE.PerspectiveCamera;
@@ -559,6 +568,12 @@ export function Viewport({
       <canvas
         ref={canvasRef}
         className="viewport-canvas"
+        width={PS1_RESOLUTION.x}
+        height={PS1_RESOLUTION.y}
+      />
+      <canvas
+        ref={uiRef}
+        className="viewport-ui"
         width={PS1_RESOLUTION.x}
         height={PS1_RESOLUTION.y}
       />

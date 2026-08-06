@@ -116,7 +116,7 @@ function Hierarchy({
           }}
         >
           <span className="tree-icon">
-            {e.flags & 1 ? "☀" : e.flags & 2 ? "🎥" : e.model >= 0 ? "▣" : "○"}
+            {e.flags & 1 ? "☀" : e.flags & 2 ? "🎥" : e.flags & 8 ? "▦" : e.model >= 0 ? "▣" : "○"}
           </span>
           {names[i] ?? `entité ${i}`}
           {e.model >= 0 && (
@@ -204,6 +204,246 @@ function Vec3Field({
   );
 }
 
+/* Cartes des composants UI (v1.3), philosophie uGUI : RectTransform avec
+ * la grille de presets d'ancres, Canvas, Image (4 types), Text. */
+const ANCHOR_PRESETS: { label: string; v: [number, number] }[] = [
+  { label: "↖", v: [0, 0] },
+  { label: "↑", v: [0.5, 0] },
+  { label: "↗", v: [1, 0] },
+  { label: "←", v: [0, 0.5] },
+  { label: "·", v: [0.5, 0.5] },
+  { label: "→", v: [1, 0.5] },
+  { label: "↙", v: [0, 1] },
+  { label: "↓", v: [0.5, 1] },
+  { label: "↘", v: [1, 1] },
+];
+
+function UiCards({
+  ui,
+  mutate,
+}: {
+  ui: Record<string, unknown>;
+  mutate: (mut: (e: Record<string, unknown>) => void, histKey?: string) => void;
+}) {
+  const rect = (ui.rect ?? {}) as Record<string, unknown>;
+  const image = ui.image as Record<string, unknown> | undefined;
+  const text = ui.text as Record<string, unknown> | undefined;
+  const num2 = (v: unknown, d: [number, number]): [number, number] =>
+    Array.isArray(v) ? [Number(v[0]) || 0, Number(v[1]) || 0] : d;
+  const pos = num2(rect.position, [0, 0]);
+  const size = num2(rect.size, [0, 0]);
+  const setRect = (patch: Record<string, unknown>, key?: string) =>
+    mutate((e) => {
+      e.rect = { ...((e.rect as object) ?? {}), ...patch };
+    }, key);
+
+  return (
+    <>
+      {ui.canvas === true && (
+        <ComponentCard icon="▦" title="Canvas">
+          <label className="component-row">
+            <input
+              type="checkbox"
+              checked={ui.active !== false}
+              onChange={(e) =>
+                mutate((ent) => {
+                  if (e.target.checked) delete ent.active;
+                  else ent.active = false;
+                })
+              }
+            />
+            actif au chargement
+          </label>
+          <div className="field-readonly">Screen Space – Overlay · 320×240</div>
+        </ComponentCard>
+      )}
+      {ui.canvas !== true && (
+        <ComponentCard icon="⊞" title="RectTransform">
+          <div className="anchor-grid" title="Presets d'ancre (min = max = pivot)">
+            {ANCHOR_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() =>
+                  setRect({ anchor_min: p.v, anchor_max: p.v, pivot: p.v, position: [0, 0] })
+                }
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="anchor-stretch">
+            <button
+              onClick={() =>
+                setRect({ anchor_min: [0, 0], anchor_max: [1, 1], pivot: [0.5, 0.5], position: [0, 0] })
+              }
+            >
+              ⤢ étirer
+            </button>
+          </div>
+          <div className="field">
+            <label>Position</label>
+            <div className="vec3">
+              {[0, 1].map((a) => (
+                <input
+                  key={a}
+                  type="number"
+                  value={pos[a]}
+                  onChange={(e) => {
+                    const next: [number, number] = [...pos];
+                    next[a] = Number(e.target.value) || 0;
+                    setRect({ position: next }, "ui-pos");
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <label>Taille (marges si étiré)</label>
+            <div className="vec3">
+              {[0, 1].map((a) => (
+                <input
+                  key={a}
+                  type="number"
+                  value={size[a]}
+                  onChange={(e) => {
+                    const next: [number, number] = [...size];
+                    next[a] = Number(e.target.value) || 0;
+                    setRect({ size: next }, "ui-size");
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </ComponentCard>
+      )}
+      {image && (
+        <ComponentCard
+          icon="🖼"
+          title="Image"
+          onRemove={() => mutate((e) => delete e.image)}
+        >
+          <div className="field color-field">
+            <label>Couleur</label>
+            <input
+              type="color"
+              value={rgbToHex((image.color as [number, number, number]) ?? [255, 255, 255])}
+              onChange={(e) =>
+                mutate((ent) => {
+                  (ent.image as Record<string, unknown>).color = hexToRgb(e.target.value);
+                }, "ui-color")
+              }
+            />
+          </div>
+          <div className="field">
+            <label>Image Type</label>
+            <select
+              className="scene-select model-select"
+              value={(image.type as string) ?? "simple"}
+              onChange={(e) =>
+                mutate((ent) => {
+                  const img = ent.image as Record<string, unknown>;
+                  if (e.target.value === "simple") delete img.type;
+                  else img.type = e.target.value;
+                  if (e.target.value !== "filled") {
+                    delete img.fill;
+                    delete img.amount;
+                  }
+                })
+              }
+            >
+              <option value="simple">Simple</option>
+              <option value="sliced">Sliced (9-slice)</option>
+              <option value="tiled">Tiled</option>
+              <option value="filled">Filled (jauge)</option>
+            </select>
+          </div>
+          {(image.type as string) === "filled" && (
+            <>
+              <div className="field">
+                <label>Fill</label>
+                <select
+                  className="scene-select model-select"
+                  value={(image.fill as string) ?? "horizontal"}
+                  onChange={(e) =>
+                    mutate((ent) => {
+                      (ent.image as Record<string, unknown>).fill = e.target.value;
+                    })
+                  }
+                >
+                  <option value="horizontal">horizontal</option>
+                  <option value="vertical">vertical</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Amount : {Math.round(((image.amount as number) ?? 1) * 100)} %</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(((image.amount as number) ?? 1) * 100)}
+                  onChange={(e) =>
+                    mutate((ent) => {
+                      (ent.image as Record<string, unknown>).amount =
+                        Number(e.target.value) / 100;
+                    }, "ui-amount")
+                  }
+                />
+              </div>
+            </>
+          )}
+        </ComponentCard>
+      )}
+      {text && (
+        <ComponentCard icon="🅰" title="Text" onRemove={() => mutate((e) => delete e.text)}>
+          <div className="field">
+            <label>Texte (A-Z 0-9 . , ! ? : - / ')</label>
+            <input
+              className="name-input"
+              value={(text.text as string) ?? ""}
+              spellCheck={false}
+              onChange={(e) =>
+                mutate((ent) => {
+                  (ent.text as Record<string, unknown>).text = e.target.value.toUpperCase();
+                }, "ui-text")
+              }
+            />
+          </div>
+          <div className="field">
+            <label>Alignement</label>
+            <select
+              className="scene-select model-select"
+              value={(text.align as string) ?? "left"}
+              onChange={(e) =>
+                mutate((ent) => {
+                  const t = ent.text as Record<string, unknown>;
+                  if (e.target.value === "left") delete t.align;
+                  else t.align = e.target.value;
+                })
+              }
+            >
+              <option value="left">gauche</option>
+              <option value="center">centre</option>
+              <option value="right">droite</option>
+            </select>
+          </div>
+          <div className="field color-field">
+            <label>Couleur</label>
+            <input
+              type="color"
+              value={rgbToHex((text.color as [number, number, number]) ?? [255, 255, 255])}
+              onChange={(e) =>
+                mutate((ent) => {
+                  (ent.text as Record<string, unknown>).color = hexToRgb(e.target.value);
+                }, "ui-tcolor")
+              }
+            />
+          </div>
+        </ComponentCard>
+      )}
+    </>
+  );
+}
+
 function Inspector({
   scene,
   name,
@@ -232,6 +472,8 @@ function Inspector({
   onCamFovChange,
   camDraw,
   onCamDrawChange,
+  uiJson,
+  onUiMutate,
   focusNameSignal,
 }: {
   scene: PscScene;
@@ -261,6 +503,9 @@ function Inspector({
   onCamFovChange?: (fov: number | null) => void;
   camDraw?: number | null;
   onCamDrawChange?: (d: number | null) => void;
+  /** Composants UI (v1.3) de l'entité (JSON brut) — mode projet. */
+  uiJson?: Record<string, unknown> | null;
+  onUiMutate?: (mut: (e: Record<string, unknown>) => void, histKey?: string) => void;
   focusNameSignal?: number;
 }) {
   const entity = scene.entities[selected];
@@ -308,6 +553,10 @@ function Inspector({
           <div className="field-readonly">{name}</div>
         </div>
       )}
+      {/* Une entité UI porte un RectTransform : la carte Transform 3D
+          est remplacée, comme dans Unity. */}
+      {uiJson && onUiMutate && <UiCards ui={uiJson} mutate={onUiMutate} />}
+      {!uiJson && (
       <div className="field-group">
         <div className="field-group-title">Transform</div>
         <Vec3Field
@@ -331,6 +580,7 @@ function Inspector({
           onChange={(scale) => onChange({ ...transform, scale })}
         />
       </div>
+      )}
       {entity.parent >= 0 && (
         <div className="field-group">
           <div className="field-readonly">parent : entité {entity.parent}</div>
@@ -671,11 +921,23 @@ export default function App() {
     }
   }, []);
 
-  /* Rebuild du .psc depuis le JSON (mode projet). */
+  /* Rebuild du .psc depuis le JSON (mode projet). Si un asset manque
+     dans Library/ (ex. police jamais convertie), un build de projet est
+     tenté une fois puis la scène est re-construite — plus d'erreur
+     « main.fnt introuvable » à la première ouverture. */
   const rebuild = useCallback(
     async (doc: SceneDoc, path: string, dir: string, selectName?: string) => {
       try {
-        const built = await api.buildScene(dir, path, JSON.stringify(doc));
+        let built;
+        try {
+          built = await api.buildScene(dir, path, JSON.stringify(doc));
+        } catch (e) {
+          if (!/cannot read|introuvable|No such file/i.test(String(e))) throw e;
+          setNotice("assets manquants dans Library/ — conversion du projet…");
+          await api.buildProject(dir);
+          built = await api.buildScene(dir, path, JSON.stringify(doc));
+          setNotice("assets convertis");
+        }
         const bytes = new Uint8Array(built.psc);
         setScene(parsePsc(bytes.buffer));
         setEntityNames(built.entity_names);
@@ -949,10 +1211,24 @@ export default function App() {
      couleur chaude) ou caméra (recul + regard vers l'origine, la scène
      dans le cadre). */
   const addEntity = useCallback(
-    (kind: "empty" | "light" | "camera") => {
-      const base =
-        kind === "light" ? "lumiere" : kind === "camera" ? "camera" : "entite";
+    (kind: "empty" | "light" | "camera" | "canvas" | "uiimage" | "uitext") => {
+      const base = { light: "lumiere", camera: "camera", canvas: "canvas", uiimage: "image", uitext: "texte" }[
+        kind as string
+      ] ?? "entite";
       const name = uniqueName(base);
+      /* Image/Texte UI : sous le canvas sélectionné, sinon le premier. */
+      const uiParent =
+        kind === "uiimage" || kind === "uitext"
+          ? ((selected >= 0 &&
+              sceneDoc?.entities?.find(
+                (e) => e.name === entityNames[selected] && (e.canvas === true || e.rect),
+              )?.name) ||
+            (sceneDoc?.entities?.find((e) => e.canvas === true)?.name as string | undefined))
+          : undefined;
+      if ((kind === "uiimage" || kind === "uitext") && !uiParent) {
+        setError("Ajoute d'abord un Canvas (menu ＋ → Canvas UI).");
+        return;
+      }
       mutateDoc((doc) => {
         doc.entities = doc.entities ?? [];
         if (kind === "light") {
@@ -969,12 +1245,28 @@ export default function App() {
             rotation: [-21, 180, 0],
             camera: true,
           });
+        } else if (kind === "canvas") {
+          doc.entities.push({ name, canvas: true });
+        } else if (kind === "uiimage") {
+          doc.entities.push({
+            name,
+            parent: uiParent,
+            rect: { anchor_min: [0.5, 0.5], anchor_max: [0.5, 0.5], size: [48, 24] },
+            image: { color: [200, 200, 210] },
+          });
+        } else if (kind === "uitext") {
+          doc.entities.push({
+            name,
+            parent: uiParent,
+            rect: { anchor_min: [0.5, 0.5], anchor_max: [0.5, 0.5], size: [80, 10] },
+            text: { font: "main", text: "TEXTE" },
+          });
         } else {
           doc.entities.push({ name, position: [0, 0, 0] });
         }
       }, name);
     },
-    [mutateDoc, uniqueName],
+    [mutateDoc, uniqueName, sceneDoc, selected, entityNames],
   );
 
   const duplicateEntity = useCallback(() => {
@@ -1502,6 +1794,9 @@ export default function App() {
                 onClose={() => setAddMenu(null)}
                 actions={[
                   { label: "▣ GameObject", onClick: () => addEntity("empty") },
+                  { label: "▦ Canvas UI", onClick: () => addEntity("canvas") },
+                  { label: "🖼 Image UI", onClick: () => addEntity("uiimage") },
+                  { label: "🅰 Texte UI", onClick: () => addEntity("uitext") },
                   { label: "☀ Lumière directionnelle", onClick: () => addEntity("light") },
                   { label: "🎥 Caméra", onClick: () => addEntity("camera") },
                 ]}
@@ -1629,6 +1924,28 @@ export default function App() {
                 onCamDrawChange={
                   isTauri && sceneDoc
                     ? (v) => setEntityCamProp("draw_distance", v)
+                    : undefined
+                }
+                uiJson={
+                  isTauri &&
+                  sceneDoc &&
+                  selectedJsonEntity &&
+                  (selectedJsonEntity.canvas === true ||
+                    selectedJsonEntity.rect ||
+                    selectedJsonEntity.image ||
+                    selectedJsonEntity.text)
+                    ? selectedJsonEntity
+                    : null
+                }
+                onUiMutate={
+                  isTauri && sceneDoc
+                    ? (mut) => {
+                        const name = entityNames[selected];
+                        mutateDoc((doc) => {
+                          const e = doc.entities?.find((x) => x.name === name);
+                          if (e) mut(e);
+                        }, name);
+                      }
                     : undefined
                 }
                 focusNameSignal={renameFocus}
