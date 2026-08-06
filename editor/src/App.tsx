@@ -1058,6 +1058,11 @@ export default function App() {
   const [notice, setNotice] = useState<string>("");
   const [viewMode, setViewMode] = useState<"scene" | "ui" | "vram">("scene");
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  /* Presets de vue du viewport (3D / Dessus / Face / Côté). */
+  const [viewPreset, setViewPreset] = useState<{
+    seq: number;
+    kind: "3d" | "top" | "front" | "side";
+  }>({ seq: 0, kind: "3d" });
   const [dither, setDither] = useState(true);
   const [culling, setCulling] = useState(false);
 
@@ -2274,6 +2279,30 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                <div className="gizmo-bar angle-bar">
+                  {(
+                    [
+                      ["3d", "3D", "Vue perspective libre"],
+                      ["top", "⬒", "Vue de dessus (2D)"],
+                      ["front", "◻", "Vue de face"],
+                      ["side", "◨", "Vue de côté"],
+                    ] as const
+                  ).map(([kind, icon, label]) => (
+                    <button
+                      key={kind}
+                      title={label}
+                      onClick={() => setViewPreset((p) => ({ seq: p.seq + 1, kind }))}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                  <button
+                    title="Vue Canvas UI (édition de l'interface)"
+                    onClick={() => setViewMode("ui")}
+                  >
+                    ▦
+                  </button>
+                </div>
                 <div className="gizmo-bar view-bar">
                   <button
                     className={dither ? "active" : ""}
@@ -2301,6 +2330,7 @@ export default function App() {
                   dither={dither}
                   culling={culling}
                   onModelDrop={isTauri && sceneDoc ? addModelEntity : undefined}
+                  viewPreset={viewPreset}
                 />
               </div>
             )}

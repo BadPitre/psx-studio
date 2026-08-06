@@ -48,6 +48,8 @@ export interface ViewportProps {
   /** Drop d'un modèle du panneau Project : instancier à la position visée
    * (coordonnées monde PS1, posée sur le plan du sol y=0). */
   onModelDrop?: (out: string, pos: [number, number, number]) => void;
+  /** Preset de vue (seq incrémenté à chaque clic) : 3d, dessus, face, côté. */
+  viewPreset?: { seq: number; kind: "3d" | "top" | "front" | "side" };
 }
 
 const MOVE_SPEED = 420; // unités monde / seconde
@@ -69,6 +71,7 @@ export function Viewport({
   dither = true,
   culling = false,
   onModelDrop,
+  viewPreset,
 }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -105,6 +108,11 @@ export function Viewport({
   useEffect(() => {
     liveRef.current = { selected, onTransform, onGizmoDragging };
   });
+  /* Preset de vue demandé (lu par la boucle de rendu, seq consommé). */
+  const presetRef = useRef<{ seq: number; kind: "3d" | "top" | "front" | "side" }>({ seq: 0, kind: "3d" });
+  useEffect(() => {
+    if (viewPreset) presetRef.current = viewPreset;
+  }, [viewPreset]);
 
   /* Init renderer + boucle + contrôles caméra (une seule fois). */
   useEffect(() => {
@@ -217,6 +225,30 @@ export function Viewport({
     };
     applyCamera();
 
+    /* Presets de vue (boutons 3D/Dessus/Face/Côté) : la caméra se place
+     * autour du pivot courant (le point à `dist` devant elle), comme le
+     * gizmo de vue de Unity. Le pitch ±90° passe par 89,9° (pas de
+     * gimbal lock avec l'ordre YXZ). */
+    let presetSeq = 0;
+    const applyPreset = (kind: "3d" | "top" | "front" | "side") => {
+      const target = cam.pos.clone().addScaledVector(forward(), cam.dist);
+      if (kind === "top") {
+        cam.yaw = 0;
+        cam.pitch = -Math.PI / 2 + 0.002;
+      } else if (kind === "front") {
+        cam.yaw = 0;
+        cam.pitch = 0;
+      } else if (kind === "side") {
+        cam.yaw = Math.PI / 2;
+        cam.pitch = 0;
+      } else {
+        cam.yaw = 0.5;
+        cam.pitch = -0.45;
+      }
+      cam.pos.copy(target).addScaledVector(forward(), -cam.dist);
+      applyCamera();
+    };
+
     /* Souris (sur l'overlay, qui couvre le canvas 320x240). */
     let dragButton = -1;
     let moved = false;
@@ -311,6 +343,11 @@ export function Viewport({
 
       const s = stateRef.current;
       if (!s) return;
+
+      if (presetRef.current.seq !== presetSeq) {
+        presetSeq = presetRef.current.seq;
+        applyPreset(presetRef.current.kind);
+      }
 
       if (keys.size > 0) {
         const speed = MOVE_SPEED * dt * (keys.has("ShiftLeft") || keys.has("ShiftRight") ? 3 : 1);
