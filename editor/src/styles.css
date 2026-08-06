@@ -500,3 +500,9 @@ body {
   padding: 0 5px;
 }
 .tile-badge.danger { background: #e06c6c; }
+
+/* Les canvas du viewport (320x240 étirés + overlay plein cadre) ne
+ * doivent jamais déborder sur le panneau Project en dessous. */
+.viewport-stack { overflow: hidden; }
+.viewport { overflow: hidden; min-height: 0; }
+.project-panel { position: relative; z-index: 20; }
