@@ -258,6 +258,7 @@ function UiCards({
   const rect = (ui.rect ?? {}) as Record<string, unknown>;
   const image = ui.image as Record<string, unknown> | undefined;
   const text = ui.text as Record<string, unknown> | undefined;
+  const layout = ui.layout as Record<string, unknown> | undefined;
   const num2 = (v: unknown, d: [number, number]): [number, number] =>
     Array.isArray(v) ? [Number(v[0]) || 0, Number(v[1]) || 0] : d;
   const pos = num2(rect.position, [0, 0]);
@@ -422,6 +423,127 @@ function UiCards({
             </>
           )}
         </ComponentCard>
+      )}
+      {layout && (
+        <ComponentCard
+          icon="☰"
+          title="Layout Group"
+          onRemove={() => mutate((e) => delete e.layout)}
+        >
+          <div className="field">
+            <label>Axe</label>
+            <select
+              className="scene-select model-select"
+              value={(layout.axis as string) ?? "vertical"}
+              onChange={(e) =>
+                mutate((ent) => {
+                  (ent.layout as Record<string, unknown>).axis = e.target.value;
+                })
+              }
+            >
+              <option value="vertical">vertical (vlist)</option>
+              <option value="horizontal">horizontal (hlist)</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Padding (g, h, d, b)</label>
+            <div className="vec3">
+              {[0, 1, 2, 3].map((a) => (
+                <input
+                  key={a}
+                  type="number"
+                  min={0}
+                  max={255}
+                  value={(Array.isArray(layout.padding) ? Number(layout.padding[a]) : 0) || 0}
+                  onChange={(e) =>
+                    mutate((ent) => {
+                      const l = ent.layout as Record<string, unknown>;
+                      const pad = Array.isArray(l.padding) ? [...(l.padding as number[])] : [0, 0, 0, 0];
+                      pad[a] = Number(e.target.value) || 0;
+                      l.padding = pad;
+                    }, "ui-pad")
+                  }
+                />
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <label>Spacing</label>
+            <input
+              type="number"
+              min={0}
+              max={255}
+              className="name-input"
+              value={(layout.spacing as number) ?? 0}
+              onChange={(e) =>
+                mutate((ent) => {
+                  (ent.layout as Record<string, unknown>).spacing = Number(e.target.value) || 0;
+                }, "ui-spacing")
+              }
+            />
+          </div>
+          <div className="field">
+            <label>Alignement des enfants</label>
+            <select
+              className="scene-select model-select"
+              value={(layout.child_align as string) ?? "top-left"}
+              onChange={(e) =>
+                mutate((ent) => {
+                  const l = ent.layout as Record<string, unknown>;
+                  if (e.target.value === "top-left") delete l.child_align;
+                  else l.child_align = e.target.value;
+                })
+              }
+            >
+              {["top-left", "top-center", "top-right", "middle-left", "middle-center",
+                "middle-right", "bottom-left", "bottom-center", "bottom-right"].map((a) => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </div>
+          <label className="component-row">
+            <input
+              type="checkbox"
+              checked={layout.expand_w === true}
+              onChange={(e) =>
+                mutate((ent) => {
+                  const l = ent.layout as Record<string, unknown>;
+                  if (e.target.checked) l.expand_w = true;
+                  else delete l.expand_w;
+                })
+              }
+            />
+            expand largeur
+          </label>
+          <label className="component-row">
+            <input
+              type="checkbox"
+              checked={layout.expand_h === true}
+              onChange={(e) =>
+                mutate((ent) => {
+                  const l = ent.layout as Record<string, unknown>;
+                  if (e.target.checked) l.expand_h = true;
+                  else delete l.expand_h;
+                })
+              }
+            />
+            expand hauteur
+          </label>
+        </ComponentCard>
+      )}
+      {!layout && (
+        <div className="add-component">
+          <button
+            className="button"
+            onClick={() =>
+              mutate((e) => {
+                e.layout = { axis: "vertical", padding: [4, 4, 4, 4], spacing: 4, expand_w: true };
+              })
+            }
+          >
+            ＋ Layout Group
+          </button>
+        </div>
       )}
       {text && (
         <ComponentCard icon="🅰" title="Text" onRemove={() => mutate((e) => delete e.text)}>
@@ -1241,21 +1363,21 @@ export default function App() {
      couleur chaude) ou caméra (recul + regard vers l'origine, la scène
      dans le cadre). */
   const addEntity = useCallback(
-    (kind: "empty" | "light" | "camera" | "canvas" | "uiimage" | "uitext") => {
-      const base = { light: "lumiere", camera: "camera", canvas: "canvas", uiimage: "image", uitext: "texte" }[
+    (kind: "empty" | "light" | "camera" | "canvas" | "uiimage" | "uitext" | "vlist" | "hlist") => {
+      const base = { light: "lumiere", camera: "camera", canvas: "canvas", uiimage: "image", uitext: "texte", vlist: "liste", hlist: "liste" }[
         kind as string
       ] ?? "entite";
       const name = uniqueName(base);
       /* Image/Texte UI : sous le canvas sélectionné, sinon le premier. */
       const uiParent =
-        kind === "uiimage" || kind === "uitext"
+        kind === "uiimage" || kind === "uitext" || kind === "vlist" || kind === "hlist"
           ? ((selected >= 0 &&
               sceneDoc?.entities?.find(
                 (e) => e.name === entityNames[selected] && (e.canvas === true || e.rect),
               )?.name) ||
             (sceneDoc?.entities?.find((e) => e.canvas === true)?.name as string | undefined))
           : undefined;
-      if ((kind === "uiimage" || kind === "uitext") && !uiParent) {
+      if ((kind === "uiimage" || kind === "uitext" || kind === "vlist" || kind === "hlist") && !uiParent) {
         setError("Ajoute d'abord un Canvas (menu ＋ → Canvas UI).");
         return;
       }
@@ -1283,6 +1405,19 @@ export default function App() {
             parent: uiParent,
             rect: { anchor_min: [0.5, 0.5], anchor_max: [0.5, 0.5], size: [48, 24] },
             image: { color: [200, 200, 210] },
+          });
+        } else if (kind === "vlist" || kind === "hlist") {
+          doc.entities.push({
+            name,
+            parent: uiParent,
+            rect: { anchor_min: [0.5, 0.5], anchor_max: [0.5, 0.5], size: [100, 60] },
+            layout: {
+              axis: kind === "vlist" ? "vertical" : "horizontal",
+              padding: [4, 4, 4, 4],
+              spacing: 4,
+              child_align: "top-left",
+              ...(kind === "vlist" ? { expand_w: true } : { expand_h: true }),
+            },
           });
         } else if (kind === "uitext") {
           doc.entities.push({
@@ -1838,6 +1973,8 @@ export default function App() {
                   { label: "▦ Canvas UI", onClick: () => addEntity("canvas") },
                   { label: "🖼 Image UI", onClick: () => addEntity("uiimage") },
                   { label: "🅰 Texte UI", onClick: () => addEntity("uitext") },
+                  { label: "☰ Liste verticale UI", onClick: () => addEntity("vlist") },
+                  { label: "☷ Liste horizontale UI", onClick: () => addEntity("hlist") },
                   { label: "☀ Lumière directionnelle", onClick: () => addEntity("light") },
                   { label: "🎥 Caméra", onClick: () => addEntity("camera") },
                 ]}
