@@ -1433,6 +1433,14 @@ export default function App() {
             },
           });
         } else if (kind === "uitext") {
+          // La police "main" doit exister dans les assets de la scène
+          // (convertie en Library/main.fnt par le build du projet).
+          const assets = (doc.assets ?? (doc.assets = {})) as Record<string, unknown>;
+          if (!Array.isArray(assets.fonts)) assets.fonts = [];
+          const fonts = assets.fonts as { id: string; fnt: string }[];
+          if (!fonts.some((f) => f.id === "main")) {
+            fonts.push({ id: "main", fnt: "main.fnt" });
+          }
           doc.entities.push({
             name,
             parent: uiParent,
