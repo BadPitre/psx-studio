@@ -107,13 +107,37 @@ export function drawUi(ctx: CanvasRenderingContext2D, scene: PscScene) {
         ctx.fillStyle = `rgb(${rec.color[0]},${rec.color[1]},${rec.color[2]})`;
         ctx.fillRect(r.x, r.y, w, h);
       } else if (w > 0 && h > 0) {
-        // Sprite : région UV de la texture (Simple/Filled ; Sliced et
-        // Tiled retombent sur Simple pour l'instant, comme le runtime).
         const tex = scene.textures[rec.asset];
         if (tex) {
           const sw = rec.uv[2] || tex.width;
           const sh = rec.uv[3] || tex.height;
-          drawRgbaRegion(ctx, tex.rgba, tex.width, rec.uv[0], rec.uv[1], sw, sh, r.x, r.y, w, h);
+          const type = rec.flags & 3;
+          if (type === 1) {
+            // Sliced : coins intacts, bords/centre étirés.
+            const [bl, bt, br, bb] = rec.border;
+            const xs = [r.x, r.x + bl, r.x + w - br, r.x + w];
+            const ys = [r.y, r.y + bt, r.y + h - bb, r.y + h];
+            const us = [rec.uv[0], rec.uv[0] + bl, rec.uv[0] + sw - br, rec.uv[0] + sw];
+            const vs = [rec.uv[1], rec.uv[1] + bt, rec.uv[1] + sh - bb, rec.uv[1] + sh];
+            for (let cy = 0; cy < 3; cy++)
+              for (let cx = 0; cx < 3; cx++) {
+                const pw = xs[cx + 1] - xs[cx];
+                const ph = ys[cy + 1] - ys[cy];
+                if (pw > 0 && ph > 0)
+                  drawRgbaRegion(ctx, tex.rgba, tex.width, us[cx], vs[cy],
+                    us[cx + 1] - us[cx], vs[cy + 1] - vs[cy], xs[cx], ys[cy], pw, ph);
+              }
+          } else if (type === 2) {
+            // Tiled : répétition du sprite, bords tronqués.
+            for (let ty = 0; ty < h; ty += sh)
+              for (let tx = 0; tx < w; tx += sw) {
+                const pw = Math.min(sw, w - tx);
+                const ph = Math.min(sh, h - ty);
+                drawRgbaRegion(ctx, tex.rgba, tex.width, rec.uv[0], rec.uv[1], pw, ph, r.x + tx, r.y + ty, pw, ph);
+              }
+          } else {
+            drawRgbaRegion(ctx, tex.rgba, tex.width, rec.uv[0], rec.uv[1], sw, sh, r.x, r.y, w, h);
+          }
         }
       }
     }

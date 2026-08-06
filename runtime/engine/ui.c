@@ -236,10 +236,78 @@ uint8_t* Ui_Draw(const Scene* scene, uint32_t* ot, uint8_t* packet,
 				addPrim(&ot[0], tile);
 				packet += sizeof(TILE);
 			}
+			else if ((rec->flags & 0x3) == 1)
+			{
+				/* Sliced (9-slice) : coins intacts, bords/centre etires.
+				 * POLY_FT4 partout (il porte son tpage, uv affines). */
+				int sw = rec->uv[2] ? rec->uv[2] : 255;
+				int sh = rec->uv[3] ? rec->uv[3] : 255;
+				int bl = rec->border[0], bt = rec->border[1];
+				int br = rec->border[2], bb = rec->border[3];
+				int xs[4] = { r.x, r.x + bl, r.x + w - br, r.x + w };
+				int ys[4] = { r.y, r.y + bt, r.y + h - bb, r.y + h };
+				int us[4] = { rec->uv[0], rec->uv[0] + bl,
+					rec->uv[0] + sw - br, rec->uv[0] + sw };
+				int vs[4] = { rec->uv[1], rec->uv[1] + bt,
+					rec->uv[1] + sh - bb, rec->uv[1] + sh };
+				for (int cy = 0; cy < 3; cy++)
+				for (int cx = 0; cx < 3; cx++)
+				{
+					int pw = xs[cx + 1] - xs[cx];
+					int ph = ys[cy + 1] - ys[cy];
+					if (pw <= 0 || ph <= 0)
+						continue;
+					if (packet + sizeof(POLY_FT4) > packet_limit)
+						break;
+					POLY_FT4* q = (POLY_FT4*)packet;
+					setPolyFT4(q);
+					setXYWH(q, xs[cx], ys[cy], pw, ph);
+					setUVWH(q, us[cx], vs[cy],
+						us[cx + 1] - us[cx] - 1, vs[cy + 1] - vs[cy] - 1);
+					q->tpage = scene->tex_tpage[rec->asset];
+					q->clut = scene->tex_clut[rec->asset];
+					setRGB0(q, rec->color[0], rec->color[1], rec->color[2]);
+					if (rec->flags & (1 << 3))
+						setSemiTrans(q, 1);
+					addPrim(&ot[0], q);
+					packet += sizeof(POLY_FT4);
+				}
+			}
+			else if ((rec->flags & 0x3) == 2)
+			{
+				/* Tiled : le sprite repete en grille de SPRT (tres
+				 * economes), bords tronques. */
+				int sw = rec->uv[2] ? rec->uv[2] : 16;
+				int sh = rec->uv[3] ? rec->uv[3] : 16;
+				for (int ty = 0; ty < h; ty += sh)
+				for (int tx = 0; tx < w; tx += sw)
+				{
+					if (packet + sizeof(SPRT) > packet_limit)
+						break;
+					SPRT* spr = (SPRT*)packet;
+					setSprt(spr);
+					setXY0(spr, r.x + tx, r.y + ty);
+					setWH(spr, tx + sw > w ? w - tx : sw,
+						ty + sh > h ? h - ty : sh);
+					setUV0(spr, rec->uv[0], rec->uv[1]);
+					spr->clut = scene->tex_clut[rec->asset];
+					setRGB0(spr, rec->color[0], rec->color[1], rec->color[2]);
+					if (rec->flags & (1 << 3))
+						setSemiTrans(spr, 1);
+					addPrim(&ot[0], spr);
+					packet += sizeof(SPRT);
+				}
+				if (packet + sizeof(DR_TPAGE) <= packet_limit)
+				{
+					DR_TPAGE* tp = (DR_TPAGE*)packet;
+					setDrawTPage(tp, 0, 1, scene->tex_tpage[rec->asset]);
+					addPrim(&ot[0], tp);
+					packet += sizeof(DR_TPAGE);
+				}
+			}
 			else
 			{
-				/* Sprite Simple/Filled : SPRT (les types Sliced/Tiled
-				 * retombent sur Simple au jalon 1). */
+				/* Sprite Simple/Filled : un SPRT. */
 				if (packet + sizeof(SPRT) + sizeof(DR_TPAGE) > packet_limit)
 					break;
 				SPRT* spr = (SPRT*)packet;

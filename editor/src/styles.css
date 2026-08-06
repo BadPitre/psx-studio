@@ -568,3 +568,7 @@ body {
   touch-action: none;
 }
 .project-resize:hover { background: var(--select); }
+
+/* Caret de pliage de la hiérarchie + scroll garanti dans la grille. */
+.tree-caret { width: 12px; color: var(--muted); font-size: 9px; flex-shrink: 0; }
+.panel { min-height: 0; }

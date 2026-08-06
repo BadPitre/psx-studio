@@ -543,7 +543,8 @@ pub fn scene_village_json() -> &'static str {
     { "name": "vie_fond", "parent": "hud",
       "rect": { "anchor_min": [0, 0], "anchor_max": [0, 0], "pivot": [0, 0],
                 "position": [8, 8], "size": [70, 12] },
-      "image": { "color": [10, 12, 24] } },
+      "image": { "texture": "checker_tex", "uv": [0, 0, 24, 24],
+                 "type": "sliced", "border": [6, 6, 6, 6] } },
     { "name": "vie", "parent": "vie_fond",
       "rect": { "anchor_min": [0, 0], "anchor_max": [1, 1],
                 "position": [2, 2], "size": [2, 2] },
@@ -555,12 +556,15 @@ pub fn scene_village_json() -> &'static str {
     { "name": "aide", "parent": "hud",
       "rect": { "anchor_min": [0, 1], "anchor_max": [0, 1], "pivot": [0, 1],
                 "position": [8, -8], "size": [104, 36] },
-      "image": { "color": [10, 12, 24] },
+      "image": { "texture": "checker_tex", "uv": [0, 0, 16, 16], "type": "tiled",
+                 "color": [60, 60, 70] } },
+    { "name": "liste", "parent": "aide",
+      "rect": { "anchor_min": [0, 0], "anchor_max": [1, 1] },
       "layout": { "axis": "vertical", "padding": [4, 4, 4, 4], "spacing": 4,
                   "child_align": "top-left", "expand_w": true } },
-    { "name": "aide1", "parent": "aide", "rect": { "size": [0, 8] },
+    { "name": "aide1", "parent": "liste", "rect": { "size": [0, 8] },
       "text": { "font": "main", "text": "X : PARLER" } },
-    { "name": "aide2", "parent": "aide", "rect": { "size": [0, 8] },
+    { "name": "aide2", "parent": "liste", "rect": { "size": [0, 8] },
       "text": { "font": "main", "text": "PAVE : BOUGER" } }
   ]
 }

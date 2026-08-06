@@ -66,6 +66,20 @@ function Hierarchy({
     });
     return d;
   }, [scene]);
+  /* Plier/déplier les enfants d'une entité (caret, comme Unity). */
+  const [folded, setFolded] = useState<Set<number>>(new Set());
+  const hasChildren = useMemo(
+    () => scene.entities.map((_, i) => scene.entities.some((e) => e.parent === i)),
+    [scene],
+  );
+  const isHidden = (i: number) => {
+    let p = scene.entities[i].parent;
+    while (p >= 0) {
+      if (folded.has(p)) return true;
+      p = scene.entities[p].parent;
+    }
+    return false;
+  };
 
   return (
     <div
@@ -103,7 +117,7 @@ function Hierarchy({
           </span>
         </div>
       )}
-      {scene.entities.map((e, i) => (
+      {scene.entities.map((e, i) => isHidden(i) ? null : (
         <div
           key={i}
           className={`tree-item ${selected === i ? "selected" : ""}`}
@@ -116,6 +130,21 @@ function Hierarchy({
             onContextMenu(i, ev.clientX, ev.clientY);
           }}
         >
+          <span
+            className="tree-caret"
+            onClick={(ev) => {
+              if (!hasChildren[i]) return;
+              ev.stopPropagation();
+              setFolded((f) => {
+                const next = new Set(f);
+                if (next.has(i)) next.delete(i);
+                else next.add(i);
+                return next;
+              });
+            }}
+          >
+            {hasChildren[i] ? (folded.has(i) ? "▸" : "▾") : ""}
+          </span>
           <span className="tree-icon">
             {e.flags & 1 ? "☀" : e.flags & 2 ? "🎥" : e.flags & 8 ? "▦" : e.model >= 0 ? "▣" : "○"}
           </span>

@@ -21,7 +21,7 @@ describe("parsePsc sur scene0.psc (village)", () => {
   it("lit l'en-tête et les réglages de scène", () => {
     expect(scene.models.length).toBe(4);
     expect(scene.textures.length).toBe(3);
-    expect(scene.entities.length).toBe(17);
+    expect(scene.entities.length).toBe(18);
     expect(scene.background).toEqual([24, 32, 56]);
     // Le vecteur lumière pointe vers la source (Y négatif = vers le haut).
     expect(scene.lightToward[1]).toBeLessThan(-0.4);
@@ -79,7 +79,7 @@ describe("parsePsc sur scene0.psc (village)", () => {
     });
     // La cheminée (parentée à une maison) + les 3 widgets UI sous le hud.
     const children = scene.entities.filter((e) => e.parent >= 0);
-    expect(children.length).toBe(7);
+    expect(children.length).toBe(8);
     // Le sol a une échelle 4 en X/Z.
     const sol = scene.entities[0];
     expect(sol.scale[0]).toBeCloseTo(4.0, 2);
@@ -97,7 +97,7 @@ describe("parsePsc sur scene0.psc — table UI (v1.3)", () => {
 
   it("lit les widgets, la police et les chaînes", () => {
     // hud (canvas) + vie_fond + vie (filled) + zone (texte).
-    expect(scene.ui.length).toBe(7);
+    expect(scene.ui.length).toBe(8);
     expect(scene.fontCount).toBe(1);
     const [hud, fond, vie, zone] = scene.ui;
     expect(hud.components & 1).toBe(1);
@@ -113,11 +113,15 @@ describe("parsePsc sur scene0.psc — table UI (v1.3)", () => {
     expect(zone.extra).toBe(2);
     // Les entités UI portent le flag (bit 3).
     expect(scene.entities[hud.entity].flags & 8).toBe(8);
-    // aide : Layout Group vertical (padding en uv, spacing en extra).
-    const aide = scene.ui[4];
-    expect(aide.components & (1 << 4)).toBe(1 << 4);
-    expect(aide.uv).toEqual([4, 4, 4, 4]);
-    expect(aide.extra).toBe(4);
+    // vie_fond : image Sliced (type 1) avec ses borders.
+    expect(fond.flags & 3).toBe(1);
+    expect(fond.border).toEqual([6, 6, 6, 6]);
+    // aide : image Tiled (type 2) ; liste : Layout Group vertical.
+    expect(scene.ui[4].flags & 3).toBe(2);
+    const liste = scene.ui[5];
+    expect(liste.components & (1 << 4)).toBe(1 << 4);
+    expect(liste.uv).toEqual([4, 4, 4, 4]);
+    expect(liste.extra).toBe(4);
   });
 });
 
