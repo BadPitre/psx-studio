@@ -542,6 +542,8 @@ body {
 
 /* Mode Canvas : l'UI éditée dans sa propre vue, en grand. */
 .ui-canvas-panel {
+  overflow: hidden;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -551,7 +553,11 @@ body {
   background: #101116;
 }
 .ui-canvas {
+  /* Borné en largeur ET en hauteur : un canvas (élément remplacé à
+   * ratio intrinsèque 4/3) réduit sa largeur si max-height mord —
+   * plus de débordement sur la barre d'outils en fenêtre peu haute. */
   width: min(92%, 960px);
+  max-height: 88%;
   aspect-ratio: 4 / 3;
   image-rendering: pixelated;
   outline: 1px solid var(--panel-border);
