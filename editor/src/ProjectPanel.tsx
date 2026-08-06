@@ -321,7 +321,15 @@ export function ProjectPanel({
       </div>
       {!collapsed && tab === "project" && (
         <div className="project-body">
-          <div className="project-tree">
+          <div
+            className="project-tree"
+            onContextMenu={(e) => {
+              // Clic droit dans le vide de l'arbre (ou sur « Tout ») :
+              // menu Créer ▸ (dossier/scène) sur le dossier courant.
+              e.preventDefault();
+              setMenu({ x: e.clientX, y: e.clientY, file: null });
+            }}
+          >
             <div
               className={`project-node ${selectedDir === "" ? "selected" : ""}`}
               onClick={() => setSelectedDir("")}
