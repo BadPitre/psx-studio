@@ -104,6 +104,19 @@ terme drag & drop vers la hiérarchie/le viewport.
    modèle (et sa texture appariée) est ajouté aux assets de la scène si
    besoin, l'entité est nommée et sélectionnée, annulable au Ctrl+Z
 
+## Lot E — Système UI (Canvas + widgets, façon UMG)
+
+Composer HUD, menus et dialogues comme dans Unreal : un Canvas 320×240,
+des widgets ancrés (image, texte, jauge, bouton), un mode d'édition
+visuel, un format binaire `.PUI` + polices bitmap `.fnt`, un runtime
+`Ui_Draw` en tête d'OT et une navigation au D-pad (pas de souris sur
+PS1 : le focus est un concept de premier ordre).
+
+**Spec complète : [`UI-SYSTEM.md`](UI-SYSTEM.md)** — 4 jalons :
+fondations (format + runtime + HUD de démo), mode Canvas éditeur,
+interactif (jauges/boutons/focus/API scripts), confort (9-slice,
+animations).
+
 ## Divers (good first issues, voir CONTRIBUTING.md)
 
 Grille au sol du viewport, sélecteur de piste CD-DA par scène, LOD par
