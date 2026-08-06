@@ -210,6 +210,28 @@ fn import_asset(
     psxpipe::project::import_asset(&PathBuf::from(project_dir), &PathBuf::from(src_path))
 }
 
+/// Import par contenu : le drag & drop HTML5 ne donne pas le chemin du
+/// fichier deposé (dragDropEnabled est coupé pour que le drag & drop
+/// interne de l'éditeur fonctionne sous Windows) — le frontend envoie
+/// les octets, écrits dans assets/ puis importés en place.
+#[tauri::command(async)]
+fn import_asset_bytes(
+    project_dir: String,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<psxpipe::project::ImportedAsset, String> {
+    let dir = PathBuf::from(project_dir);
+    // Nom de fichier seul (pas de traversée), déposé dans assets/.
+    let file_name = std::path::Path::new(&name)
+        .file_name()
+        .ok_or_else(|| format!("nom de fichier invalide : {name}"))?;
+    let assets = dir.join("assets");
+    std::fs::create_dir_all(&assets).map_err(|e| format!("assets/ : {e}"))?;
+    let dst = assets.join(file_name);
+    std::fs::write(&dst, &bytes).map_err(|e| format!("{} : {e}", dst.display()))?;
+    psxpipe::project::import_asset(&dir, &dst)
+}
+
 /// Contenu du projet pour le panneau Project (fichiers + project.json).
 #[tauri::command(async)]
 fn list_project_files(
@@ -378,6 +400,7 @@ pub fn run() {
             build_scene,
             build_project,
             import_asset,
+            import_asset_bytes,
             list_project_files,
             create_scene,
             create_folder,

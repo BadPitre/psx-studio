@@ -35,8 +35,15 @@ export function ContextMenu({
     };
   }, [onClose]);
 
+  /* Près du bord droit, les sous-menus s'ouvrent vers la gauche. */
+  const submenuLeft =
+    typeof window !== "undefined" && x > window.innerWidth - 420;
+
   return (
-    <div className="context-menu" style={{ left: x, top: y }}>
+    <div
+      className={`context-menu ${submenuLeft ? "submenu-left" : ""}`}
+      style={{ left: x, top: y }}
+    >
       {actions.map((a) => (
         <div
           key={a.label}

@@ -10,7 +10,6 @@ import { Viewport, type GizmoMode } from "./viewport/Viewport";
 import {
   api,
   isTauri,
-  onFileDrop,
   pickProjectDir,
   type ProjectFile,
   type ProjectInfo,
@@ -708,6 +707,8 @@ function Inspector({
   onCamFovChange,
   camDraw,
   onCamDrawChange,
+  solid,
+  onSolidChange,
   uiJson,
   onUiMutate,
   focusNameSignal,
@@ -741,6 +742,9 @@ function Inspector({
   onCamFovChange?: (fov: number | null) => void;
   camDraw?: number | null;
   onCamDrawChange?: (d: number | null) => void;
+  /** Collider AABB effectif (défaut console : solide si modèle). */
+  solid?: boolean;
+  onSolidChange?: (on: boolean) => void;
   /** Composants UI (v1.3) de l'entité (JSON brut) — mode projet. */
   uiJson?: Record<string, unknown> | null;
   onUiMutate?: (mut: (e: Record<string, unknown>) => void, histKey?: string) => void;
@@ -1021,6 +1025,20 @@ function Inspector({
         </ComponentCard>
       )}
 
+      {solid && (
+        <ComponentCard
+          icon="🧊"
+          title="Collider (AABB)"
+          onRemove={onSolidChange ? () => onSolidChange(false) : undefined}
+        >
+          <div className="field-readonly">
+            {hasMesh
+              ? "Boîte du modèle × échelle (axes X/Z), pour Physics_MoveAndSlide. Un modèle très plat (sol) ne bloque pas la marche."
+              : "Mur invisible : boîte 64×64 unités × échelle (axes X/Z). Ajuste l'échelle X/Z pour dimensionner l'obstacle."}
+          </div>
+        </ComponentCard>
+      )}
+
       {(script != null || pendingScript) && onScriptChange && (
         <ComponentCard
           icon="📜"
@@ -1058,6 +1076,9 @@ function Inspector({
           <button
             className="button"
             onClick={(e) => {
+              // stopPropagation : le clic d'ouverture ne doit pas
+              // atteindre window, où ContextMenu écoute pour se fermer.
+              e.stopPropagation();
               const r = (e.target as HTMLElement).getBoundingClientRect();
               setAddComp({ x: r.left, y: r.bottom + 4 });
             }}
@@ -1072,11 +1093,24 @@ function Inspector({
           y={addComp.y}
           onClose={() => setAddComp(null)}
           actions={[
-            ...(!hasMesh && modelIds && modelIds.length > 0
+            ...(!hasMesh
+              ? [
+                  modelIds && modelIds.length > 0
+                    ? {
+                        label: "▣ MeshRenderer",
+                        onClick: () => onModelChange?.(modelIds[0]),
+                      }
+                    : {
+                        label: "▣ MeshRenderer — importe d'abord un modèle (.glb)",
+                        onClick: () => {},
+                      },
+                ]
+              : []),
+            ...(!solid && onSolidChange
               ? [
                   {
-                    label: "▣ MeshRenderer",
-                    onClick: () => onModelChange?.(modelIds[0]),
+                    label: "🧊 Collider (AABB)",
+                    onClick: () => onSolidChange(true),
                   },
                 ]
               : []),
@@ -1092,7 +1126,20 @@ function Inspector({
               ? [{ label: "🎥 Caméra", onClick: () => onCameraChange?.(true) }]
               : []),
             ...(script == null && !pendingScript
-              ? [{ label: "📜 Script", onClick: () => setPendingScript(true) }]
+              ? [
+                  {
+                    label: "📜 Script",
+                    children: [
+                      { label: "✎ personnalisé…", onClick: () => setPendingScript(true) },
+                      ...["player", "npc", "torche", "hud", "dialogue", "pause"].map(
+                        (s) => ({
+                          label: s === "player" ? "🕹 player (contrôleur démo)" : s,
+                          onClick: () => onScriptChange?.(s),
+                        }),
+                      ),
+                    ],
+                  },
+                ]
               : []),
           ]}
         />
@@ -1871,6 +1918,23 @@ export default function App() {
     [mutateDoc, selected, entityNames],
   );
 
+  /* Collider AABB : n'écrit `solid` que quand il diffère du défaut
+     console (solide si modèle) — le JSON reste minimal. */
+  const setEntitySolid = useCallback(
+    (on: boolean) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity) return;
+        const hasModel = entity.model != null;
+        if (on === hasModel) delete entity.solid;
+        else entity.solid = on;
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
   /* Propriétés caméra (fov, draw_distance) fusionnées dans l'objet
      camera du JSON ; toutes au défaut -> retour à `true`. */
   const setEntityCamProp = useCallback(
@@ -1992,19 +2056,24 @@ export default function App() {
     }
   }, [project, sceneDoc, scenePath]);
 
-  /* Import d'assets par drag & drop natif (mode projet). */
+  /* Import d'assets par drag & drop HTML5 (mode projet) : le drag natif
+     Tauri est coupé (il avale le DnD interne sous Windows), les fichiers
+     déposés arrivent donc en dataTransfer.files — importés par contenu. */
   useEffect(() => {
     if (!isTauri || !project) return;
-    let unlisten: (() => void) | undefined;
-    onFileDrop(async (paths) => {
-      const supported = paths.filter((p) => /\.(gltf|glb|png)$/i.test(p));
-      if (supported.length === 0) return;
+    const onDrop = async (e: DragEvent) => {
+      const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+        /\.(gltf|glb|png)$/i.test(f.name),
+      );
+      if (files.length === 0) return;
+      e.preventDefault();
       // Textures d'abord : permet d'appairer modèle + texture du même nom.
-      supported.sort((a, b) => Number(/\.png$/i.test(b)) - Number(/\.png$/i.test(a)));
+      files.sort((a, b) => Number(/\.png$/i.test(b.name)) - Number(/\.png$/i.test(a.name)));
       const summaries: string[] = [];
-      for (const path of supported) {
+      for (const file of files) {
         try {
-          const imported = await api.importAsset(project.dir, path);
+          const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+          const imported = await api.importAssetBytes(project.dir, file.name, bytes);
           summaries.push(`${imported.id} : ${imported.summary}`);
           mutateDocRef.current((doc) => {
             doc.assets = doc.assets ?? {};
@@ -2034,14 +2103,22 @@ export default function App() {
               }
             }
           });
-        } catch (e) {
-          summaries.push(String(e));
+        } catch (err) {
+          summaries.push(String(err));
         }
       }
       setNotice(`import : ${summaries.join(" · ")}`);
       refreshFiles(project.dir);
-    }).then((fn) => (unlisten = fn));
-    return () => unlisten?.();
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+    };
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("dragover", onDragOver);
+    return () => {
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("dragover", onDragOver);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
 
@@ -2140,6 +2217,15 @@ export default function App() {
     (currentModelId &&
       sceneDoc?.assets?.models?.find((m) => m.id === currentModelId)?.pmd) ||
     null;
+  /* Collider effectif : override JSON (projet) ou bits 4/5 des flags
+     (.psc, visionneuse), sinon le défaut console — solide si modèle. */
+  const currentSolid = sceneDoc
+    ? ((selectedJsonEntity?.solid as boolean | undefined) ?? currentModelId != null)
+    : (pscEntity?.flags ?? 0) & 16
+      ? true
+      : (pscEntity?.flags ?? 0) & 32
+        ? false
+        : (pscEntity?.model ?? -1) >= 0;
 
   /* Seuil de subdivision du modèle sélectionné (lu dans project.json). */
   const [modelSubdiv, setModelSubdiv] = useState<number | null>(null);
@@ -2329,6 +2415,15 @@ export default function App() {
                   { label: "Copier", shortcut: "Ctrl+C", onClick: copyEntity },
                   { label: "Coller", shortcut: "Ctrl+V", onClick: pasteEntity },
                   { label: "Dupliquer", shortcut: "Ctrl+D", onClick: duplicateEntity },
+                  /* Secours du drag hiérarchie -> panneau Project. */
+                  ...(selectedName && docNames?.has(selectedName) && !selectedPrefabSource
+                    ? [
+                        {
+                          label: "🧩 Sauvegarder comme prefab",
+                          onClick: () => createPrefabFromEntity(selectedName),
+                        },
+                      ]
+                    : []),
                   {
                     label: "Supprimer",
                     shortcut: "Suppr",
@@ -2517,6 +2612,8 @@ export default function App() {
                     ? (v) => setEntityCamProp("draw_distance", v)
                     : undefined
                 }
+                solid={currentSolid}
+                onSolidChange={isTauri && sceneDoc ? setEntitySolid : undefined}
                 prefabSource={selectedPrefabSource}
                 onOpenPrefab={isTauri && sceneDoc ? openPrefab : undefined}
                 uiJson={

@@ -189,17 +189,33 @@ int32_t Entity_Dist2XZ(const Entity* a, const Entity* b)
 
 /* AABB monde (axes X/Z) d'une entite : bounds du modele x echelle propre,
  * centres sur la position monde. La rotation est ignoree (physique
- * volontairement simple, cf. doc projet). */
+ * volontairement simple, cf. doc projet). Sans modele (collider force,
+ * ENTITY_FLAG_SOLID) : boite par defaut 64x64 unites x echelle — un mur
+ * invisible dimensionne par l'echelle de l'entite. */
+#define COLLIDER_DEFAULT_HALF	32
+
 static void EntityBoxXZ(const Scene* scene, const Entity* ent,
 	int32_t* min_x, int32_t* max_x, int32_t* min_z, int32_t* max_z)
 {
-	const SVECTOR* mn = &scene->model_min[ent->model];
-	const SVECTOR* mx = &scene->model_max[ent->model];
+	int32_t hx, hz, cx, cz;
 
-	int32_t hx = (((int32_t)(mx->vx - mn->vx) * ent->scale.vx) >> 12) / 2;
-	int32_t hz = (((int32_t)(mx->vz - mn->vz) * ent->scale.vz) >> 12) / 2;
-	int32_t cx = ent->world.t[0] + (((int32_t)(mx->vx + mn->vx) * ent->scale.vx) >> 12) / 2;
-	int32_t cz = ent->world.t[2] + (((int32_t)(mx->vz + mn->vz) * ent->scale.vz) >> 12) / 2;
+	if (ent->model >= 0)
+	{
+		const SVECTOR* mn = &scene->model_min[ent->model];
+		const SVECTOR* mx = &scene->model_max[ent->model];
+
+		hx = (((int32_t)(mx->vx - mn->vx) * ent->scale.vx) >> 12) / 2;
+		hz = (((int32_t)(mx->vz - mn->vz) * ent->scale.vz) >> 12) / 2;
+		cx = ent->world.t[0] + (((int32_t)(mx->vx + mn->vx) * ent->scale.vx) >> 12) / 2;
+		cz = ent->world.t[2] + (((int32_t)(mx->vz + mn->vz) * ent->scale.vz) >> 12) / 2;
+	}
+	else
+	{
+		hx = (COLLIDER_DEFAULT_HALF * (int32_t)ent->scale.vx) >> 12;
+		hz = (COLLIDER_DEFAULT_HALF * (int32_t)ent->scale.vz) >> 12;
+		cx = ent->world.t[0];
+		cz = ent->world.t[2];
+	}
 
 	*min_x = cx - hx;
 	*max_x = cx + hx;
@@ -221,13 +237,16 @@ static int CollidesAt(const Scene* scene, const Entity* self,
 	for (int i = 0; i < scene->entity_count; i++)
 	{
 		const Entity* other = &scene->entities[i];
-		if (other == self || other->model < 0 || !other->solid || !other->visible)
+		if (other == self || !other->solid || !other->visible)
 			continue;
-		/* Le sol (tres plat et tres large) ne bloque pas la marche. */
-		const SVECTOR* mn = &scene->model_min[other->model];
-		const SVECTOR* mx = &scene->model_max[other->model];
-		if (mx->vy - mn->vy < 8)
-			continue;
+		if (other->model >= 0)
+		{
+			/* Le sol (tres plat et tres large) ne bloque pas la marche. */
+			const SVECTOR* mn = &scene->model_min[other->model];
+			const SVECTOR* mx = &scene->model_max[other->model];
+			if (mx->vy - mn->vy < 8)
+				continue;
+		}
 
 		int32_t o_min_x, o_max_x, o_min_z, o_max_z;
 		EntityBoxXZ(scene, other, &o_min_x, &o_max_x, &o_min_z, &o_max_z);

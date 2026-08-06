@@ -117,9 +117,13 @@ de triangles — surveille l'avertissement de budget.)
   (snapping de sommets, affine, Gouraud GTE).
 - **Inspecteur** : philosophie Unity — une entité porte des
   **composants** en cartes retirables (✕) : MeshRenderer (modèle +
-  subdivision), Lumière (couleur, intensité), Caméra (FOV, distance
-  d'affichage), Script (nom résolu par hash — voir §6). Le bouton
-  « ＋ Ajouter un composant » liste ceux disponibles.
+  subdivision), **Collider (AABB)** — boîte du modèle × échelle pour
+  les collisions ; sur une entité vide, un **mur invisible** 64×64
+  unités × échelle —, Lumière (couleur, intensité), Caméra (FOV,
+  distance d'affichage), Script (nom résolu par hash — voir §6 ; le
+  sous-menu propose les scripts de la démo, dont `player` le
+  contrôleur). Le bouton « ＋ Ajouter un composant » liste ceux
+  disponibles.
 - **VRAM** : bouton VRAM = carte des pages texture/CLUT réellement
   packées, avec % d'occupation et pages libres.
 - **Panneau Project** (bande du bas, comme Unity) : tout le contenu du
@@ -136,8 +140,8 @@ de triangles — surveille l'avertissement de budget.)
   l'origine). L'onglet **Console** à côté garde le journal des imports,
   builds et erreurs.
 - **Prefabs** (comme Unity) : glisse une entité de la hiérarchie vers
-  le panneau Project → elle devient un `prefabs/<nom>.json`
-  réutilisable. Glisse le prefab dans la hiérarchie d'une scène → une
+  le panneau Project (ou clic droit → « Sauvegarder comme prefab ») →
+  elle devient un `prefabs/<nom>.json` réutilisable. Glisse le prefab dans la hiérarchie d'une scène → une
   **instance liée** (en bleu 🧩) : la scène ne stocke qu'une référence,
   le contenu est incorporé au build. Double-clic sur le prefab (ou
   « Ouvrir le prefab » dans l'inspecteur) → **Prefab Mode** : édition

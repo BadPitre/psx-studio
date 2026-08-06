@@ -380,6 +380,11 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 .context-item.has-submenu:hover > .context-submenu { display: block; }
+/* Menu proche du bord droit : les sous-menus s'ouvrent vers la gauche. */
+.context-menu.submenu-left .context-submenu {
+  left: auto;
+  right: calc(100% - 4px);
+}
 
 /* ------------------------------------------------- panneau Project -- */
 .project-panel {

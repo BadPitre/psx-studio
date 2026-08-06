@@ -254,7 +254,14 @@ static int Scene_Parse(Scene* scene, uint8_t* data)
 		ent->cam_draw = (uint16_t)rec->rot.pad;
 		ent->light_radius = (uint16_t)rec->scale.pad;
 		ent->visible = 1;
-		ent->solid = (ent->model >= 0);
+		/* Collider AABB (v1.4) : override explicite, sinon le defaut
+		 * historique — solide si l'entite a un modele. */
+		if (ent->flags & ENTITY_FLAG_SOLID)
+			ent->solid = 1;
+		else if (ent->flags & ENTITY_FLAG_NOT_SOLID)
+			ent->solid = 0;
+		else
+			ent->solid = (ent->model >= 0);
 	}
 
 	/* Premiere entite camera : vue initiale de la scene. */

@@ -446,3 +446,36 @@ fn prefab_reference_is_inlined() {
     let err = scene::build_with_options(&scene2, dir.path(), &opts).unwrap_err();
     assert!(err.contains("imbriqu"), "{err}");
 }
+
+#[test]
+fn solid_override_flags() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    // mur : collider force sans modele (bit 4) ; deco : modele traversable
+    // (bit 5) ; defaut : aucun bit (le runtime decide par la presence du
+    // modele).
+    let json = r#"{
+      "name": "colliders",
+      "assets": { "textures": [], "models": [{ "id": "cube", "pmd": "cube.pmd" }] },
+      "entities": [
+        { "name": "mur",    "solid": true,  "scale": [4.0, 1.0, 0.5] },
+        { "name": "deco",   "model": "cube", "solid": false },
+        { "name": "normal", "model": "cube" }
+      ]
+    }"#;
+    let json_path = dir.path().join("s.json");
+    std::fs::write(&json_path, json).unwrap();
+    let (bytes, _) = scene::build_file(&json_path).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    let flags = |i: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + 0x1C], bytes[rec + 0x1D]])
+    };
+    assert_eq!(flags(0) & scene::ENTITY_FLAG_SOLID, scene::ENTITY_FLAG_SOLID);
+    assert_eq!(flags(1) & scene::ENTITY_FLAG_NOT_SOLID, scene::ENTITY_FLAG_NOT_SOLID);
+    assert_eq!(
+        flags(2) & (scene::ENTITY_FLAG_SOLID | scene::ENTITY_FLAG_NOT_SOLID),
+        0
+    );
+}

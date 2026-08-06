@@ -144,6 +144,11 @@ pub struct EntityJson {
     /// racine du prefab.
     #[serde(default)]
     pub prefab: Option<String>,
+    /// Composant Collider AABB : participe aux collisions
+    /// Physics_MoveAndSlide (boîte du modèle × échelle, axes X/Z).
+    /// Absent = défaut console : solide si l'entité a un modèle.
+    #[serde(default)]
+    pub solid: Option<bool>,
     /* Composants UI (v1.3, docs/UI-SYSTEM.md) — philosophie uGUI : le
      * canvas est une entité, ses enfants portent RectTransform + Image/
      * Text/Button/Layout. */
@@ -331,6 +336,11 @@ pub const ENTITY_FLAG_CAMERA: u16 = 1 << 1;
 /// Modificateur du bit lumière : ponctuelle (torche) au lieu de
 /// directionnelle. Le rayon vit dans le pad du vecteur échelle.
 pub const ENTITY_FLAG_LIGHT_POINT: u16 = 1 << 2;
+/// Collider AABB forcé (v1.4) : solide même sans modèle... (bit 4) — le
+/// défaut runtime reste « solide si modèle » quand aucun bit n'est posé.
+pub const ENTITY_FLAG_SOLID: u16 = 1 << 4;
+/// ...ou traversable malgré un modèle (bit 5) : décor purement visuel.
+pub const ENTITY_FLAG_NOT_SOLID: u16 = 1 << 5;
 /// v1.3 : l'entité porte des composants UI (voir la table UI).
 pub const ENTITY_FLAG_UI: u16 = 1 << 3;
 
@@ -867,6 +877,11 @@ pub fn build_with_options(
             || e.layout.is_some()
         {
             flags |= ENTITY_FLAG_UI;
+        }
+        match e.solid {
+            Some(true) => flags |= ENTITY_FLAG_SOLID,
+            Some(false) => flags |= ENTITY_FLAG_NOT_SOLID,
+            None => {}
         }
         if e.light.is_some() && e.camera.enabled() {
             report.warnings.push(format!(

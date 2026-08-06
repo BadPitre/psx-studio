@@ -49,13 +49,11 @@ export interface ImportedAsset {
   warnings: string[];
 }
 
-/** Abonnement au drag & drop natif Tauri (chemins de fichiers). */
-export async function onFileDrop(cb: (paths: string[]) => void): Promise<() => void> {
-  const { getCurrentWebview } = await import("@tauri-apps/api/webview");
-  return getCurrentWebview().onDragDropEvent((event) => {
-    if (event.payload.type === "drop") cb(event.payload.paths);
-  });
-}
+/* Le drag & drop natif Tauri (dragDropEnabled) est coupé : il avale les
+ * événements de drag HTML5 sous Windows et casse tout le drag & drop
+ * interne (hiérarchie, panneau Project, viewport). Les fichiers déposés
+ * arrivent donc en HTML5 (dataTransfer.files) et sont importés par
+ * contenu via import_asset_bytes. */
 
 /** Une entrée du panneau Project (fichier du projet croisé avec project.json). */
 export interface ProjectFile {
@@ -73,6 +71,9 @@ export interface ProjectFile {
 export const api = {
   importAsset: (projectDir: string, srcPath: string) =>
     tauriInvoke<ImportedAsset>("import_asset", { projectDir, srcPath }),
+  /** Import d'un fichier déposé (HTML5 : contenu sans chemin absolu). */
+  importAssetBytes: (projectDir: string, name: string, bytes: number[]) =>
+    tauriInvoke<ImportedAsset>("import_asset_bytes", { projectDir, name, bytes }),
   listProjectFiles: (projectDir: string) =>
     tauriInvoke<ProjectFile[]>("list_project_files", { projectDir }),
   /** Crée une scène vide enregistrée ; retourne son chemin relatif. */

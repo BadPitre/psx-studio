@@ -102,6 +102,10 @@ typedef struct {
 #define ENTITY_FLAG_CAMERA		(1 << 1)
 #define ENTITY_FLAG_LIGHT_POINT	(1 << 2)
 #define ENTITY_FLAG_UI			(1 << 3)
+/* Collider AABB explicite (v1.4) : force solide (meme sans modele) ou
+ * traversable (decor visuel). Sans bit : solide si modele. */
+#define ENTITY_FLAG_SOLID		(1 << 4)
+#define ENTITY_FLAG_NOT_SOLID	(1 << 5)
 
 #define SCENE_MAX_ENTITY_LIGHTS	2
 #define SCENE_MAX_POINT_LIGHTS	4

@@ -60,6 +60,12 @@ Conventions :
 - `parent` : nom d'une autre entité (absent/null = racine). Les cycles sont
   rejetés ; le sérialiseur trie parents avant enfants.
 - `model` : absent = entité vide (nœud de hiérarchie pur).
+- `solid` (v1.4, optionnel) : composant **Collider AABB**. Absent =
+  défaut console (solide si l'entité a un modèle). `true` force le
+  collider — sans modèle, boîte 64×64 unités × échelle : un mur
+  invisible ; `false` rend un décor traversable. Encodé dans les flags
+  d'entité : bit 4 = solide forcé, bit 5 = traversable forcé (un
+  runtime ancien ignore ces bits et garde le défaut).
 - `prefab` (éditeur/pipeline, optionnel) : chemin d'un
   `prefabs/<nom>.json` (même schéma, une seule racine). Le build
   **inline** son sous-arbre à la place de l'entité : la racine prend
