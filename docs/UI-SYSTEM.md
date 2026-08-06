@@ -87,10 +87,25 @@ dernier au-dessus), comme dans Unity.
 | Composant | Équivalent Unity | Propriétés |
 |---|---|---|
 | `canvas` | Canvas (Screen Space – Overlay) | actif/inactif ; rect de référence 320×240 |
-| `image` | Image | texture + rect UV dans l'atlas, teinte, semi-trans, **`fill`** : `none`/`horizontal`/`vertical` + `amount` (0..1) — les jauges à la Unity (barre de vie = Image *Filled*) ; sans texture = aplat coloré (Panel) |
+| `image` | Image | texture + rect UV dans l'atlas (le « sprite »), teinte, semi-trans, et **`type`** — les quatre Image Types de Unity, voir ci-dessous ; sans texture = aplat coloré (Panel) |
 | `text` | Text | police, chaîne, teinte, alignement |
 | `button` | Button | focusable, états normal/focus (teinte ou UV alternatives), voisins de navigation D-pad |
 | `layout` | Vertical/Horizontal **Layout Group** | `axis` : `vertical`/`horizontal`, `padding` [g, h, d, b], `spacing`, `child_align` (9 positions), `expand_w`/`expand_h` |
+
+### Le composant Image : les quatre types de Unity
+
+Comme dans l'inspecteur Unity, une Image a un **Image Type** :
+
+| `type` | Unity | Rendu console | Propriétés |
+|---|---|---|---|
+| `simple` | Simple | 1 `SPRT` à la taille du sprite, ou 1 `POLY_FT4` si le rect étire le sprite | — |
+| `sliced` | Sliced (9-slice) | 9 primitives : 4 coins `SPRT` intacts, bords et centre étirés (`POLY_FT4`) | `border` [g, h, d, b] en texels — les marges insécables du sprite (cadres de fenêtres, panneaux redimensionnables) |
+| `tiled` | Tiled | grille de `SPRT` répétant le sprite (très économe : pas de GTE) | — |
+| `filled` | Filled | `SPRT`/`POLY_FT4` tronqué + UV recadrées | `fill` : `horizontal`/`vertical`, `amount` (0..1) — les jauges (barre de vie) ; `Ui_SetFill()` par script |
+
+Le « sprite » est un rect UV dans l'atlas de la texture, choisi
+visuellement dans l'éditeur (avec les poignées de `border` pour le mode
+`sliced`, comme le Sprite Editor).
 
 Un composant `layout` fait de l'entité un conteneur qui **range ses
 enfants lui-même** : leurs ancres/positions sont ignorées et
@@ -100,7 +115,7 @@ le contrôle des RectTransforms enfants. La taille de chaque enfant
 reste la sienne, sauf `expand_w`/`expand_h` qui remplit l'axe croisé.
 
 Volontairement pas en v1 (permis par le format via flags/réservés) :
-Grid Layout Group, Content Size Fitter, 9-slice, scroll, masques,
+Grid Layout Group, Content Size Fitter, fill radial, scroll, masques,
 animations. Ajoutés quand un vrai besoin les tire.
 
 ### Dans le `scene.json` (mêmes entités, nouveaux composants)
@@ -117,13 +132,15 @@ animations. Ajoutés quand un vrai besoin les tire.
     { "name": "vie", "parent": "vie_fond",
       "rect": { "anchor_min": [0, 0], "anchor_max": [1, 1],
                 "position": [2, 2], "size": [2, 2] },
-      "image": { "color": [200, 40, 40], "fill": "horizontal", "amount": 1.0 } },
+      "image": { "color": [200, 40, 40], "type": "filled",
+                 "fill": "horizontal", "amount": 1.0 } },
 
     { "name": "menu_pause", "canvas": true, "active": false },
     { "name": "menu", "parent": "menu_pause",
       "rect": { "anchor_min": [0.5, 0.5], "anchor_max": [0.5, 0.5],
                 "pivot": [0.5, 0.5], "position": [0, 0], "size": [120, 90] },
-      "image": { "color": [16, 16, 40] },
+      "image": { "texture": "hud_atlas", "uv": [64, 0, 24, 24],
+                 "type": "sliced", "border": [8, 8, 8, 8] },
       "layout": { "axis": "vertical", "padding": [6, 6, 6, 6],
                   "spacing": 4, "child_align": "top-center", "expand_w": true } },
     { "name": "btn_jouer", "parent": "menu",
@@ -150,23 +167,26 @@ enregistrement de composants par entité UI :
 ```
 0x00 u16  entity          (index dans la table d'entités)
 0x02 u8   components      (bits : canvas, image, text, button, layout, actif)
-0x03 u8   flags           (semi-trans, fill h/v, axe du layout, expand…)
+0x03 u8   flags           (semi-trans, type d'image ×4, fill h/v, axe du layout, expand…)
 0x04 u16  anchor_min_x    0x06 u16  anchor_min_y     (4.12)
 0x08 u16  anchor_max_x    0x0A u16  anchor_max_y
 0x0C u16  pivot_x         0x0E u16  pivot_y
 0x10 i16  pos_x           0x12 i16  pos_y
 0x14 i16  size_w          0x16 i16  size_h
 0x18 u8   r, g, b         0x1B u8   asset            (texture ou police)
-0x1C u16  data            (rect UV packé / offset chaîne / amount 4.12)
+0x1C u16  data            (offset chaîne / amount 4.12)
 0x1E u16  extra           (nav focus / padding+spacing+align du layout)
+0x20 u8   uv_x, uv_y      0x22 u8  uv_w, uv_h        (le sprite, en texels)
+0x24 u8   border g, h, d, b                          (marges 9-slice, en texels)
 ```
 
-32 octets par widget, table + table de chaînes + polices embarquées
+40 octets par widget, table + table de chaînes + polices embarquées
 dans le blob scène. Rétrocompatible : offset/count dans les octets
 réservés restants de l'en-tête, un runtime ancien ignore la table (les
 entités UI n'ayant pas de modèle, il ne dessine rien). Le packing
-exact de `data`/`extra` et les `static_assert`/tests croisés seront
-fixés dans la spec `SCENE-FORMAT.md` au moment de l'implémentation.
+exact de `flags`/`data`/`extra` et les `static_assert`/tests croisés
+seront fixés dans la spec `SCENE-FORMAT.md` au moment de
+l'implémentation.
 
 ### Polices `.fnt`
 
@@ -218,11 +238,13 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
   verticale, Liste horizontale (préréglages prêts à l'emploi).
 - **Inspecteur** : sous un Canvas, la carte Transform est **remplacée
   par la carte RectTransform** (grille de presets d'ancres 3×3 + champs
-  min/max/pivot éditables, comme Unity) ; cartes Image (texture + rect
-  UV choisi visuellement dans l'atlas, fill + amount), Text (police,
-  texte, alignement), Button, Layout Group (axe, padding, spacing,
-  alignement) — retirables au ✕, ajoutables par « ＋ Ajouter un
-  composant ».
+  min/max/pivot éditables, comme Unity) ; cartes Image (texture +
+  sprite choisi visuellement dans l'atlas, sélecteur **Image Type**
+  Simple/Sliced/Tiled/Filled avec ses champs — poignées de `border`
+  sur l'aperçu du sprite en Sliced, fill + amount en Filled), Text
+  (police, texte, alignement), Button, Layout Group (axe, padding,
+  spacing, alignement) — retirables au ✕, ajoutables par « ＋ Ajouter
+  un composant ».
 - **Viewport** : les canvas actifs sont rendus en surimpression au
   pixel (320×240) par-dessus la 3D. Sélectionner une entité UI passe
   la manipulation en 2D : déplacement à la souris (snap 1px, Ctrl =
@@ -242,24 +264,28 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
   `.psc` (cache incrémental inchangé) ; les TIM d'UI passent par le
   packer VRAM (l'auto-4bpp fait le bon choix pour des atlas d'icônes) ;
 - `gen_project` ajoute une police de démo et, au village : un HUD
-  (vie en Image *Filled* + score) et un menu pause en layout vertical.
+  (vie en Image *Filled* + score) et un menu pause en layout vertical
+  sur fond *Sliced*.
 
 ## 9. Jalons de livraison
 
 1. **Fondations** : SceneFormat v1.3 (table UI + `.fnt`, writer Rust,
-   parsers TS/C, tests croisés), `font2fnt`, runtime `Ui_Draw` avec
-   RectTransform complet (ancres/pivot/étirement) + canvas/image (fill
-   compris)/text, HUD statique dans la démo. *Vérifiable au previewer
+   parsers TS/C, tests croisés — les 4 types d'image dans le format
+   dès le départ), `font2fnt`, runtime `Ui_Draw` avec RectTransform
+   complet (ancres/pivot/étirement) + canvas/image (*Simple* et
+   *Filled*)/text, HUD statique dans la démo. *Vérifiable au previewer
    + émulateur.*
-2. **Layout Groups + édition visuelle** : composant `layout` résolu
-   dans le runtime et l'éditeur, rendu des canvas dans le viewport,
-   cartes RectTransform/Image/Text dans l'inspecteur, manipulation 2D
-   à la souris, groupe UI dans le menu « ＋ ».
+2. **Layout Groups, Sliced/Tiled + édition visuelle** : composant
+   `layout` résolu dans le runtime et l'éditeur, rendu *Sliced*
+   (9 primitives) et *Tiled* (grille), rendu des canvas dans le
+   viewport, cartes RectTransform/Image (sélecteur d'Image Type +
+   poignées de border)/Text dans l'inspecteur, manipulation 2D à la
+   souris, groupe UI dans le menu « ＋ ».
 3. **Interactif** : Button + focus D-pad (navigation automatique dans
    les layouts), API scripts (`Ui_Get` + setters), le dialogue de démo
-   migré en canvas.
-4. **Confort** (au besoin) : Grid Layout, Content Size Fitter, 9-slice,
-   live tweaking des RectTransforms via la balise RAM.
+   migré en canvas (fond *Sliced*).
+4. **Confort** (au besoin) : Grid Layout, Content Size Fitter, fill
+   radial, live tweaking des RectTransforms via la balise RAM.
 
 ## 10. Questions ouvertes (à trancher en implémentant)
 

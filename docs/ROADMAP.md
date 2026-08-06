@@ -110,7 +110,8 @@ Composer HUD, menus et dialogues **comme dans Unity, pas comme
 Unreal** : l'UI vit dans la scène — le Canvas est une entité de la
 hiérarchie, les éléments UI sont des entités enfants à **composants**
 (RectTransform fidèle : ancres min/max + presets, pivot, étirement ;
-Image *Filled* pour les jauges ; Text ; Button ; **Layout Groups**
+Image avec les **4 Image Types de Unity** — Simple, Sliced 9-slice,
+Tiled, Filled pour les jauges ; Text ; Button ; **Layout Groups**
 verticaux/horizontaux qui rangent leurs enfants). Édition dans les
 panneaux existants (hiérarchie, inspecteur à cartes, viewport en
 surimpression 2D), sérialisation dans le `.psc` (SceneFormat v1.3,
