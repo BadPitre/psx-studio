@@ -49,6 +49,7 @@ function Hierarchy({
   onContextMenu,
   onModelDrop,
   onPrefabDrop,
+  onReorder,
 }: {
   scene: PscScene;
   names: string[];
@@ -61,6 +62,8 @@ function Hierarchy({
   onModelDrop?: (out: string) => void;
   /** Drop d'un prefab du panneau Project : l'instancier dans la scène. */
   onPrefabDrop?: (rel: string) => void;
+  /** Réordonner/reparenter par drag & drop interne (zone : before/after/into/root). */
+  onReorder?: (dragged: string, target: string | null, zone: "before" | "after" | "into" | "root") => void;
 }) {
   const depths = useMemo(() => {
     const d: number[] = [];
@@ -83,6 +86,14 @@ function Hierarchy({
     }
     return false;
   };
+  /* Drag & drop interne : zone visée sur la ligne survolée (Unity :
+     haut = insérer avant, milieu = devenir enfant, bas = insérer après). */
+  const [dragOver, setDragOver] = useState<{ i: number; zone: "before" | "after" | "into" } | null>(null);
+  const zoneOf = (ev: React.DragEvent): "before" | "after" | "into" => {
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const y = (ev.clientY - r.top) / r.height;
+    return y < 0.25 ? "before" : y > 0.75 ? "after" : "into";
+  };
 
   return (
     <div
@@ -101,6 +112,12 @@ function Hierarchy({
         if (onPrefabDrop && prefab) {
           e.preventDefault();
           onPrefabDrop(prefab);
+          return;
+        }
+        const dragged = e.dataTransfer.getData("text/psx-entity");
+        if (onReorder && dragged) {
+          e.preventDefault();
+          onReorder(dragged, null, "root");
         }
       }}
     >
@@ -129,12 +146,29 @@ function Hierarchy({
       {scene.entities.map((e, i) => isHidden(i) ? null : (
         <div
           key={i}
-          className={`tree-item ${selected === i ? "selected" : ""}`}
+          className={`tree-item ${selected === i ? "selected" : ""} ${
+            dragOver?.i === i ? `drop-${dragOver.zone}` : ""
+          }`}
           style={{ paddingLeft: 8 + depths[i] * 16 }}
           draggable
           onDragStart={(ev) =>
             ev.dataTransfer.setData("text/psx-entity", names[i] ?? String(i))
           }
+          onDragOver={(ev) => {
+            if (!onReorder) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            setDragOver({ i, zone: zoneOf(ev) });
+          }}
+          onDragLeave={() => setDragOver((d) => (d?.i === i ? null : d))}
+          onDrop={(ev) => {
+            setDragOver(null);
+            const dragged = ev.dataTransfer.getData("text/psx-entity");
+            if (!onReorder || !dragged || dragged === names[i]) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            onReorder(dragged, names[i], zoneOf(ev));
+          }}
           onClick={() => onSelect(i)}
           onContextMenu={(ev) => {
             if (!onContextMenu) return;
@@ -1455,6 +1489,71 @@ export default function App() {
     [mutateDoc, uniqueName, sceneDoc, selected, entityNames],
   );
 
+  /* Réordonnancement de la hiérarchie (drag & drop interne) : le
+     sous-arbre déplacé garde son ordre, la parenté et la position dans
+     le tableau changent — l'ordre du tableau EST l'ordre de dessin des
+     enfants d'un Layout Group. Garde-fou : pas de drop dans son propre
+     sous-arbre. */
+  const reorderEntity = useCallback(
+    (dragged: string, target: string | null, zone: "before" | "after" | "into" | "root") => {
+      if (!sceneDoc) return;
+      mutateDoc((doc) => {
+        const all = doc.entities ?? [];
+        const picked = new Set<string>([dragged]);
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const e of all) {
+            if (e.parent && picked.has(e.parent as string) && !picked.has(e.name as string)) {
+              picked.add(e.name as string);
+              grew = true;
+            }
+          }
+        }
+        if (target && picked.has(target)) return;
+        const subtree = all.filter((e) => picked.has(e.name as string));
+        const rest = all.filter((e) => !picked.has(e.name as string));
+        const rootEnt = subtree.find((e) => e.name === dragged);
+        if (!rootEnt) return;
+        // Index juste après le sous-arbre complet de `name` dans `rest`.
+        const subtreeEnd = (name: string) => {
+          const set = new Set<string>([name]);
+          let g = true;
+          while (g) {
+            g = false;
+            for (const e of rest) {
+              if (e.parent && set.has(e.parent as string) && !set.has(e.name as string)) {
+                set.add(e.name as string);
+                g = true;
+              }
+            }
+          }
+          let last = rest.findIndex((e) => e.name === name);
+          rest.forEach((e, idx) => {
+            if (set.has(e.name as string)) last = Math.max(last, idx);
+          });
+          return last + 1;
+        };
+        if (zone === "root" || !target) {
+          delete rootEnt.parent;
+          rest.push(...subtree);
+        } else if (zone === "into") {
+          rootEnt.parent = target;
+          rest.splice(subtreeEnd(target), 0, ...subtree);
+        } else {
+          const tEnt = rest.find((e) => e.name === target);
+          if (tEnt?.parent) rootEnt.parent = tEnt.parent as string;
+          else delete rootEnt.parent;
+          const idx =
+            zone === "before" ? rest.findIndex((e) => e.name === target) : subtreeEnd(target);
+          rest.splice(idx, 0, ...subtree);
+        }
+        doc.entities = rest;
+      }, dragged);
+    },
+    [sceneDoc, mutateDoc],
+  );
+
   const duplicateEntity = useCallback(() => {
     if (selected < 0) return;
     const srcName = entityNames[selected];
@@ -2088,6 +2187,7 @@ export default function App() {
                 isTauri && sceneDoc ? (out) => addModelEntity(out, [0, 0, 0]) : undefined
               }
               onPrefabDrop={isTauri && sceneDoc ? instantiatePrefab : undefined}
+              onReorder={isTauri && sceneDoc ? reorderEntity : undefined}
             />
             {addMenu && (
               <ContextMenu

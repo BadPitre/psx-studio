@@ -583,3 +583,8 @@ body {
  * avec le contenu) : borner la ligne unique de .layout à la hauteur
  * disponible est ce qui permet aux panneaux de scroller en interne. */
 .layout { grid-template-rows: minmax(0, 1fr); }
+
+/* Zones de drop du réordonnancement de la hiérarchie. */
+.tree-item.drop-into { outline: 1px dashed var(--accent); outline-offset: -1px; }
+.tree-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.tree-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
