@@ -124,7 +124,14 @@ fn build_scene(
             .map(|p| p.to_path_buf())
             .unwrap_or(project)
     };
-    let (psc, report) = psxpipe::scene::build(&scene, &base)?;
+    let (psc, report) = psxpipe::scene::build_with_options(
+        &scene,
+        &base,
+        &psxpipe::scene::BuildOptions {
+            prefab_dir: Some(PathBuf::from(&project_dir)),
+            ..Default::default()
+        },
+    )?;
     Ok(BuiltScene {
         psc,
         entity_names: report.entity_names,

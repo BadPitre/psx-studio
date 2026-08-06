@@ -332,7 +332,14 @@ pub fn build(project_dir: &Path, force: bool) -> Result<BuildReport, String> {
         let scene_json: scene::SceneJson =
             serde_json::from_str(&scene_text).map_err(|e| format!("{scene_rel}: {e}"))?;
         let (bytes, scene_report) =
-            scene::build_with_options(&scene_json, &library, &scene::BuildOptions::default())?;
+            scene::build_with_options(
+                &scene_json,
+                &library,
+                &scene::BuildOptions {
+                    prefab_dir: Some(project_dir.to_path_buf()),
+                    ..Default::default()
+                },
+            )?;
         std::fs::write(build_dir.join(format!("SCENE{i}.PSC")), &bytes)
             .map_err(|e| e.to_string())?;
 

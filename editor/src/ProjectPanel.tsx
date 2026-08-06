@@ -78,6 +78,7 @@ export function ProjectPanel({
   logs,
   currentScenePath,
   onOpenScene,
+  onOpenPrefab,
   onImport,
   onCreateScene,
   onCreateFolder,
@@ -92,6 +93,8 @@ export function ProjectPanel({
   currentScenePath: string;
   /** Ouvre une scène (chemin relatif projet). */
   onOpenScene: (path: string) => void;
+  /** Ouvre un prefab en Prefab Mode (édition isolée). */
+  onOpenPrefab?: (path: string) => void;
   /** (Ré)importe un asset gltf/glb/png (chemin relatif projet). */
   onImport: (path: string) => void;
   onCreateScene: (name: string) => void;
@@ -150,6 +153,7 @@ export function ProjectPanel({
       setSelectedDir(f.path);
       setExpanded((s) => new Set(s).add(f.path));
     } else if (f.kind === "scene" && f.exists) onOpenScene(f.path);
+    else if (f.kind === "prefab" && f.exists && onOpenPrefab) onOpenPrefab(f.path);
     else if (importable(f) && !f.registered) onImport(f.path);
   };
 
@@ -168,6 +172,11 @@ export function ProjectPanel({
     const actions: MenuAction[] = [];
     if (f.kind === "scene" && f.exists)
       actions.push({ label: "Ouvrir", onClick: () => onOpenScene(f.path) });
+    if (f.kind === "prefab" && f.exists && onOpenPrefab)
+      actions.push({
+        label: "🧩 Ouvrir (Prefab Mode)",
+        onClick: () => onOpenPrefab(f.path),
+      });
     if (importable(f))
       actions.push({
         label: f.registered ? "Réimporter" : "Importer dans le projet",

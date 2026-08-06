@@ -60,6 +60,12 @@ Conventions :
 - `parent` : nom d'une autre entité (absent/null = racine). Les cycles sont
   rejetés ; le sérialiseur trie parents avant enfants.
 - `model` : absent = entité vide (nœud de hiérarchie pur).
+- `prefab` (éditeur/pipeline, optionnel) : chemin d'un
+  `prefabs/<nom>.json` (même schéma, une seule racine). Le build
+  **inline** son sous-arbre à la place de l'entité : la racine prend
+  nom/parent/transform/`active` de l'instance, les enfants deviennent
+  `instance.enfant`, les assets sont fusionnés (dédupliqués par id).
+  Le `.psc` n'en garde aucune trace ; prefabs imbriqués rejetés (v1).
 - `light_dir` : direction de **propagation** de la lumière en espace monde
   (le pipeline la normalise et stocke le vecteur *vers* la source, prêt pour
   la matrice lumière GTE).

@@ -29,7 +29,7 @@ fn default_scale() -> [f32; 3] {
     [1.0, 1.0, 1.0]
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct SceneJson {
     pub name: String,
@@ -39,7 +39,7 @@ pub struct SceneJson {
     pub entities: Vec<EntityJson>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     #[serde(default = "Settings::default_background")]
@@ -78,7 +78,7 @@ impl Default for Settings {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Assets {
     #[serde(default)]
@@ -89,14 +89,14 @@ pub struct Assets {
     pub fonts: Vec<FontJson>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct TextureJson {
     pub id: String,
     pub tim: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ModelJson {
     pub id: String,
@@ -105,7 +105,7 @@ pub struct ModelJson {
     pub texture: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct EntityJson {
     pub name: String,
@@ -137,6 +137,13 @@ pub struct EntityJson {
     /// degrés ; défaut 74 ≈ la projection PS1 native, h = 160).
     #[serde(default)]
     pub camera: CameraJson,
+    /// Référence de prefab : l'entité est remplacée au build par le
+    /// sous-arbre de `prefabs/<nom>.json` (assets fusionnés, enfants
+    /// nommés `<instance>.<enfant>`) — la console ne voit que des
+    /// entités ordinaires. La transform de l'instance s'applique à la
+    /// racine du prefab.
+    #[serde(default)]
+    pub prefab: Option<String>,
     /* Composants UI (v1.3, docs/UI-SYSTEM.md) — philosophie uGUI : le
      * canvas est une entité, ses enfants portent RectTransform + Image/
      * Text/Button/Layout. */
@@ -354,16 +361,19 @@ pub struct SceneReport {
     pub entity_names: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BuildOptions {
     /// Repack textures into VRAM automatically (default). When false, the
     /// placements baked into the TIM files are kept as-is.
     pub pack_vram: bool,
+    /// Dossier de résolution des références de prefab (le dossier projet,
+    /// en général). Absent : résolues relativement à `base_dir`.
+    pub prefab_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for BuildOptions {
     fn default() -> Self {
-        BuildOptions { pack_vram: true }
+        BuildOptions { pack_vram: true, prefab_dir: None }
     }
 }
 
@@ -451,11 +461,110 @@ pub fn build(scene: &SceneJson, base_dir: &Path) -> Result<(Vec<u8>, SceneReport
     build_with_options(scene, base_dir, &BuildOptions::default())
 }
 
+/// Résout les références de prefab d'une scène : chaque entité portant
+/// `"prefab"` est remplacée par le sous-arbre du fichier (même schéma
+/// qu'une scène). Les assets sont fusionnés (dédupliqués par id), la
+/// racine du prefab prend le nom, le parent et la transform de
+/// l'instance, les enfants sont nommés `<instance>.<enfant>` — la
+/// console ne connaît pas les prefabs, tout est inliné.
+pub fn resolve_prefabs(
+    scene: &SceneJson,
+    base_dir: &Path,
+    options: &BuildOptions,
+) -> Result<SceneJson, String> {
+    let mut out = scene.clone();
+    out.entities.clear();
+    for e in &scene.entities {
+        let Some(rel) = &e.prefab else {
+            out.entities.push(e.clone());
+            continue;
+        };
+        let dir = options.prefab_dir.as_deref().unwrap_or(base_dir);
+        let path = dir.join(rel);
+        let text = std::fs::read_to_string(&path)
+            .map_err(|err| format!("prefab '{}': cannot read {}: {err}", e.name, path.display()))?;
+        let prefab: SceneJson =
+            serde_json::from_str(&text).map_err(|err| format!("prefab {rel}: {err}"))?;
+        if prefab.entities.iter().any(|x| x.prefab.is_some()) {
+            return Err(format!("prefab {rel}: prefabs imbriqués non supportés (v1)"));
+        }
+        let roots: Vec<usize> = prefab
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.parent.is_none())
+            .map(|(i, _)| i)
+            .collect();
+        if roots.len() != 1 {
+            return Err(format!(
+                "prefab {rel}: une seule entité racine attendue ({} trouvées)",
+                roots.len()
+            ));
+        }
+        for m in prefab.assets.models {
+            if !out.assets.models.iter().any(|x| x.id == m.id) {
+                out.assets.models.push(m);
+            }
+        }
+        for t in prefab.assets.textures {
+            if !out.assets.textures.iter().any(|x| x.id == t.id) {
+                out.assets.textures.push(t);
+            }
+        }
+        for f in prefab.assets.fonts {
+            if !out.assets.fonts.iter().any(|x| x.id == f.id) {
+                out.assets.fonts.push(f);
+            }
+        }
+        // Renommage : racine -> nom de l'instance, enfants préfixés.
+        let rename: HashMap<String, String> = prefab
+            .entities
+            .iter()
+            .enumerate()
+            .map(|(i, x)| {
+                let new = if i == roots[0] {
+                    e.name.clone()
+                } else {
+                    format!("{}.{}", e.name, x.name)
+                };
+                (x.name.clone(), new)
+            })
+            .collect();
+        for (i, mut pe) in prefab.entities.into_iter().enumerate() {
+            pe.name = rename[&pe.name].clone();
+            if i == roots[0] {
+                pe.parent = e.parent.clone();
+                pe.position = e.position;
+                pe.rotation = e.rotation;
+                pe.scale = e.scale;
+                if e.active == Some(false) {
+                    pe.active = Some(false);
+                }
+            } else if let Some(p) = &pe.parent {
+                pe.parent = Some(
+                    rename
+                        .get(p)
+                        .cloned()
+                        .ok_or_else(|| format!("prefab {rel}: parent '{p}' inconnu"))?,
+                );
+            }
+            out.entities.push(pe);
+        }
+    }
+    Ok(out)
+}
+
 pub fn build_with_options(
     scene: &SceneJson,
     base_dir: &Path,
     options: &BuildOptions,
 ) -> Result<(Vec<u8>, SceneReport), String> {
+    // Références de prefab : expansion avant tout (une passe, sans
+    // récursion — les prefabs imbriqués sont refusés en v1).
+    if scene.entities.iter().any(|e| e.prefab.is_some()) {
+        let expanded = resolve_prefabs(scene, base_dir, options)?;
+        return build_with_options(&expanded, base_dir, options);
+    }
     let mut report = SceneReport {
         name: scene.name.clone(),
         ..Default::default()

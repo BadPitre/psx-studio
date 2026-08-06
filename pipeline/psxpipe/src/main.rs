@@ -248,6 +248,7 @@ fn run(cli: Cli) -> Result<(), String> {
         } => {
             let options = scene::BuildOptions {
                 pack_vram: !keep_vram,
+                ..Default::default()
             };
             let (bytes, report) = scene::build_file_with_options(&input, &options)?;
             let out = output.unwrap_or_else(|| input.with_extension("psc"));

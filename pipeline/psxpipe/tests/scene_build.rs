@@ -79,7 +79,10 @@ fn vram_overlap_rejected_without_packing() {
     std::fs::copy(dir.path().join("checker.tim"), dir.path().join("house.tim")).unwrap();
     let json_path = dir.path().join("scene0.json");
     std::fs::write(&json_path, samples::scene_village_json()).unwrap();
-    let opts = scene::BuildOptions { pack_vram: false };
+    let opts = scene::BuildOptions {
+        pack_vram: false,
+        ..Default::default()
+    };
     let err = scene::build_file_with_options(&json_path, &opts).unwrap_err();
     assert!(err.contains("VRAM overlap"), "unexpected error: {err}");
 }
@@ -374,4 +377,59 @@ fn ui_table_fonts_and_strings() {
     let info = psxpipe::fnt::parse(fnt).unwrap();
     assert_eq!((info.cell_w, info.cell_h), (6, 8));
     assert_eq!(psxpipe::fnt::advances(fnt)[(b'I' - 32) as usize], 5);
+}
+
+#[test]
+fn prefab_reference_is_inlined() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    std::fs::create_dir_all(dir.path().join("prefabs")).unwrap();
+    // Prefab : un panneau UI avec un texte enfant.
+    std::fs::write(
+        dir.path().join("prefabs/pancarte.json"),
+        r#"{
+          "name": "pancarte",
+          "assets": { "textures": [], "models": [],
+                      "fonts": [{ "id": "main", "fnt": "main.fnt" }] },
+          "entities": [
+            { "name": "racine", "canvas": true },
+            { "name": "libelle", "parent": "racine",
+              "rect": { "size": [80, 10] },
+              "text": { "font": "main", "text": "SALUT" } }
+          ]
+        }"#,
+    )
+    .unwrap();
+    let json = r#"{
+      "name": "avec-prefab",
+      "assets": { "textures": [], "models": [{ "id": "cube", "pmd": "cube.pmd" }] },
+      "entities": [
+        { "name": "decor", "model": "cube" },
+        { "name": "hud", "prefab": "prefabs/pancarte.json" }
+      ]
+    }"#;
+    let scene: scene::SceneJson = serde_json::from_str(json).unwrap();
+    let opts = scene::BuildOptions {
+        prefab_dir: Some(dir.path().to_path_buf()),
+        ..Default::default()
+    };
+    let (bytes, report) = scene::build_with_options(&scene, dir.path(), &opts).unwrap();
+    // L'instance est remplacee : racine renommee "hud", enfant prefixe.
+    assert_eq!(report.entity_names, vec!["decor", "hud", "hud.libelle"]);
+    let h = scene::parse_header(&bytes).unwrap();
+    assert_eq!((h.entity_count, h.ui_count, h.font_count), (3, 2, 1));
+    // La police du prefab a bien ete fusionnee et embarquee.
+    let ui = scene::parse_ui(&bytes, &h);
+    assert_eq!(ui[1].components & (1 << 2), 1 << 2);
+    // Prefabs imbriques refuses.
+    std::fs::write(
+        dir.path().join("prefabs/meta.json"),
+        r#"{ "name": "meta", "assets": { "models": [] },
+             "entities": [{ "name": "r", "prefab": "prefabs/pancarte.json" }] }"#,
+    )
+    .unwrap();
+    let json2 = json.replace("prefabs/pancarte.json", "prefabs/meta.json");
+    let scene2: scene::SceneJson = serde_json::from_str(&json2).unwrap();
+    let err = scene::build_with_options(&scene2, dir.path(), &opts).unwrap_err();
+    assert!(err.contains("imbriqu"), "{err}");
 }

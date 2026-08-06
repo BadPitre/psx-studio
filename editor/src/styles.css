@@ -592,3 +592,15 @@ body {
 /* Barre des presets de vue (3D / Dessus / Face / Côté / Canvas UI). */
 .angle-bar { left: 10px; transform: none; }
 .angle-bar button { width: auto; min-width: 30px; padding: 0 6px; font-size: 12px; }
+
+/* Instances de prefab dans la hiérarchie (bleu, comme Unity). */
+.tree-item.prefab-item { color: #7fb2ff; }
+.tree-item.prefab-item .tree-meta { color: #5b7db3; }
+
+/* Fil d'Ariane du Prefab Mode (barre d'outils). */
+.prefab-crumb { display: inline-flex; align-items: center; gap: 8px; }
+.prefab-crumb-name { color: #7fb2ff; font-weight: 600; white-space: nowrap; }
+
+/* Carte Prefab de l'inspecteur (racine d'instance). */
+.component-card.prefab-card { border-left: 2px solid #7fb2ff; }
+.prefab-card .button { margin-top: 6px; }

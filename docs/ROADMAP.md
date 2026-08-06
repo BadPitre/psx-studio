@@ -132,14 +132,22 @@ l'utiliseront plus tard.
 dérivés des réservés ; font2fnt + police de démo 5×7 ; Ui_Draw en
 OT[0] : rects 4.12, aplats, Image Filled, texte aligné ; HUD village
 et champ ; parsers TS/C + previewer en parité, testés),
-jalon 2 **en cours** (livré : calque HUD du viewport, mode Canvas
-dédié — vue séparée, fond damier, sélection + déplacement souris —,
-cartes RectTransform/Canvas/Image/Text, menu ＋ UI, conversion auto de
-Library/, resize du panneau Project, **Layout Groups**
-verticaux/horizontaux dans toute la pile avec la boîte d'aide de démo ;
-reste : Sliced/Tiled), puis prefabs UI + Prefab Mode, interactif
-(boutons/focus/API scripts), confort (Grid Layout, fill radial, live
-tweaking, overrides avancés).
+~~jalon 2 (édition dans l'éditeur)~~ — **livré** (calque HUD du
+viewport, mode Canvas dédié — vue séparée, fond damier, sélection +
+déplacement souris —, cartes RectTransform/Canvas/Image/Text, menu ＋
+UI, conversion auto de Library/, resize du panneau Project, **Layout
+Groups** verticaux/horizontaux et **Sliced/Tiled** dans toute la
+pile),
+~~jalon 3 (prefabs vivants + Prefab Mode)~~ — **livré** (référence
+`{ "prefab": "prefabs/x.json" }` dans la scène, inlinée au build par
+psxpipe — assets fusionnés, enfants `instance.enfant`, racine qui
+prend transform/nom/parent de l'instance, prefabs imbriqués rejetés ;
+instances en **bleu** 🧩 dans la hiérarchie, enfants en lecture seule,
+carte Prefab dans l'inspecteur ; **Prefab Mode** : ouverture isolée
+d'un prefab depuis le panneau Project ou l'inspecteur, fil d'Ariane
+`‹ scène 🧩 prefab`, sauvegarde = toutes les scènes suivent),
+puis interactif (boutons/focus/API scripts), confort (Grid Layout,
+fill radial, live tweaking, overrides avancés).
 
 ## Divers (good first issues, voir CONTRIBUTING.md)
 

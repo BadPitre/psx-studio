@@ -236,38 +236,43 @@ void Ui_SetTint(UiWidget* w, uint8_t r, uint8_t g, uint8_t b);
 - **Live tweaking** : les widgets étant des entités, la balise RAM
   existante s'étend naturellement aux RectTransforms (jalon 4).
 
-## 7. Prefabs UI (réutiliser entre les scènes)
+## 7. Prefabs UI (réutiliser entre les scènes) — **livré**
 
 Comme dans Unity, un canvas ne vit **pas forcément dans une scène** :
 il peut être sauvegardé en **Prefab** et réutilisé partout.
 
 - **Fichier** : `prefabs/<nom>.json` — le même schéma d'entités que le
-  `scene.json` (un sous-arbre avec une racine, ici typiquement un
-  canvas), plus ses besoins d'assets (textures, polices). Un prefab se
-  crée depuis la hiérarchie : clic droit sur un canvas →
-  « Sauvegarder comme prefab » — ou depuis le panneau Project :
-  « Créer ▸ Prefab UI » (le sous-menu Créer l'attendait).
+  `scene.json` (un sous-arbre avec **exactement une racine**, ici
+  typiquement un canvas), plus ses besoins d'assets (modèles,
+  textures, polices). Un prefab se crée en glissant une entité de la
+  hiérarchie vers le panneau Project (le sous-arbre + ses assets sont
+  emportés).
 - **Instance dans une scène** : une entité-référence
-  `{ "name": "hud", "prefab": "prefabs/hud.json" }`. Dans la
-  hiérarchie, l'instance apparaît **en bleu** (convention Unity) avec
-  son contenu en lecture seule ; modifier le prefab met à jour toutes
-  les scènes qui l'utilisent.
+  `{ "name": "hud", "prefab": "prefabs/hud.json" }` — créée en
+  glissant le prefab du panneau Project vers la hiérarchie. La racine
+  du prefab prend le nom, le parent, le transform et l'état `actif` de
+  l'instance ; les enfants sont nommés `hud.enfant`. Dans la
+  hiérarchie, l'instance apparaît **en bleu** 🧩 (convention Unity),
+  ses enfants en lecture seule (l'inspecteur renvoie vers le prefab) ;
+  modifier le prefab met à jour toutes les scènes qui l'utilisent.
 - **Résolution au build** : psxpipe **inline** le sous-arbre du prefab
-  dans le `.psc` de chaque scène qui l'instancie (entités aplaties,
-  assets fusionnés/dédupliqués). **La console ne connaît pas les
+  dans le `.psc` de chaque scène qui l'instancie
+  (`scene::resolve_prefabs` : entités aplaties, assets
+  fusionnés/dédupliqués par id). **La console ne connaît pas les
   prefabs** — le runtime voit des entités UI ordinaires, le format
-  v1.3 ne change pas. Tout le mécanisme est éditeur + pipeline.
-- **Prefab Mode** (édition isolée, son propre viewport) : double-clic
-  sur le prefab dans le panneau Project (ou sur une instance dans la
-  hiérarchie) → l'éditeur bascule en mode isolé, comme Unity : le
-  viewport ne montre **que** le prefab (fond damier neutre ou la scène
-  estompée derrière), la hiérarchie ne montre que son sous-arbre, un
-  **fil d'Ariane** (`scène ‹ hud.prefab`) ramène à la scène.
-  Sauvegarder écrit le fichier prefab ; toutes les instances suivent.
-- **Overrides d'instance (v1 minimal)** : l'instance peut surcharger
-  l'état `actif` de sa racine et son ordre dans la hiérarchie — pas de
-  surcharge par enfant en v1 (noté en question ouverte, comme le
-  « revert/apply » de Unity).
+  v1.3 ne change pas. Les **prefabs imbriqués sont rejetés** en v1
+  (erreur claire au build).
+- **Prefab Mode** (édition isolée) : double-clic sur le prefab dans le
+  panneau Project (ou « Ouvrir le prefab » depuis l'inspecteur d'une
+  instance) → l'éditeur ouvre le prefab **seul** : la hiérarchie ne
+  montre que son sous-arbre, le viewport/mode Canvas l'édite comme une
+  scène, un **fil d'Ariane** (`‹ scène 🧩 prefab (Prefab Mode)`)
+  ramène à la scène. Sauvegarder écrit le fichier prefab ; toutes les
+  instances suivent au rebuild.
+- **Overrides d'instance (v1 minimal)** : l'instance surcharge le
+  transform, le nom, le parent et l'état `actif` de sa racine, et son
+  ordre dans la hiérarchie — pas de surcharge par enfant en v1 (noté
+  en question ouverte, comme le « revert/apply » de Unity).
 
 Le mécanisme (fichier d'entités + inline au build + mode isolé) est
 volontairement **générique** : les prefabs 3D (une maison + ses

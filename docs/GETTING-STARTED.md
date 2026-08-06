@@ -135,6 +135,14 @@ de triangles — surveille l'avertissement de budget.)
   l'instancie** comme entité à l'endroit visé (dans la hiérarchie : à
   l'origine). L'onglet **Console** à côté garde le journal des imports,
   builds et erreurs.
+- **Prefabs** (comme Unity) : glisse une entité de la hiérarchie vers
+  le panneau Project → elle devient un `prefabs/<nom>.json`
+  réutilisable. Glisse le prefab dans la hiérarchie d'une scène → une
+  **instance liée** (en bleu 🧩) : la scène ne stocke qu'une référence,
+  le contenu est incorporé au build. Double-clic sur le prefab (ou
+  « Ouvrir le prefab » dans l'inspecteur) → **Prefab Mode** : édition
+  isolée avec fil d'Ariane « ‹ scène » ; sauvegarde = toutes les scènes
+  qui l'utilisent suivent.
 - **▶ Play** : build incrémental + PCSX-Redux. Pendant que le jeu tourne,
   déplacer une entité (gizmo ou inspecteur) **l'écrit dans la RAM
   console** : le décor bouge dans le jeu, sans rebuild.

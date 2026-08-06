@@ -50,6 +50,8 @@ function Hierarchy({
   onModelDrop,
   onPrefabDrop,
   onReorder,
+  prefabRoots,
+  docNames,
 }: {
   scene: PscScene;
   names: string[];
@@ -64,6 +66,10 @@ function Hierarchy({
   onPrefabDrop?: (rel: string) => void;
   /** Réordonner/reparenter par drag & drop interne (zone : before/after/into/root). */
   onReorder?: (dragged: string, target: string | null, zone: "before" | "after" | "into" | "root") => void;
+  /** Racines d'instances de prefab (nom → chemin du prefab). */
+  prefabRoots?: Map<string, string>;
+  /** Noms présents dans le scene.json — les absents sont des enfants d'instance. */
+  docNames?: Set<string> | null;
 }) {
   const depths = useMemo(() => {
     const d: number[] = [];
@@ -143,19 +149,26 @@ function Hierarchy({
           </span>
         </div>
       )}
-      {scene.entities.map((e, i) => isHidden(i) ? null : (
+      {scene.entities.map((e, i) => {
+        if (isHidden(i)) return null;
+        /* Instances de prefab (bleu, comme Unity) : la racine porte la
+           référence, les enfants viennent du prefab (lecture seule). */
+        const name = names[i];
+        const isPrefabRoot = Boolean(name && prefabRoots?.has(name));
+        const isPrefabChild = Boolean(name && docNames && !docNames.has(name));
+        return (
         <div
           key={i}
           className={`tree-item ${selected === i ? "selected" : ""} ${
             dragOver?.i === i ? `drop-${dragOver.zone}` : ""
-          }`}
+          } ${isPrefabRoot || isPrefabChild ? "prefab-item" : ""}`}
           style={{ paddingLeft: 8 + depths[i] * 16 }}
-          draggable
+          draggable={!isPrefabChild}
           onDragStart={(ev) =>
             ev.dataTransfer.setData("text/psx-entity", names[i] ?? String(i))
           }
           onDragOver={(ev) => {
-            if (!onReorder) return;
+            if (!onReorder || isPrefabChild) return;
             ev.preventDefault();
             ev.stopPropagation();
             setDragOver({ i, zone: zoneOf(ev) });
@@ -164,7 +177,7 @@ function Hierarchy({
           onDrop={(ev) => {
             setDragOver(null);
             const dragged = ev.dataTransfer.getData("text/psx-entity");
-            if (!onReorder || !dragged || dragged === names[i]) return;
+            if (!onReorder || isPrefabChild || !dragged || dragged === names[i]) return;
             ev.preventDefault();
             ev.stopPropagation();
             onReorder(dragged, names[i], zoneOf(ev));
@@ -193,14 +206,15 @@ function Hierarchy({
             {hasChildren[i] ? (folded.has(i) ? "▸" : "▾") : ""}
           </span>
           <span className="tree-icon">
-            {e.flags & 1 ? "☀" : e.flags & 2 ? "🎥" : e.flags & 8 ? "▦" : e.model >= 0 ? "▣" : "○"}
+            {isPrefabRoot ? "🧩" : e.flags & 1 ? "☀" : e.flags & 2 ? "🎥" : e.flags & 8 ? "▦" : e.model >= 0 ? "▣" : "○"}
           </span>
           {names[i] ?? `entité ${i}`}
           {e.model >= 0 && (
             <span className="tree-meta">{scene.models[e.model].prims.length} tris</span>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -674,6 +688,8 @@ function Inspector({
   uiJson,
   onUiMutate,
   focusNameSignal,
+  prefabSource,
+  onOpenPrefab,
 }: {
   scene: PscScene;
   name: string;
@@ -706,6 +722,9 @@ function Inspector({
   uiJson?: Record<string, unknown> | null;
   onUiMutate?: (mut: (e: Record<string, unknown>) => void, histKey?: string) => void;
   focusNameSignal?: number;
+  /** Racine d'instance de prefab : chemin du prefab source. */
+  prefabSource?: string | null;
+  onOpenPrefab?: (rel: string) => void;
 }) {
   const entity = scene.entities[selected];
   const toDeg = (u: number) => Math.round((u / 4096) * 3600) / 10;
@@ -750,6 +769,24 @@ function Inspector({
       ) : (
         <div className="field-group">
           <div className="field-readonly">{name}</div>
+        </div>
+      )}
+      {/* Racine d'instance : la scène ne stocke qu'une référence — seul le
+          transform de la racine appartient à la scène, le reste au prefab. */}
+      {prefabSource && (
+        <div className="component-card prefab-card">
+          <div className="component-head">
+            <span className="component-title">🧩 Prefab</span>
+          </div>
+          <div className="field-readonly">{prefabSource}</div>
+          <div className="hint">
+            Instance liée : le contenu vient du prefab, incorporé au build.
+          </div>
+          {onOpenPrefab && (
+            <button className="button" onClick={() => onOpenPrefab(prefabSource)}>
+              Ouvrir le prefab
+            </button>
+          )}
         </div>
       )}
       {/* Une entité UI porte un RectTransform : la carte Transform 3D
@@ -1074,6 +1111,9 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [scenePath, setScenePath] = useState<string>("");
   const [sceneDoc, setSceneDoc] = useState<SceneDoc | null>(null);
+  /* Prefab Mode : édition isolée d'un prefabs/*.json (même machinerie
+     qu'une scène) — mémorise la scène d'origine pour le fil d'Ariane. */
+  const [prefabReturn, setPrefabReturn] = useState<string | null>(null);
   const [entityNames, setEntityNames] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1220,6 +1260,25 @@ export default function App() {
     },
     [rebuild],
   );
+
+  /* Prefab Mode : ouvre prefabs/x.json comme une scène (un prefab EST un
+     SceneJson) et retient la scène courante pour le bouton retour. */
+  const openPrefab = useCallback(
+    (rel: string) => {
+      if (!project) return;
+      if (!scenePath.startsWith("prefabs/"))
+        setPrefabReturn(scenePath || project.scenes[0]?.path || "");
+      selectScene(project, rel);
+    },
+    [project, scenePath, selectScene],
+  );
+
+  const closePrefab = useCallback(() => {
+    if (!project) return;
+    const back = prefabReturn;
+    setPrefabReturn(null);
+    if (back) selectScene(project, back);
+  }, [project, prefabReturn, selectScene]);
 
   /* Console : chaque notice/erreur affichée alimente aussi le journal. */
   useEffect(() => {
@@ -1626,58 +1685,26 @@ export default function App() {
     [project, sceneDoc, refreshFiles],
   );
 
+  /* Instance VIVANTE : la scène ne stocke qu'une référence
+     `{ "prefab": "prefabs/x.json" }` — le build l'incorpore (assets fusionnés,
+     enfants préfixés "instance.enfant"). Modifier le prefab met à jour
+     toutes les scènes qui l'utilisent. */
   const instantiatePrefab = useCallback(
-    async (rel: string) => {
+    (rel: string) => {
       if (!project || !sceneDoc) return;
-      try {
-        const prefab = JSON.parse(await api.loadScene(project.dir, rel)) as SceneDoc;
-        const pEntities = (prefab.entities ?? []).map((e) => structuredClone(e));
-        if (!pEntities.length) return;
-        // Renommage unique de tout le sous-arbre + remap des parents.
-        const rename = new Map<string, string>();
-        const taken = new Set(sceneDoc.entities?.map((e) => e.name as string) ?? []);
-        for (const e of pEntities) {
-          let name = e.name as string;
-          let n = 2;
-          while (taken.has(name)) name = `${e.name}-${n++}`;
-          taken.add(name);
-          rename.set(e.name as string, name);
-          e.name = name;
-        }
-        for (const e of pEntities) {
-          if (e.parent && rename.has(e.parent as string)) e.parent = rename.get(e.parent as string);
-        }
-        const rootName = pEntities[0].name as string;
-        mutateDoc((doc) => {
-          doc.assets = doc.assets ?? {};
-          doc.assets.models = doc.assets.models ?? [];
-          doc.assets.textures = doc.assets.textures ?? [];
-          const da = doc.assets as Record<string, unknown>;
-          for (const m of prefab.assets?.models ?? []) {
-            if (!doc.assets!.models!.some((x) => x.id === m.id)) doc.assets!.models!.push(m);
-          }
-          for (const t of prefab.assets?.textures ?? []) {
-            if (!doc.assets!.textures!.some((x) => x.id === t.id)) doc.assets!.textures!.push(t);
-          }
-          const pf = (prefab.assets as Record<string, unknown>)?.fonts as
-            | { id: string }[]
-            | undefined;
-          if (pf?.length) {
-            if (!Array.isArray(da.fonts)) da.fonts = [];
-            for (const f of pf) {
-              if (!(da.fonts as { id: string }[]).some((x) => x.id === f.id))
-                (da.fonts as unknown[]).push(f);
-            }
-          }
-          doc.entities = doc.entities ?? [];
-          doc.entities.push(...pEntities);
-        }, rootName);
-        setNotice(`prefab instancié : ${rootName}`);
-      } catch (e) {
-        setError(String(e));
+      if (scenePath.startsWith("prefabs/")) {
+        setError("prefabs imbriqués non supportés — reviens à la scène pour instancier");
+        return;
       }
+      const stem = rel.replace(/^prefabs\//, "").replace(/\.json$/i, "");
+      const name = uniqueName(stem);
+      mutateDoc((doc) => {
+        doc.entities = doc.entities ?? [];
+        doc.entities.push({ name, prefab: rel });
+      }, name);
+      setNotice(`instance liée : ${name} → ${rel} (modifier le prefab met à jour la scène)`);
     },
-    [project, sceneDoc, mutateDoc],
+    [project, sceneDoc, scenePath, uniqueName, mutateDoc],
   );
 
   /* Instanciation d'un modèle du panneau Project (drop viewport = à la
@@ -2019,6 +2046,26 @@ export default function App() {
     selected >= 0 && sceneDoc
       ? sceneDoc.entities?.find((e) => e.name === entityNames[selected])
       : undefined;
+  /* Instances de prefab : la racine porte `prefab` dans le JSON ; les
+     enfants n'existent que dans le .psc construit ("instance.enfant"). */
+  const prefabRoots = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of sceneDoc?.entities ?? []) {
+      if (typeof e.prefab === "string") m.set(e.name as string, e.prefab);
+    }
+    return m;
+  }, [sceneDoc]);
+  const docNames = useMemo(
+    () => (sceneDoc ? new Set(sceneDoc.entities?.map((e) => e.name as string) ?? []) : null),
+    [sceneDoc],
+  );
+  const selectedName = selected >= 0 ? entityNames[selected] : undefined;
+  /* Enfant d'instance sélectionné : nom de la racine (avant le premier "."). */
+  const prefabChildRoot =
+    selectedName && docNames && !docNames.has(selectedName)
+      ? selectedName.split(".")[0]
+      : null;
+  const selectedPrefabSource = selectedName ? prefabRoots.get(selectedName) ?? null : null;
   const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
   const currentScript = (selectedJsonEntity?.script as string | undefined) ?? null;
   /* Composants : source JSON en mode projet, .psc en mode visionneuse
@@ -2113,18 +2160,35 @@ export default function App() {
             <button className="button" onClick={openProject}>
               Ouvrir un projet…
             </button>
-            {project && project.scenes.length > 0 && (
-              <select
-                className="scene-select"
-                value={scenePath}
-                onChange={(e) => selectScene(project, e.target.value)}
-              >
-                {project.scenes.map((s) => (
-                  <option key={s.path} value={s.path}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+            {project && prefabReturn !== null ? (
+              /* Prefab Mode : fil d'Ariane scène ‹— prefab isolé. */
+              <span className="prefab-crumb">
+                <button className="button" onClick={closePrefab} title="Revenir à la scène">
+                  ‹ {prefabReturn.split("/").pop()?.replace(/\.json$/i, "") || "scène"}
+                </button>
+                <span className="prefab-crumb-name">
+                  🧩 {scenePath.split("/").pop()?.replace(/\.json$/i, "")}
+                  <span className="muted"> (Prefab Mode)</span>
+                </span>
+              </span>
+            ) : (
+              project &&
+              project.scenes.length > 0 && (
+                <select
+                  className="scene-select"
+                  value={scenePath}
+                  onChange={(e) => {
+                    setPrefabReturn(null);
+                    selectScene(project, e.target.value);
+                  }}
+                >
+                  {project.scenes.map((s) => (
+                    <option key={s.path} value={s.path}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              )
             )}
             {project && (
               <button className="button" onClick={saveScene} disabled={!dirty}>
@@ -2195,6 +2259,8 @@ export default function App() {
               }
               onPrefabDrop={isTauri && sceneDoc ? instantiatePrefab : undefined}
               onReorder={isTauri && sceneDoc ? reorderEntity : undefined}
+              prefabRoots={prefabRoots}
+              docNames={docNames}
             />
             {addMenu && (
               <ContextMenu
@@ -2344,7 +2410,29 @@ export default function App() {
                 />
               </div>
             )}
-            {currentTransform ? (
+            {prefabChildRoot && isTauri && sceneDoc ? (
+              <div className="panel">
+                <div className="panel-title">Inspecteur</div>
+                <div className="field-group">
+                  <div className="field-readonly">🧩 {selectedName}</div>
+                </div>
+                <div className="hint">
+                  Cette entité fait partie de l'instance de prefab «{" "}
+                  {prefabChildRoot} ». Pour la modifier, ouvre le prefab — les
+                  changements s'appliqueront à toutes les scènes.
+                </div>
+                {prefabRoots.get(prefabChildRoot) && (
+                  <div className="field-group">
+                    <button
+                      className="button"
+                      onClick={() => openPrefab(prefabRoots.get(prefabChildRoot)!)}
+                    >
+                      Ouvrir le prefab
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : currentTransform ? (
               <Inspector
                 scene={scene}
                 name={entityNames[selected] ?? `entité ${selected}`}
@@ -2393,6 +2481,8 @@ export default function App() {
                     ? (v) => setEntityCamProp("draw_distance", v)
                     : undefined
                 }
+                prefabSource={selectedPrefabSource}
+                onOpenPrefab={isTauri && sceneDoc ? openPrefab : undefined}
                 uiJson={
                   isTauri &&
                   sceneDoc &&
@@ -2449,7 +2539,11 @@ export default function App() {
           files={projectFiles}
           logs={logs}
           currentScenePath={scenePath}
-          onOpenScene={(path) => selectScene(project, path)}
+          onOpenScene={(path) => {
+            setPrefabReturn(null);
+            selectScene(project, path);
+          }}
+          onOpenPrefab={openPrefab}
           onImport={importFromPanel}
           onCreateScene={createSceneFromPanel}
           onCreateFolder={createFolderFromPanel}
