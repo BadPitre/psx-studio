@@ -389,6 +389,12 @@ pub fn write_all(dir: &Path) -> Result<(), String> {
     let img: image::RgbaImage =
         image::ImageBuffer::from_raw(64, 64, guy_rgba(64)).ok_or("buffer size mismatch")?;
     img.save(dir.join("guy.png")).map_err(|e| e.to_string())?;
+
+    // Police UI de démo (grille 16 glyphes/ligne, cellules 6x8).
+    let (rgba, w, h) = font_rgba();
+    let img: image::RgbaImage =
+        image::ImageBuffer::from_raw(w, h, rgba).ok_or("buffer size mismatch")?;
+    img.save(dir.join("font.png")).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -516,6 +522,9 @@ pub fn scene_village_json() -> &'static str {
       { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
       { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" },
       { "id": "guy",    "pmd": "guy.pmd",    "texture": "guy_tex" }
+    ],
+    "fonts": [
+      { "id": "main", "fnt": "main.fnt" }
     ]
   },
   "entities": [
@@ -529,7 +538,20 @@ pub fn scene_village_json() -> &'static str {
     { "name": "lune",    "position": [300, -260, 500], "rotation": [35, -120, 0], "light": { "color": [70, 90, 160] } },
     { "name": "torche",  "position": [265, -36, 150], "scale": [0.05, 0.28, 0.05], "model": "cube",
       "light": { "type": "point", "color": [255, 150, 60], "intensity": 1.6, "radius": 520 }, "script": "torche" },
-    { "name": "camera",  "position": [0, -200, -420], "rotation": [-21, 180, 0], "camera": true }
+    { "name": "camera",  "position": [0, -200, -420], "rotation": [-21, 180, 0], "camera": true },
+    { "name": "hud", "canvas": true },
+    { "name": "vie_fond", "parent": "hud",
+      "rect": { "anchor_min": [0, 0], "anchor_max": [0, 0], "pivot": [0, 0],
+                "position": [8, 8], "size": [70, 12] },
+      "image": { "color": [10, 12, 24] } },
+    { "name": "vie", "parent": "vie_fond",
+      "rect": { "anchor_min": [0, 0], "anchor_max": [1, 1],
+                "position": [2, 2], "size": [2, 2] },
+      "image": { "color": [200, 40, 40], "type": "filled", "fill": "horizontal", "amount": 0.75 } },
+    { "name": "zone", "parent": "hud",
+      "rect": { "anchor_min": [1, 0], "anchor_max": [1, 0], "pivot": [1, 0],
+                "position": [-8, 8], "size": [140, 10] },
+      "text": { "font": "main", "text": "VILLAGE", "align": "right" } }
   ]
 }
 "#
@@ -557,6 +579,9 @@ pub fn scene_field_json() -> &'static str {
       { "id": "ground", "pmd": "ground.pmd", "texture": "checker_tex" },
       { "id": "house",  "pmd": "house.pmd",  "texture": "house_tex" },
       { "id": "guy",    "pmd": "guy.pmd",    "texture": "guy_tex" }
+    ],
+    "fonts": [
+      { "id": "main", "fnt": "main.fnt" }
     ]
   },
   "entities": [
@@ -571,7 +596,20 @@ pub fn scene_field_json() -> &'static str {
     { "name": "cube23", "position": [200, -40, 280],  "rotation": [0, 75, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube31", "position": [-200, -40, 480], "rotation": [0, 10, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
     { "name": "cube32", "position": [0, -40, 480],    "rotation": [0, 25, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
-    { "name": "cube33", "position": [200, -40, 480],  "rotation": [0, 40, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" }
+    { "name": "cube33", "position": [200, -40, 480],  "rotation": [0, 40, 0], "scale": [0.3, 0.3, 0.3], "model": "cube" },
+    { "name": "hud", "canvas": true },
+    { "name": "vie_fond", "parent": "hud",
+      "rect": { "anchor_min": [0, 0], "anchor_max": [0, 0], "pivot": [0, 0],
+                "position": [8, 8], "size": [70, 12] },
+      "image": { "color": [10, 12, 24] } },
+    { "name": "vie", "parent": "vie_fond",
+      "rect": { "anchor_min": [0, 0], "anchor_max": [1, 1],
+                "position": [2, 2], "size": [2, 2] },
+      "image": { "color": [200, 40, 40], "type": "filled", "fill": "horizontal", "amount": 0.75 } },
+    { "name": "zone", "parent": "hud",
+      "rect": { "anchor_min": [1, 0], "anchor_max": [1, 0], "pivot": [1, 0],
+                "position": [-8, 8], "size": [140, 10] },
+      "text": { "font": "main", "text": "CHAMP DE CUBES", "align": "right" } }
   ]
 }
 "#
@@ -668,6 +706,7 @@ pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
     use crate::{gltf_import, tim};
 
     write_all(dir)?;
+    std::fs::write(dir.join("main.fnt"), demo_font_fnt()?).map_err(|e| e.to_string())?;
 
     for (gltf_name, pmd_name) in [
         ("cube.gltf", "cube.pmd"),
@@ -707,6 +746,91 @@ pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
         std::fs::write(dir.join(tim_name), timg.write()).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/* --------------------------------------------------------- police UI -- */
+
+pub const FONT_CELL_W: u8 = 6;
+pub const FONT_CELL_H: u8 = 8;
+pub const FONT_FIRST: u8 = 32;
+pub const FONT_COUNT: u8 = 59; // espace..Z (ASCII 32-90)
+
+/// Art 5x7 des glyphes utiles ('#' = pixel) ; les autres cellules du
+/// charset restent vides (invisibles).
+fn glyph_art(c: u8) -> Option<[&'static str; 7]> {
+    Some(match c {
+        b'!' => ["  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "     ", "  #  "],
+        b'\'' => ["  #  ", "  #  ", "     ", "     ", "     ", "     ", "     "],
+        b'-' => ["     ", "     ", "     ", " ### ", "     ", "     ", "     "],
+        b'.' => ["     ", "     ", "     ", "     ", "     ", "     ", "  #  "],
+        b'/' => ["    #", "   # ", "   # ", "  #  ", " #   ", " #   ", "#    "],
+        b'0' => [" ### ", "#   #", "#  ##", "# # #", "##  #", "#   #", " ### "],
+        b'1' => ["  #  ", " ##  ", "  #  ", "  #  ", "  #  ", "  #  ", " ### "],
+        b'2' => [" ### ", "#   #", "    #", "  ## ", " #   ", "#    ", "#####"],
+        b'3' => [" ### ", "#   #", "    #", "  ## ", "    #", "#   #", " ### "],
+        b'4' => ["   # ", "  ## ", " # # ", "#  # ", "#####", "   # ", "   # "],
+        b'5' => ["#####", "#    ", "#### ", "    #", "    #", "#   #", " ### "],
+        b'6' => [" ### ", "#    ", "#    ", "#### ", "#   #", "#   #", " ### "],
+        b'7' => ["#####", "    #", "   # ", "  #  ", "  #  ", "  #  ", "  #  "],
+        b'8' => [" ### ", "#   #", "#   #", " ### ", "#   #", "#   #", " ### "],
+        b'9' => [" ### ", "#   #", "#   #", " ####", "    #", "    #", " ### "],
+        b':' => ["     ", "  #  ", "     ", "     ", "     ", "  #  ", "     "],
+        b'?' => [" ### ", "#   #", "    #", "  ## ", "  #  ", "     ", "  #  "],
+        b'A' => [" ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
+        b'B' => ["#### ", "#   #", "#   #", "#### ", "#   #", "#   #", "#### "],
+        b'C' => [" ### ", "#   #", "#    ", "#    ", "#    ", "#   #", " ### "],
+        b'D' => ["#### ", "#   #", "#   #", "#   #", "#   #", "#   #", "#### "],
+        b'E' => ["#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#####"],
+        b'F' => ["#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#    "],
+        b'G' => [" ### ", "#   #", "#    ", "# ###", "#   #", "#   #", " ### "],
+        b'H' => ["#   #", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
+        b'I' => [" ### ", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", " ### "],
+        b'J' => ["    #", "    #", "    #", "    #", "    #", "#   #", " ### "],
+        b'K' => ["#   #", "#  # ", "# #  ", "##   ", "# #  ", "#  # ", "#   #"],
+        b'L' => ["#    ", "#    ", "#    ", "#    ", "#    ", "#    ", "#####"],
+        b'M' => ["#   #", "## ##", "# # #", "# # #", "#   #", "#   #", "#   #"],
+        b'N' => ["#   #", "##  #", "# # #", "#  ##", "#   #", "#   #", "#   #"],
+        b'O' => [" ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "],
+        b'P' => ["#### ", "#   #", "#   #", "#### ", "#    ", "#    ", "#    "],
+        b'Q' => [" ### ", "#   #", "#   #", "#   #", "# # #", "#  # ", " ## #"],
+        b'R' => ["#### ", "#   #", "#   #", "#### ", "# #  ", "#  # ", "#   #"],
+        b'S' => [" ####", "#    ", "#    ", " ### ", "    #", "    #", "#### "],
+        b'T' => ["#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "  #  "],
+        b'U' => ["#   #", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "],
+        b'V' => ["#   #", "#   #", "#   #", "#   #", "#   #", " # # ", "  #  "],
+        b'W' => ["#   #", "#   #", "#   #", "# # #", "# # #", "## ##", "#   #"],
+        b'X' => ["#   #", "#   #", " # # ", "  #  ", " # # ", "#   #", "#   #"],
+        b'Y' => ["#   #", "#   #", " # # ", "  #  ", "  #  ", "  #  ", "  #  "],
+        b'Z' => ["#####", "    #", "   # ", "  #  ", " #   ", "#    ", "#####"],
+        _ => return None,
+    })
+}
+
+/// Atlas RGBA de la police de démo : 16 glyphes par ligne, cellules 6x8.
+pub fn font_rgba() -> (Vec<u8>, u32, u32) {
+    let cols = crate::fnt::GLYPHS_PER_ROW;
+    let rows = (FONT_COUNT as u32).div_ceil(cols);
+    let (w, h) = (cols * FONT_CELL_W as u32, rows * FONT_CELL_H as u32);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for g in 0..FONT_COUNT as u32 {
+        let Some(art) = glyph_art(FONT_FIRST + g as u8) else { continue };
+        let (gx, gy) = ((g % cols) * FONT_CELL_W as u32, (g / cols) * FONT_CELL_H as u32);
+        for (y, row) in art.iter().enumerate() {
+            for (x, ch) in row.bytes().enumerate() {
+                if ch == b'#' {
+                    let o = (((gy + y as u32) * w + gx + x as u32) * 4) as usize;
+                    rgba[o..o + 4].copy_from_slice(&[255, 255, 255, 255]);
+                }
+            }
+        }
+    }
+    (rgba, w, h)
+}
+
+/// Encode la police de démo en .fnt (atlas TIM 4bpp + chasses).
+pub fn demo_font_fnt() -> Result<Vec<u8>, String> {
+    let (rgba, w, h) = font_rgba();
+    crate::fnt::encode(&rgba, w, h, FONT_CELL_W, FONT_CELL_H, FONT_FIRST, FONT_COUNT)
 }
 
 /// Build the two demo .psc scenes into `out_dir`, using (and generating)

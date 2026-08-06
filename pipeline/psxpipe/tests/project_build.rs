@@ -26,6 +26,7 @@ fn setup_project(dir: &std::path::Path) {
             { "png": "assets/house.png",   "out": "house.tim" },
             { "png": "assets/guy.png",     "out": "guy.tim" }
           ],
+          "fonts": [{ "png": "assets/font.png", "out": "main.fnt" }],
           "scenes": ["scenes/scene0.json", "scenes/scene1.json"],
           "sfx": [{ "wav": "audio/sfx.wav", "out": "BLIP.VAG" }],
           "music": ["audio/music.wav"]
@@ -40,8 +41,8 @@ fn full_project_build_and_cache() {
     setup_project(dir.path());
 
     let report = project::build(dir.path(), false).unwrap();
-    // 4 models + 3 textures + 1 sfx converted on the first run.
-    assert_eq!(report.converted, 8);
+    // 4 models + 3 textures + 1 police + 1 sfx converted on the first run.
+    assert_eq!(report.converted, 9);
     assert_eq!(report.cached, 0);
     assert_eq!(report.scenes.len(), 2);
 
@@ -65,7 +66,7 @@ fn full_project_build_and_cache() {
     // Second run: everything cached.
     let report2 = project::build(dir.path(), false).unwrap();
     assert_eq!(report2.converted, 0);
-    assert_eq!(report2.cached, 8);
+    assert_eq!(report2.cached, 9);
 
     // Changing a source (valid but different image) invalidates only it.
     let png = dir.path().join("assets/checker.png");
@@ -74,7 +75,7 @@ fn full_project_build_and_cache() {
     img.save(&png).unwrap();
     let report3 = project::build(dir.path(), false).unwrap();
     assert_eq!(report3.converted, 1);
-    assert_eq!(report3.cached, 7);
+    assert_eq!(report3.cached, 8);
 }
 
 #[test]

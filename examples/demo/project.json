@@ -12,6 +12,9 @@
     { "png": "assets/house.png",   "out": "house.tim" },
     { "png": "assets/guy.png",     "out": "guy.tim" }
   ],
+  "fonts": [
+    { "png": "assets/font.png", "out": "main.fnt" }
+  ],
   "scenes": ["scenes/scene0.json", "scenes/scene1.json"],
   "sfx": [
     { "wav": "audio/sfx.wav", "out": "BLIP.VAG" }

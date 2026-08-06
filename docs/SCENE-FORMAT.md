@@ -210,3 +210,20 @@ d'entité est l'indice du fichier `.psc` (ordre topologique).
   (le composant Script est arrivé exactement comme ça en v1.1).
 - Le placement VRAM reste celui des TIMs (packing assisté en Phase 3).
 - Toute rupture incrémente `version` ; le runtime rejette l'inconnu.
+
+## Extension v1.3 — table UI + polices (Lot E jalon 1)
+
+Le 4e compteur de l'en-tête (0x12) devient `ui_count`, et 0x3E devient
+`font_count` (nuls avant : rétrocompatible). Les tables se dérivent :
+`ui = align4(lights + light_count*6)`, puis `font_count` entrées de
+8 octets (offset u32 + taille u32 d'un blob .fnt embarqué), puis la
+table de chaînes (C, terminées par 0). Un enregistrement UI fait
+40 octets : entité u16, composants u8 (canvas/image/text/button/layout/
+actif), flags u8 (type d'image, fill vertical, semi-trans, axe layout),
+ancres min/max + pivot en 4.12 (6×u16), position/taille i16×4, teinte
+RGB + asset u8, data u16 (offset chaîne ou amount 4.12), extra u16
+(alignement texte, spacing+padding layout), sprite uv u8×4, border
+u8×4. Les entités UI portent `ENTITY_FLAG_UI` (bit 3). Un .fnt :
+"FNT1", cell_w/h u8, first u8, count u8, chasses u8×count, pad(4),
+puis un TIM 4bpp (packé en VRAM avec les textures par le builder).
+Spec de conception : docs/UI-SYSTEM.md.

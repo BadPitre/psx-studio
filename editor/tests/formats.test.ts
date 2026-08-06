@@ -21,7 +21,7 @@ describe("parsePsc sur scene0.psc (village)", () => {
   it("lit l'en-tête et les réglages de scène", () => {
     expect(scene.models.length).toBe(4);
     expect(scene.textures.length).toBe(3);
-    expect(scene.entities.length).toBe(10);
+    expect(scene.entities.length).toBe(14);
     expect(scene.background).toEqual([24, 32, 56]);
     // Le vecteur lumière pointe vers la source (Y négatif = vers le haut).
     expect(scene.lightToward[1]).toBeLessThan(-0.4);
@@ -77,9 +77,9 @@ describe("parsePsc sur scene0.psc (village)", () => {
     scene.entities.forEach((e, i) => {
       if (e.parent >= 0) expect(e.parent).toBeLessThan(i);
     });
-    // La cheminée est le seul enfant (parenté à une maison).
+    // La cheminée (parentée à une maison) + les 3 widgets UI sous le hud.
     const children = scene.entities.filter((e) => e.parent >= 0);
-    expect(children.length).toBe(1);
+    expect(children.length).toBe(4);
     // Le sol a une échelle 4 en X/Z.
     const sol = scene.entities[0];
     expect(sol.scale[0]).toBeCloseTo(4.0, 2);
@@ -92,11 +92,35 @@ describe("parsePsc sur scene0.psc (village)", () => {
   });
 });
 
+describe("parsePsc sur scene0.psc — table UI (v1.3)", () => {
+  const scene = loadScene("scene0.psc");
+
+  it("lit les widgets, la police et les chaînes", () => {
+    // hud (canvas) + vie_fond + vie (filled) + zone (texte).
+    expect(scene.ui.length).toBe(4);
+    expect(scene.fontCount).toBe(1);
+    const [hud, fond, vie, zone] = scene.ui;
+    expect(hud.components & 1).toBe(1);
+    expect(fond.size).toEqual([70, 12]);
+    expect(fond.anchorMin).toEqual([0, 0]);
+    // vie : image filled étirée, amount 0.75, rouge.
+    expect(vie.flags & 3).toBe(3);
+    expect(vie.data).toBe(3072);
+    expect(vie.anchorMax).toEqual([1, 1]);
+    expect(vie.color).toEqual([200, 40, 40]);
+    // zone : texte aligné à droite, résolu depuis la table de chaînes.
+    expect(zone.text).toBe("VILLAGE");
+    expect(zone.extra).toBe(2);
+    // Les entités UI portent le flag (bit 3).
+    expect(scene.entities[hud.entity].flags & 8).toBe(8);
+  });
+});
+
 describe("parsePsc sur scene1.psc (champ de cubes)", () => {
   const scene = loadScene("scene1.psc");
 
   it("charge la deuxième scène de démo", () => {
-    expect(scene.entities.length).toBe(12);
+    expect(scene.entities.length).toBe(16);
     expect(scene.background).toEqual([8, 8, 20]);
   });
 });

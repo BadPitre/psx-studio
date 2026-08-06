@@ -16,7 +16,7 @@ fn village_builds_and_parses() {
     let h = scene::parse_header(&bytes).unwrap();
     assert_eq!(h.model_count, 4);
     assert_eq!(h.texture_count, 3);
-    assert_eq!(h.entity_count, 10);
+    assert_eq!(h.entity_count, 14);
     assert_eq!(h.total_size as usize, bytes.len());
     assert_eq!(h.background, [24, 32, 56]);
 
@@ -94,7 +94,8 @@ fn auto_packing_repairs_colliding_placements() {
     let json_path = dir.path().join("scene0.json");
     std::fs::write(&json_path, samples::scene_village_json()).unwrap();
     let (_, report) = scene::build_file(&json_path).unwrap();
-    assert_eq!(report.vram.len(), 3);
+    // 3 textures + l'atlas de la police UI (v1.3).
+    assert_eq!(report.vram.len(), 4);
     let (a, b) = (&report.vram[0].1, &report.vram[1].1);
     assert_ne!((a.x, a.y), (b.x, b.y));
     assert_eq!(a.x % 64, 0);
@@ -336,4 +337,41 @@ fn point_lights_flag_and_radius() {
     assert!(scene::build_file(&p).unwrap_err().contains("type de lumière"));
     std::fs::write(&p, json.replace("500", "20")).unwrap();
     assert!(scene::build_file(&p).unwrap_err().contains("radius"));
+}
+
+#[test]
+fn ui_table_fonts_and_strings() {
+    let bytes = build_village();
+    let h = scene::parse_header(&bytes).unwrap();
+    assert_eq!(h.ui_count, 4);
+    assert_eq!(h.font_count, 1);
+
+    let ui = scene::parse_ui(&bytes, &h);
+    // hud : canvas actif, sans image ni texte.
+    assert_eq!(ui[0].components, (1 << 0) | (1 << 5));
+    // vie_fond : image posée en haut-gauche, 70x12 a (8, 8).
+    assert_eq!(ui[1].components & (1 << 1), 1 << 1);
+    assert_eq!((ui[1].pos, ui[1].size), ([8, 8], [70, 12]));
+    assert_eq!(ui[1].anchors[0..2], [0, 0]);
+    // vie : image filled horizontale, etiree (min != max), amount 0.75.
+    assert_eq!(ui[2].flags & 0x3, 3);
+    assert_eq!(ui[2].data, 3072);
+    assert_eq!(ui[2].anchors[2..4], [4096, 4096]);
+    assert_eq!(ui[2].color, [200, 40, 40]);
+    // zone : texte aligne a droite, police 0, chaine dans la table.
+    assert_eq!(ui[3].components & (1 << 2), 1 << 2);
+    assert_eq!((ui[3].asset, ui[3].extra), (0, 2));
+    let (_, _, strings) = h.ui_offsets();
+    let start = strings + ui[3].data as usize;
+    let end = bytes[start..].iter().position(|&b| b == 0).unwrap() + start;
+    assert_eq!(&bytes[start..end], b"VILLAGE");
+
+    // Les entites UI portent le flag, et la police embarquee est un FNT
+    // valide dont le TIM a ete place en VRAM par le packer.
+    let fonts = scene::parse_fonts(&bytes, &h);
+    let (off, size) = fonts[0];
+    let fnt = &bytes[off..off + size];
+    let info = psxpipe::fnt::parse(fnt).unwrap();
+    assert_eq!((info.cell_w, info.cell_h), (6, 8));
+    assert_eq!(psxpipe::fnt::advances(fnt)[(b'I' - 32) as usize], 5);
 }

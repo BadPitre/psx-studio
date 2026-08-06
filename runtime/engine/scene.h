@@ -38,7 +38,7 @@ typedef struct {
 	uint16_t	model_count;
 	uint16_t	texture_count;
 	uint16_t	entity_count;
-	uint16_t	pad;
+	uint16_t	ui_count;		/* extension v1.3 : widgets UI (0 avant) */
 	uint32_t	models_offset;
 	uint32_t	textures_offset;
 	uint32_t	entities_offset;
@@ -50,8 +50,48 @@ typedef struct {
 	uint32_t	scripts_offset;		/* table de hashes FNV-1a 32 */
 	uint32_t	lights_offset;		/* extension v1.2 : table des lumieres */
 	uint16_t	light_count;		/* entites-lumieres (2 max, lignes GTE 1-2) */
-	uint8_t		reserved[2];
+	uint16_t	font_count;		/* extension v1.3 : polices .fnt embarquees */
 } PscHeader;
+
+/* Un widget UI (extension v1.3, docs/UI-SYSTEM.md) : RectTransform a la
+ * Unity (ancres/pivot en 4.12 du rect parent) + composants. La table suit
+ * les lumieres (alignee 4) ; les chaines suivent la table des polices. */
+typedef struct {
+	uint16_t	entity;
+	uint8_t		components;		/* bit0 canvas, 1 image, 2 text, 3 button, 4 layout, 5 actif */
+	uint8_t		flags;			/* bits0-1 image type, 2 fill vertical, 3 semi-trans, 4 layout horizontal */
+	uint16_t	anchor_min[2];	/* 4.12 (0..4096) */
+	uint16_t	anchor_max[2];
+	uint16_t	pivot[2];
+	int16_t		pos[2];			/* pixels (marges sur un axe etire) */
+	int16_t		size[2];
+	uint8_t		color[3];
+	uint8_t		asset;			/* texture (image) ou police (texte), 0xFF = aucune */
+	uint16_t	data;			/* offset chaine / amount 4.12 (filled) */
+	uint16_t	extra;			/* alignement texte / spacing+padding layout */
+	uint8_t		uv[4];			/* sprite x, y, l, h en texels (0 = texture entiere) */
+	uint8_t		border[4];		/* marges 9-slice */
+} PscUiRec;
+
+#define UI_COMP_CANVAS	(1 << 0)
+#define UI_COMP_IMAGE	(1 << 1)
+#define UI_COMP_TEXT	(1 << 2)
+#define UI_COMP_BUTTON	(1 << 3)
+#define UI_COMP_LAYOUT	(1 << 4)
+#define UI_COMP_ACTIVE	(1 << 5)
+
+#define SCENE_MAX_UI		48
+#define SCENE_MAX_FONTS		4
+
+/* Police chargee : atlas TIM uploade, chasses en RAM (pointeur arene). */
+typedef struct {
+	uint16_t		tpage;
+	uint16_t		clut;
+	uint8_t			u0, v0;		/* coin du TIM dans sa page, en texels */
+	uint8_t			cell_w, cell_h;
+	uint8_t			first, count;
+	const uint8_t*	advances;
+} UiFont;
 
 /* Une entree de la table des lumieres (v1.2) : l'entite donne la
  * direction (elle eclaire le long de son axe -Z local), la couleur est
@@ -66,6 +106,7 @@ typedef struct {
 #define ENTITY_FLAG_LIGHT		(1 << 0)
 #define ENTITY_FLAG_CAMERA		(1 << 1)
 #define ENTITY_FLAG_LIGHT_POINT	(1 << 2)
+#define ENTITY_FLAG_UI			(1 << 3)
 
 #define SCENE_MAX_ENTITY_LIGHTS	2
 #define SCENE_MAX_POINT_LIGHTS	4
@@ -141,6 +182,15 @@ typedef struct {
 	/* Premiere entite camera (-1 : aucune) : vue initiale de la scene. */
 	int16_t				camera_entity;
 	CVECTOR				background;
+	/* UI (v1.3) : table des widgets + polices + chaines dans l'arene. */
+	const PscUiRec*		ui;
+	int					ui_count;
+	const char*			ui_strings;
+	UiFont				fonts[SCENE_MAX_FONTS];
+	int					font_count;
+	/* tpage/clut des textures (pour les images UI en SPRT). */
+	uint16_t			tex_tpage[SCENE_MAX_TEXTURES];
+	uint16_t			tex_clut[SCENE_MAX_TEXTURES];
 } Scene;
 
 /* Load a .psc file from the CD into the scene arena (which is reset).
@@ -175,6 +225,21 @@ uint8_t* Scene_Draw(const Scene* scene, const MATRIX* view, uint32_t* ot,
 	int ot_length, uint8_t* packet, uint8_t* packet_limit);
 
 int Scene_TriangleCount(const Scene* scene);
+
+/* UI (v1.3) ---------------------------------------------------------------
+ * Dessine les canvas actifs en tete d'OT (au-dessus de la 3D). Appele par
+ * Scene_Draw ; les setters ci-dessous s'utilisent depuis les scripts. */
+uint8_t* Ui_Draw(const Scene* scene, uint32_t* ot, uint8_t* packet,
+	uint8_t* packet_limit);
+
+/* Composants UI d'une entite (NULL si elle n'en a pas). */
+const PscUiRec* Ui_Get(const Scene* scene, const Entity* e);
+/* Remplissage d'une image Filled, 0..4096 (jauges). */
+void Ui_SetFill(const Scene* scene, const Entity* e, int amount_412);
+/* Montre/cache un widget (un canvas cache masque tout son sous-arbre). */
+void Ui_SetActive(const Scene* scene, const Entity* e, int active);
+void Ui_SetTint(const Scene* scene, const Entity* e, uint8_t r, uint8_t g,
+	uint8_t b);
 
 /* Read a whole CD file into the scene arena WITHOUT resetting it. */
 void* Scene_ReadFileToArena(const char* path, uint32_t* size_out);

@@ -24,6 +24,9 @@ pub struct ProjectJson {
     pub models: Vec<ModelSrc>,
     #[serde(default)]
     pub textures: Vec<TextureSrc>,
+    /// Polices bitmap UI (v1.3).
+    #[serde(default)]
+    pub fonts: Vec<FontSrc>,
     /// Scene JSONs; their asset paths resolve in Library/ first.
     pub scenes: Vec<String>,
     #[serde(default)]
@@ -61,6 +64,24 @@ pub struct TextureSrc {
     /// 16 couleurs — moitié de VRAM gagnée sans perte, sinon 8 bpp).
     #[serde(default)]
     pub bpp: Option<u32>,
+}
+
+/// Police bitmap UI : PNG en grille régulière -> .fnt (atlas TIM 4bpp +
+/// chasses mesurées). Défauts alignés sur la police de démo.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FontSrc {
+    pub png: String,
+    pub out: String,
+    /// [largeur, hauteur] de cellule (défaut [6, 8]).
+    #[serde(default)]
+    pub cell: Option<[u8; 2]>,
+    /// Premier caractère ASCII (défaut 32 = espace).
+    #[serde(default)]
+    pub first: Option<u8>,
+    /// Nombre de glyphes (défaut 59 = espace..Z).
+    #[serde(default)]
+    pub count: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -257,6 +278,27 @@ pub fn build(project_dir: &Path, force: bool) -> Result<BuildReport, String> {
             }
         }
         cache.record(texture.png.clone(), hash);
+        report.converted += 1;
+    }
+
+    for font in &project.fonts {
+        let src = project_dir.join(&font.png);
+        let out = library.join(&font.out);
+        let cell = font.cell.unwrap_or([6, 8]);
+        let (first, count) = (font.first.unwrap_or(32), font.count.unwrap_or(59));
+        let hash = format!("{}:{}x{}:{first}:{count}", hash_file(&src)?, cell[0], cell[1]);
+        if !force && cache.is_fresh(&font.png, &hash, &out) {
+            report.cached += 1;
+            continue;
+        }
+        let img = image::open(&src)
+            .map_err(|e| format!("{}: {e}", font.png))?
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        let fnt = crate::fnt::encode(img.as_raw(), w, h, cell[0], cell[1], first, count)
+            .map_err(|e| format!("{}: {e}", font.png))?;
+        std::fs::write(&out, fnt).map_err(|e| e.to_string())?;
+        cache.record(font.png.clone(), hash);
         report.converted += 1;
     }
 

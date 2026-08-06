@@ -58,6 +58,34 @@ export interface PscScene {
   entities: PscEntity[];
   /** Lumières additionnelles (v1.2, 2 max — le GTE en offre 3 avec le soleil). */
   lights: PscLight[];
+  /** Widgets UI (v1.3) dans l'ordre du fichier (parents d'abord). */
+  ui: PscUiWidget[];
+  /** Polices bitmap embarquées (v1.3). */
+  fontCount: number;
+}
+
+/** Un widget UI (v1.3) : RectTransform 4.12 + composants, champs bruts. */
+export interface PscUiWidget {
+  entity: number;
+  /** bit0 canvas, 1 image, 2 text, 3 button, 4 layout, 5 actif. */
+  components: number;
+  /** bits0-1 image type (simple/sliced/tiled/filled), 2 fill vertical, 3 semi-trans. */
+  flags: number;
+  /** anchor_min, anchor_max, pivot en fractions 0..1. */
+  anchorMin: [number, number];
+  anchorMax: [number, number];
+  pivot: [number, number];
+  position: [number, number];
+  size: [number, number];
+  color: [number, number, number];
+  asset: number;
+  /** amount 4.12 (image filled) ou offset chaîne (texte). */
+  data: number;
+  extra: number;
+  uv: [number, number, number, number];
+  border: [number, number, number, number];
+  /** Chaîne du widget texte (résolue depuis la table). */
+  text: string | null;
 }
 
 export function parsePsc(buffer: ArrayBuffer): PscScene {
@@ -139,6 +167,57 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
     }
   }
 
+  // Table UI (v1.3) : suit les lumières (alignée 4), puis les polices
+  // puis les chaînes — offsets dérivés, comme le runtime.
+  const ui: PscUiWidget[] = [];
+  const uiCount = data.getUint16(18, true);
+  const fontCount = data.getUint16(62, true);
+  if (uiCount > 0 && lightsOffset > 0) {
+    const uiOffset = (lightsOffset + lightCount * 6 + 3) & ~3;
+    const stringsOffset = uiOffset + uiCount * 40 + fontCount * 8;
+    for (let i = 0; i < uiCount; i++) {
+      const rec = uiOffset + i * 40;
+      const frac = (o: number) => data.getUint16(rec + o, true) / 4096;
+      const components = data.getUint8(rec + 2);
+      const strOff = data.getUint16(rec + 28, true);
+      let text: string | null = null;
+      if (components & (1 << 2)) {
+        let end = stringsOffset + strOff;
+        while (data.getUint8(end) !== 0) end++;
+        text = new TextDecoder().decode(
+          new Uint8Array(data.buffer, data.byteOffset + stringsOffset + strOff, end - stringsOffset - strOff),
+        );
+      }
+      ui.push({
+        entity: data.getUint16(rec, true),
+        components,
+        flags: data.getUint8(rec + 3),
+        anchorMin: [frac(4), frac(6)],
+        anchorMax: [frac(8), frac(10)],
+        pivot: [frac(12), frac(14)],
+        position: [data.getInt16(rec + 16, true), data.getInt16(rec + 18, true)],
+        size: [data.getInt16(rec + 20, true), data.getInt16(rec + 22, true)],
+        color: rgb(rec + 24),
+        asset: data.getUint8(rec + 27),
+        data: data.getUint16(rec + 28, true),
+        extra: data.getUint16(rec + 30, true),
+        uv: [
+          data.getUint8(rec + 32),
+          data.getUint8(rec + 33),
+          data.getUint8(rec + 34),
+          data.getUint8(rec + 35),
+        ],
+        border: [
+          data.getUint8(rec + 36),
+          data.getUint8(rec + 37),
+          data.getUint8(rec + 38),
+          data.getUint8(rec + 39),
+        ],
+        text,
+      });
+    }
+  }
+
   return {
     background: rgb(32),
     ambient: rgb(36),
@@ -153,6 +232,8 @@ export function parsePsc(buffer: ArrayBuffer): PscScene {
     textures,
     entities,
     lights,
+    ui,
+    fontCount,
   };
 }
 

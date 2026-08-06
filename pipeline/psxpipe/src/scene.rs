@@ -18,6 +18,9 @@ pub const MODEL_ENTRY_SIZE: usize = 12;
 pub const TEXTURE_ENTRY_SIZE: usize = 8;
 pub const ENTITY_SIZE: usize = 32;
 pub const LIGHT_ENTRY_SIZE: usize = 6;
+/// v1.3 : enregistrement de composants UI (voir docs/UI-SYSTEM.md).
+pub const UI_ENTRY_SIZE: usize = 40;
+pub const FONT_ENTRY_SIZE: usize = 8;
 pub const NO_INDEX: u16 = 0xFFFF;
 
 /* ---------------------------------------------------------------- JSON -- */
@@ -81,6 +84,9 @@ pub struct Assets {
     #[serde(default)]
     pub textures: Vec<TextureJson>,
     pub models: Vec<ModelJson>,
+    /// Polices bitmap .fnt (v1.3, UI).
+    #[serde(default)]
+    pub fonts: Vec<FontJson>,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +137,122 @@ pub struct EntityJson {
     /// degrés ; défaut 74 ≈ la projection PS1 native, h = 160).
     #[serde(default)]
     pub camera: CameraJson,
+    /* Composants UI (v1.3, docs/UI-SYSTEM.md) — philosophie uGUI : le
+     * canvas est une entité, ses enfants portent RectTransform + Image/
+     * Text/Button/Layout. */
+    #[serde(default)]
+    pub canvas: Option<bool>,
+    /// Inactif au chargement (canvas de menu pause, etc.).
+    #[serde(default)]
+    pub active: Option<bool>,
+    #[serde(default)]
+    pub rect: Option<RectJson>,
+    #[serde(default)]
+    pub image: Option<UiImageJson>,
+    #[serde(default)]
+    pub text: Option<UiTextJson>,
+    #[serde(default)]
+    pub button: Option<bool>,
+    #[serde(default)]
+    pub layout: Option<UiLayoutJson>,
+}
+
+/// RectTransform (sémantique Unity) : ancres/pivot en fractions 0..1 du
+/// parent, position/taille en pixels écran (marges sur un axe étiré).
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct RectJson {
+    #[serde(default = "half2")]
+    pub anchor_min: [f32; 2],
+    #[serde(default = "half2")]
+    pub anchor_max: [f32; 2],
+    #[serde(default = "half2")]
+    pub pivot: [f32; 2],
+    #[serde(default)]
+    pub position: [f32; 2],
+    #[serde(default)]
+    pub size: [f32; 2],
+}
+
+fn half2() -> [f32; 2] {
+    [0.5, 0.5]
+}
+
+impl Default for RectJson {
+    fn default() -> Self {
+        RectJson {
+            anchor_min: half2(),
+            anchor_max: half2(),
+            pivot: half2(),
+            position: [0.0, 0.0],
+            size: [0.0, 0.0],
+        }
+    }
+}
+
+/// Composant Image, avec les 4 Image Types de Unity.
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct UiImageJson {
+    #[serde(default)]
+    pub texture: Option<String>,
+    /// Teinte (défaut 128 = neutre pour les texturées, blanc en aplat).
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+    /// Sprite [x, y, l, h] en texels dans l'atlas (absent = texture entière).
+    #[serde(default)]
+    pub uv: Option<[u16; 4]>,
+    /// "simple" (défaut) | "sliced" | "tiled" | "filled".
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
+    /// Marges 9-slice [g, h, d, b] en texels (mode sliced).
+    #[serde(default)]
+    pub border: Option<[u8; 4]>,
+    /// "horizontal" (défaut) ou "vertical" (mode filled).
+    #[serde(default)]
+    pub fill: Option<String>,
+    /// Remplissage 0..1 (mode filled).
+    #[serde(default)]
+    pub amount: Option<f32>,
+    #[serde(default)]
+    pub semi_transparent: Option<bool>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct UiTextJson {
+    pub font: String,
+    pub text: String,
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+    /// "left" (défaut) | "center" | "right".
+    #[serde(default)]
+    pub align: Option<String>,
+}
+
+/// Layout Group vertical/horizontal (jalon 2 côté rendu ; le format le
+/// porte dès la v1.3).
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct UiLayoutJson {
+    pub axis: String,
+    #[serde(default)]
+    pub padding: [i16; 4],
+    #[serde(default)]
+    pub spacing: i16,
+    #[serde(default)]
+    pub child_align: Option<String>,
+    #[serde(default)]
+    pub expand_w: bool,
+    #[serde(default)]
+    pub expand_h: bool,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct FontJson {
+    pub id: String,
+    pub fnt: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -202,6 +324,8 @@ pub const ENTITY_FLAG_CAMERA: u16 = 1 << 1;
 /// Modificateur du bit lumière : ponctuelle (torche) au lieu de
 /// directionnelle. Le rayon vit dans le pad du vecteur échelle.
 pub const ENTITY_FLAG_LIGHT_POINT: u16 = 1 << 2;
+/// v1.3 : l'entité porte des composants UI (voir la table UI).
+pub const ENTITY_FLAG_UI: u16 = 1 << 3;
 
 /// Hash FNV-1a 32 bits d'un nom de script (le runtime fait le même calcul).
 pub fn script_hash(name: &str) -> u32 {
@@ -350,10 +474,28 @@ pub fn build_with_options(
         texture_blobs.push(data);
     }
 
+    /* Polices UI (v1.3) : blobs .fnt, leur TIM interne est packé en VRAM
+     * avec les textures. */
+    let mut font_index: HashMap<&str, u8> = HashMap::new();
+    let mut font_blobs: Vec<Vec<u8>> = Vec::new();
+    for (i, font) in scene.assets.fonts.iter().enumerate() {
+        if i >= 4 {
+            return Err("4 polices max par scène".into());
+        }
+        if font_index.insert(&font.id, i as u8).is_some() {
+            return Err(format!("duplicate font id '{}'", font.id));
+        }
+        let path = base_dir.join(&font.fnt);
+        let data = std::fs::read(&path)
+            .map_err(|e| format!("police '{}': cannot read {}: {e}", font.id, path.display()))?;
+        crate::fnt::parse(&data).map_err(|e| format!("police '{}': {e}", font.id))?;
+        font_blobs.push(data);
+    }
+
     /* Automatic VRAM packing: place every texture page-aligned and rewrite
-     * the coordinates baked in the TIM blobs. */
+     * the coordinates baked in the TIM blobs (font atlases included). */
     if options.pack_vram {
-        let requests: Vec<vram::TexRequest> = scene
+        let mut requests: Vec<vram::TexRequest> = scene
             .assets
             .textures
             .iter()
@@ -368,9 +510,24 @@ pub fn build_with_options(
                 })
             })
             .collect::<Result<_, String>>()?;
+        for (font, blob) in scene.assets.fonts.iter().zip(&font_blobs) {
+            let tim_off = crate::fnt::parse(blob).unwrap().tim_offset;
+            let (words, height, clut_entries) = tim_geometry(&font.id, &blob[tim_off..])?;
+            requests.push(vram::TexRequest {
+                label: format!("font:{}", font.id),
+                words,
+                height,
+                clut_entries,
+            });
+        }
         let placements = vram::pack(&requests)?;
-        for (blob, placement) in texture_blobs.iter_mut().zip(&placements) {
+        let ntex = texture_blobs.len();
+        for (blob, placement) in texture_blobs.iter_mut().zip(&placements[..ntex]) {
             tim_set_position(blob, placement);
+        }
+        for (blob, placement) in font_blobs.iter_mut().zip(&placements[ntex..]) {
+            let tim_off = crate::fnt::parse(blob).unwrap().tim_offset;
+            tim_set_position(&mut blob[tim_off..], placement);
         }
         report.vram = requests.into_iter().zip(placements).collect();
     }
@@ -593,6 +750,15 @@ pub fn build_with_options(
         if e.camera.enabled() {
             flags |= ENTITY_FLAG_CAMERA;
         }
+        if e.canvas.unwrap_or(false)
+            || e.rect.is_some()
+            || e.image.is_some()
+            || e.text.is_some()
+            || e.button.unwrap_or(false)
+            || e.layout.is_some()
+        {
+            flags |= ENTITY_FLAG_UI;
+        }
         if e.light.is_some() && e.camera.enabled() {
             report.warnings.push(format!(
                 "entité '{}' : lumière ET caméra sur la même entité — choisis un rôle (l'éditeur les rend exclusifs)",
@@ -654,16 +820,204 @@ pub fn build_with_options(
         }
     }
 
+    /* Table UI (v1.3) : un enregistrement de 40 octets par entité UI,
+     * dans l'ordre du fichier (parents d'abord), + table de chaînes. */
+    let mut ui_recs: Vec<u8> = Vec::new();
+    let mut ui_strings: Vec<u8> = Vec::new();
+    let mut ui_count = 0usize;
+    for &i in &order {
+        let e = &scene.entities[i];
+        let is_ui = e.canvas.unwrap_or(false)
+            || e.rect.is_some()
+            || e.image.is_some()
+            || e.text.is_some()
+            || e.button.unwrap_or(false)
+            || e.layout.is_some();
+        if !is_ui {
+            continue;
+        }
+        ui_count += 1;
+        let mut components = 0u8;
+        let mut uflags = 0u8;
+        let mut asset = 0xFFu8;
+        let mut data = 0u16;
+        let mut extra = 0u16;
+        let mut uv = [0u8; 4];
+        let mut border = [0u8; 4];
+        let mut color = [128u8, 128, 128];
+
+        if e.canvas.unwrap_or(false) {
+            components |= 1 << 0;
+        }
+        if e.active.unwrap_or(true) {
+            components |= 1 << 5;
+        }
+        if let Some(img) = &e.image {
+            components |= 1 << 1;
+            match img.kind.as_deref() {
+                None | Some("simple") => {}
+                Some("sliced") => uflags |= 1,
+                Some("tiled") => uflags |= 2,
+                Some("filled") => uflags |= 3,
+                Some(other) => {
+                    return Err(format!(
+                        "entité '{}': image type '{other}' inconnu (simple|sliced|tiled|filled)",
+                        e.name
+                    ))
+                }
+            }
+            match img.fill.as_deref() {
+                None | Some("horizontal") => {}
+                Some("vertical") => uflags |= 1 << 2,
+                Some(other) => {
+                    return Err(format!(
+                        "entité '{}': fill '{other}' inconnu (horizontal|vertical)",
+                        e.name
+                    ))
+                }
+            }
+            if img.semi_transparent.unwrap_or(false) {
+                uflags |= 1 << 3;
+            }
+            if let Some(id) = &img.texture {
+                asset = *texture_index
+                    .get(id.as_str())
+                    .ok_or(format!("entité '{}': texture UI inconnue '{id}'", e.name))?
+                    as u8;
+            } else {
+                color = [255, 255, 255];
+            }
+            if let Some(c) = img.color {
+                color = c;
+            }
+            if let Some(r) = img.uv {
+                for (k, v) in r.iter().enumerate() {
+                    if *v > 255 {
+                        return Err(format!(
+                            "entité '{}': uv {v} hors page (0-255 texels)",
+                            e.name
+                        ));
+                    }
+                    uv[k] = *v as u8;
+                }
+            }
+            if let Some(b) = img.border {
+                border = b;
+            }
+            let amount = img.amount.unwrap_or(1.0).clamp(0.0, 1.0);
+            data = (amount * ONE_4_12 as f32).round() as u16;
+        }
+        if let Some(text) = &e.text {
+            components |= 1 << 2;
+            asset = *font_index
+                .get(text.font.as_str())
+                .ok_or(format!("entité '{}': police inconnue '{}'", e.name, text.font))?;
+            if ui_strings.len() > u16::MAX as usize {
+                return Err("table de chaînes UI pleine (64 Ko)".into());
+            }
+            data = ui_strings.len() as u16;
+            ui_strings.extend_from_slice(text.text.as_bytes());
+            ui_strings.push(0);
+            extra = match text.align.as_deref() {
+                None | Some("left") => 0,
+                Some("center") => 1,
+                Some("right") => 2,
+                Some(other) => {
+                    return Err(format!(
+                        "entité '{}': align '{other}' inconnu (left|center|right)",
+                        e.name
+                    ))
+                }
+            };
+            if let Some(c) = text.color {
+                color = c;
+            } else {
+                color = [255, 255, 255];
+            }
+        }
+        if e.button.unwrap_or(false) {
+            components |= 1 << 3;
+        }
+        if let Some(layout) = &e.layout {
+            components |= 1 << 4;
+            match layout.axis.as_str() {
+                "vertical" => {}
+                "horizontal" => uflags |= 1 << 4,
+                other => {
+                    return Err(format!(
+                        "entité '{}': layout axis '{other}' inconnu (vertical|horizontal)",
+                        e.name
+                    ))
+                }
+            }
+            if layout.expand_w {
+                uflags |= 1 << 5;
+            }
+            if layout.expand_h {
+                uflags |= 1 << 6;
+            }
+            // Packing provisoire (le rendu des layouts arrive au jalon 2) :
+            // spacing + padding uniforme.
+            extra = (layout.spacing.clamp(0, 255) as u16)
+                | ((layout.padding[0].clamp(0, 255) as u16) << 8);
+        }
+
+        // Un canvas sans rect explicite couvre tout l'écran (ancres
+        // étirées) — le défaut « posé au centre » n'a de sens que pour
+        // les widgets enfants.
+        let rect = e.rect.clone().unwrap_or_else(|| {
+            if e.canvas.unwrap_or(false) {
+                RectJson {
+                    anchor_min: [0.0, 0.0],
+                    anchor_max: [1.0, 1.0],
+                    pivot: [0.0, 0.0],
+                    position: [0.0, 0.0],
+                    size: [0.0, 0.0],
+                }
+            } else {
+                RectJson::default()
+            }
+        });
+        let frac = |v: f32| (v.clamp(0.0, 1.0) * ONE_4_12 as f32).round() as u16;
+        ui_recs.extend_from_slice(&pos_to_sorted[i].to_le_bytes());
+        ui_recs.push(components);
+        ui_recs.push(uflags);
+        for v in [
+            rect.anchor_min[0],
+            rect.anchor_min[1],
+            rect.anchor_max[0],
+            rect.anchor_max[1],
+            rect.pivot[0],
+            rect.pivot[1],
+        ] {
+            ui_recs.extend_from_slice(&frac(v).to_le_bytes());
+        }
+        for v in [rect.position[0], rect.position[1], rect.size[0], rect.size[1]] {
+            ui_recs.extend_from_slice(&quantize_i16(v, "rect", &e.name)?.to_le_bytes());
+        }
+        ui_recs.extend_from_slice(&color);
+        ui_recs.push(asset);
+        ui_recs.extend_from_slice(&data.to_le_bytes());
+        ui_recs.extend_from_slice(&extra.to_le_bytes());
+        ui_recs.extend_from_slice(&uv);
+        ui_recs.extend_from_slice(&border);
+    }
+    debug_assert_eq!(ui_recs.len(), ui_count * UI_ENTRY_SIZE);
+
     /* Layout: header | model table | texture table | entities | scripts
-     * (table de hashes) | lights | blobs. */
+     * (table de hashes) | lights | table UI | table polices | chaînes UI
+     * | blobs. Les offsets UI se dérivent des précédents (pas de place
+     * dans l'en-tête) : ui = align4(fin des lumières). */
     let models_offset = HEADER_SIZE;
     let textures_offset = models_offset + model_blobs.len() * MODEL_ENTRY_SIZE;
     let entities_offset = textures_offset + texture_blobs.len() * TEXTURE_ENTRY_SIZE;
     let scripts_offset = entities_offset + entities.len();
     let lights_offset = scripts_offset + script_names.len() * 4;
-    let mut blob_cursor = lights_offset + lights.len() * LIGHT_ENTRY_SIZE;
-
     let align4 = |v: usize| (v + 3) & !3;
+    let ui_offset = align4(lights_offset + lights.len() * LIGHT_ENTRY_SIZE);
+    let fonts_offset = ui_offset + ui_recs.len();
+    let strings_offset = fonts_offset + font_blobs.len() * FONT_ENTRY_SIZE;
+    let mut blob_cursor = strings_offset + ui_strings.len();
     let mut model_entries = Vec::new();
     let mut model_offsets = Vec::new();
     for (blob, tex) in &model_blobs {
@@ -682,6 +1036,15 @@ pub fn build_with_options(
         texture_offsets.push(blob_cursor);
         texture_entries.extend_from_slice(&(blob_cursor as u32).to_le_bytes());
         texture_entries.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+        blob_cursor += blob.len();
+    }
+    let mut font_entries = Vec::new();
+    let mut font_offsets = Vec::new();
+    for blob in &font_blobs {
+        blob_cursor = align4(blob_cursor);
+        font_offsets.push(blob_cursor);
+        font_entries.extend_from_slice(&(blob_cursor as u32).to_le_bytes());
+        font_entries.extend_from_slice(&(blob.len() as u32).to_le_bytes());
         blob_cursor += blob.len();
     }
     let total_size = blob_cursor;
@@ -705,7 +1068,9 @@ pub fn build_with_options(
     out.extend_from_slice(&VERSION.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes()); // flags
     out.extend_from_slice(&(total_size as u32).to_le_bytes());
-    for count in [model_blobs.len(), texture_blobs.len(), n, 0] {
+    // Le 4e compteur (réservé jusqu'à la v1.2) devient le nombre de
+    // widgets UI — nul sur les anciens fichiers, donc rétrocompatible.
+    for count in [model_blobs.len(), texture_blobs.len(), n, ui_count] {
         if count > u16::MAX as usize {
             return Err("too many items in scene".into());
         }
@@ -730,6 +1095,9 @@ pub fn build_with_options(
     // Extension v1.2 : table des lumières (0x38 offset, 0x3C count).
     out.extend_from_slice(&(lights_offset as u32).to_le_bytes());
     out.extend_from_slice(&(lights.len() as u16).to_le_bytes());
+    // Extension v1.3 : nombre de polices (0x3E) ; les offsets des tables
+    // UI/polices/chaînes se dérivent de la fin des lumières.
+    out.extend_from_slice(&(font_blobs.len() as u16).to_le_bytes());
     out.resize(HEADER_SIZE, 0); // reserved
     out.extend_from_slice(&model_entries);
     out.extend_from_slice(&texture_entries);
@@ -741,11 +1109,19 @@ pub fn build_with_options(
         out.extend_from_slice(&entity.to_le_bytes());
         out.extend_from_slice(&[color[0], color[1], color[2], *intensity]);
     }
+    out.resize(ui_offset, 0);
+    out.extend_from_slice(&ui_recs);
+    out.extend_from_slice(&font_entries);
+    out.extend_from_slice(&ui_strings);
     for (offset, (blob, _)) in model_offsets.iter().zip(&model_blobs) {
         out.resize(*offset, 0);
         out.extend_from_slice(blob);
     }
     for (offset, blob) in texture_offsets.iter().zip(&texture_blobs) {
+        out.resize(*offset, 0);
+        out.extend_from_slice(blob);
+    }
+    for (offset, blob) in font_offsets.iter().zip(&font_blobs) {
         out.resize(*offset, 0);
         out.extend_from_slice(blob);
     }
@@ -800,6 +1176,75 @@ pub struct PscHeader {
     pub scripts_offset: u32,
     pub lights_offset: u32,
     pub light_count: u16,
+    /// v1.3 : widgets UI (4e compteur) et polices (0x3E).
+    pub ui_count: u16,
+    pub font_count: u16,
+}
+
+impl PscHeader {
+    /// Offsets dérivés des tables v1.3 : (ui, polices, chaînes).
+    pub fn ui_offsets(&self) -> (usize, usize, usize) {
+        let ui = (self.lights_offset as usize + self.light_count as usize * LIGHT_ENTRY_SIZE + 3)
+            & !3;
+        let fonts = ui + self.ui_count as usize * UI_ENTRY_SIZE;
+        let strings = fonts + self.font_count as usize * FONT_ENTRY_SIZE;
+        (ui, fonts, strings)
+    }
+}
+
+/// Un enregistrement de la table UI (v1.3), champs bruts du fichier.
+#[derive(Debug, Clone)]
+pub struct PscUiRec {
+    pub entity: u16,
+    pub components: u8,
+    pub flags: u8,
+    /// anchor_min, anchor_max, pivot en 4.12.
+    pub anchors: [u16; 6],
+    pub pos: [i16; 2],
+    pub size: [i16; 2],
+    pub color: [u8; 3],
+    pub asset: u8,
+    pub data: u16,
+    pub extra: u16,
+    pub uv: [u8; 4],
+    pub border: [u8; 4],
+}
+
+pub fn parse_ui(data: &[u8], header: &PscHeader) -> Vec<PscUiRec> {
+    let (base, _, _) = header.ui_offsets();
+    let mut out = Vec::new();
+    for i in 0..header.ui_count as usize {
+        let o = base + i * UI_ENTRY_SIZE;
+        let u16at = |k: usize| u16::from_le_bytes([data[o + k], data[o + k + 1]]);
+        let i16at = |k: usize| i16::from_le_bytes([data[o + k], data[o + k + 1]]);
+        out.push(PscUiRec {
+            entity: u16at(0),
+            components: data[o + 2],
+            flags: data[o + 3],
+            anchors: [u16at(4), u16at(6), u16at(8), u16at(10), u16at(12), u16at(14)],
+            pos: [i16at(16), i16at(18)],
+            size: [i16at(20), i16at(22)],
+            color: [data[o + 24], data[o + 25], data[o + 26]],
+            asset: data[o + 27],
+            data: u16at(28),
+            extra: u16at(30),
+            uv: [data[o + 32], data[o + 33], data[o + 34], data[o + 35]],
+            border: [data[o + 36], data[o + 37], data[o + 38], data[o + 39]],
+        });
+    }
+    out
+}
+
+/// Blobs .fnt embarqués : (offset, taille) par police.
+pub fn parse_fonts(data: &[u8], header: &PscHeader) -> Vec<(usize, usize)> {
+    let (_, base, _) = header.ui_offsets();
+    (0..header.font_count as usize)
+        .map(|i| {
+            let o = base + i * FONT_ENTRY_SIZE;
+            let u32at = |k: usize| u32::from_le_bytes(data[o + k..o + k + 4].try_into().unwrap());
+            (u32at(0) as usize, u32at(4) as usize)
+        })
+        .collect()
 }
 
 /// Une entrée de la table des lumières (v1.2).
@@ -857,6 +1302,8 @@ pub fn parse_header(data: &[u8]) -> Result<PscHeader, String> {
         scripts_offset: u32at(52),
         lights_offset: u32at(56),
         light_count: u16at(60),
+        ui_count: u16at(18),
+        font_count: u16at(62),
     };
     if h.version != VERSION {
         return Err(format!("unsupported PSC version {}", h.version));

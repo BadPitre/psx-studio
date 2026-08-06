@@ -6,6 +6,7 @@
 //!
 //! MIT License — Copyright (c) 2026 Bertrand
 
+pub mod fnt;
 pub mod gltf_import;
 pub mod pmd;
 pub mod project;

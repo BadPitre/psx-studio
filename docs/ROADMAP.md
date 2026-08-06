@@ -127,7 +127,11 @@ drag depuis le panneau Project. Mécanisme générique : les prefabs 3D
 l'utiliseront plus tard.
 
 **Spec complète : [`UI-SYSTEM.md`](UI-SYSTEM.md)** — 5 jalons :
-fondations (format v1.3 + RectTransform + runtime + HUD de démo),
+~~fondations (format v1.3 + RectTransform + runtime + HUD de démo)~~
+— **livré** (table UI 40 o/widget + polices .fnt dans le .psc, offsets
+dérivés des réservés ; font2fnt + police de démo 5×7 ; Ui_Draw en
+OT[0] : rects 4.12, aplats, Image Filled, texte aligné ; HUD village
+et champ ; parsers TS/C + previewer en parité, testés),
 Layout Groups + Sliced/Tiled + édition visuelle, prefabs UI + Prefab
 Mode, interactif (boutons/focus/API scripts), confort (Grid Layout,
 fill radial, live tweaking, overrides avancés).

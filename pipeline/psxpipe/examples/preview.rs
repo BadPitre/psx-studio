@@ -242,6 +242,7 @@ fn render(
     background: [f32; 3],
     view_rot: &Mat3,
     view_t: [f32; 3],
+    psc: Option<&[u8]>,
     out_path: &PathBuf,
 ) {
     let mut tris: Vec<RasterTri> = Vec::new();
@@ -384,8 +385,124 @@ fn render(
             ]),
         );
     }
+    if let Some(data) = psc {
+        draw_ui(&mut img, data);
+    }
     img.save(out_path).expect("cannot write PNG");
     println!("{} tris drawn -> {}", tris.len(), out_path.display());
+}
+
+/* Overlay UI (v1.3) : parite avec Ui_Draw du runtime — memes resolutions
+ * de rects (entier, 4.12), aplats colores, images Filled et texte .fnt. */
+fn draw_ui(img: &mut image::RgbaImage, data: &[u8]) {
+    use psxpipe::scene as sc;
+    let Ok(h) = sc::parse_header(data) else { return };
+    if h.ui_count == 0 {
+        return;
+    }
+    let ui = sc::parse_ui(data, &h);
+    let (_, _, strings_off) = h.ui_offsets();
+    let fonts = sc::parse_fonts(data, &h);
+    let parent_of = |e: usize| -> i32 {
+        let off = h.entities_offset as usize + e * sc::ENTITY_SIZE + 0x18;
+        let p = u16::from_le_bytes([data[off], data[off + 1]]);
+        if p == 0xFFFF { -1 } else { p as i32 }
+    };
+
+    let axis = |p_start: i32, p_len: i32, amin: u16, amax: u16, pivot: u16, pos: i16, size: i16| {
+        let lo = p_start + ((p_len * amin as i32) >> 12);
+        let hi = p_start + ((p_len * amax as i32) >> 12);
+        if amin == amax {
+            (lo + pos as i32 - ((size as i32 * pivot as i32) >> 12), size as i32)
+        } else {
+            let start = lo + pos as i32;
+            (start, hi - size as i32 - start)
+        }
+    };
+
+    let mut rects = vec![(0i32, 0i32, 0i32, 0i32); ui.len()];
+    let mut vis = vec![true; ui.len()];
+    for i in 0..ui.len() {
+        let rec = &ui[i];
+        let (mut parent, mut pvis) = ((0, 0, W as i32, H as i32), true);
+        let pe = parent_of(rec.entity as usize);
+        if pe >= 0 {
+            if let Some(pi) = ui[..i].iter().position(|r| r.entity as i32 == pe) {
+                parent = rects[pi];
+                pvis = vis[pi];
+            }
+        }
+        vis[i] = pvis && rec.components & (1 << 5) != 0;
+        let (x, w) = axis(parent.0, parent.2, rec.anchors[0], rec.anchors[2], rec.anchors[4], rec.pos[0], rec.size[0]);
+        let (y, hh) = axis(parent.1, parent.3, rec.anchors[1], rec.anchors[3], rec.anchors[5], rec.pos[1], rec.size[1]);
+        rects[i] = (x, y, w, hh);
+    }
+
+    for i in 0..ui.len() {
+        let rec = &ui[i];
+        let (x, y, mut w, mut hh) = rects[i];
+        if !vis[i] || w <= 0 || hh <= 0 {
+            continue;
+        }
+        if rec.components & (1 << 1) != 0 && rec.asset == 0xFF {
+            if rec.flags & 3 == 3 {
+                if rec.flags & (1 << 2) != 0 {
+                    hh = (hh * rec.data as i32) >> 12;
+                } else {
+                    w = (w * rec.data as i32) >> 12;
+                }
+            }
+            for py in y.max(0)..(y + hh).min(H as i32) {
+                for px in x.max(0)..(x + w).min(W as i32) {
+                    img.put_pixel(px as u32, py as u32,
+                        image::Rgba([rec.color[0], rec.color[1], rec.color[2], 255]));
+                }
+            }
+        }
+        if rec.components & (1 << 2) != 0 {
+            let Some(&(foff, fsize)) = fonts.get(rec.asset as usize) else { continue };
+            let fdata = &data[foff..foff + fsize];
+            let info = psxpipe::fnt::parse(fdata).unwrap();
+            let adv = psxpipe::fnt::advances(fdata);
+            let tim = parse_tim(&fdata[info.tim_offset..]).unwrap();
+            let start = strings_off + rec.data as usize;
+            let end = data[start..].iter().position(|&b| b == 0).unwrap() + start;
+            let text = &data[start..end];
+            let width: i32 = text.iter().map(|&c| {
+                let g = c as i32 - info.first as i32;
+                if g >= 0 && (g as usize) < info.count as usize { adv[g as usize] as i32 }
+                else { info.cell_w as i32 / 2 }
+            }).sum();
+            let mut cx = match rec.extra {
+                1 => x + (w - width) / 2,
+                2 => x + w - width,
+                _ => x,
+            };
+            for &c in text {
+                let g = c as i32 - info.first as i32;
+                if g < 0 || g as usize >= info.count as usize {
+                    cx += info.cell_w as i32 / 2;
+                    continue;
+                }
+                let (gu, gv) = ((g % 16) * info.cell_w as i32, (g / 16) * info.cell_h as i32);
+                for py in 0..info.cell_h as i32 {
+                    for px in 0..info.cell_w as i32 {
+                        let rgb = tim.sample((gu + px) as u8, (gv + py) as u8);
+                        if rgb == [0.0, 0.0, 0.0] {
+                            continue;
+                        }
+                        let (sx, sy) = (cx + px, y + py);
+                        if sx < 0 || sx >= W as i32 || sy < 0 || sy >= H as i32 {
+                            continue;
+                        }
+                        img.put_pixel(sx as u32, sy as u32,
+                            image::Rgba([rec.color[0], rec.color[1], rec.color[2], 255]));
+                    }
+                }
+                cx += adv[g as usize] as i32;
+            }
+        }
+    }
 }
 
 /* ----------------------------------------------------------------- main -- */
@@ -578,7 +695,7 @@ fn main() {
             let r = mat_vec(&view_rot, [-cam_pos[0], -cam_pos[1], -cam_pos[2]]);
             [r[0], r[1], r[2]]
         };
-        render(&instances, &lighting, background, &view_rot, view_t, &out_path);
+        render(&instances, &lighting, background, &view_rot, view_t, Some(&data), &out_path);
     } else {
         /* Model mode: orbit camera like the poc-renderer. */
         let model = parse_pmd(&data).expect("bad PMD");
@@ -611,6 +728,7 @@ fn main() {
             [16.0 / 255.0, 16.0 / 255.0, 48.0 / 255.0],
             &identity,
             [0.0, 0.0, 0.0],
+            None,
             &out_path,
         );
     }

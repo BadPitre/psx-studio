@@ -21,6 +21,9 @@ _Static_assert(sizeof(PscTextureEntry) == 8, "texture entry must be 8 bytes");
 _Static_assert(sizeof(PscEntityRec) == 32, "entity record must be 32 bytes");
 _Static_assert(sizeof(PscLightRec) == 6, "light record must be 6 bytes");
 _Static_assert(offsetof(PscHeader, lights_offset) == 56, "v1.2 layout");
+_Static_assert(offsetof(PscHeader, ui_count) == 18, "v1.3 layout");
+_Static_assert(offsetof(PscHeader, font_count) == 62, "v1.3 layout");
+_Static_assert(sizeof(PscUiRec) == 40, "v1.3 UI record");
 
 /* Scene arena ------------------------------------------------------------- */
 /* All per-scene data (the raw .psc file + runtime entity array) lives here.
@@ -185,12 +188,13 @@ static int Scene_Parse(Scene* scene, uint8_t* data)
 		if (tim.mode & 0x8)
 		{
 			LoadImage(tim.crect, tim.caddr);
-			clut[i] = getClut(tim.crect->x, tim.crect->y);
+			scene->tex_clut[i] = clut[i] = getClut(tim.crect->x, tim.crect->y);
 		}
 		/* Bit 9 = dithering : le tpage d'un polygone texture remplace
 		 * l'etat du DRAWENV, sans ce bit chaque prim texturee
 		 * redesactiverait le dithering demande par dtd=1. */
-		tpage[i] = getTPage(tim.mode & 0x3, 0, tim.prect->x, tim.prect->y)
+		scene->tex_tpage[i] = tpage[i] =
+			getTPage(tim.mode & 0x3, 0, tim.prect->x, tim.prect->y)
 			| (1 << 9);
 	}
 	DrawSync(0);
@@ -317,6 +321,56 @@ static int Scene_Parse(Scene* scene, uint8_t* data)
 			}
 		}
 	}
+	/* UI (v1.3) : la table suit les lumieres (alignee 4), puis les
+	 * polices puis les chaines. Les atlas de police sont uploades comme
+	 * les textures. */
+	scene->ui_count = 0;
+	scene->font_count = 0;
+	if (header->ui_count > 0 && header->lights_offset != 0)
+	{
+		uint32_t ui_off = (header->lights_offset
+			+ header->light_count * sizeof(PscLightRec) + 3) & ~3u;
+		uint32_t fonts_off = ui_off + header->ui_count * sizeof(PscUiRec);
+		uint32_t strings_off = fonts_off + header->font_count * 8;
+		scene->ui = (const PscUiRec*)(data + ui_off);
+		scene->ui_count = header->ui_count <= SCENE_MAX_UI
+			? header->ui_count : SCENE_MAX_UI;
+		scene->ui_strings = (const char*)(data + strings_off);
+		for (int i = 0; i < header->font_count && i < SCENE_MAX_FONTS; i++)
+		{
+			uint32_t off = *(const uint32_t*)(data + fonts_off + i * 8);
+			const uint8_t* fnt = data + off;
+			if (fnt[0] != 'F' || fnt[1] != 'N' || fnt[2] != 'T')
+				continue;
+			UiFont* font = &scene->fonts[scene->font_count++];
+			font->cell_w = fnt[4];
+			font->cell_h = fnt[5];
+			font->first = fnt[6];
+			font->count = fnt[7];
+			font->advances = fnt + 8;
+			font->clut = 0;
+			uint32_t tim_off = (8u + fnt[7] + 3u) & ~3u;
+			TIM_IMAGE tim;
+			if (GetTimInfo((const uint32_t*)(fnt + tim_off), &tim) != 0)
+			{
+				scene->font_count--;
+				continue;
+			}
+			LoadImage(tim.prect, tim.paddr);
+			if (tim.mode & 0x8)
+			{
+				LoadImage(tim.crect, tim.caddr);
+				font->clut = getClut(tim.crect->x, tim.crect->y);
+			}
+			font->tpage = getTPage(tim.mode & 0x3, 0, tim.prect->x, tim.prect->y);
+			/* Texels par mot : 4 en 4bpp, 2 en 8bpp. */
+			int shift = (tim.mode & 0x3) == 0 ? 2 : 1;
+			font->u0 = (uint8_t)((tim.prect->x % 64) << shift);
+			font->v0 = (uint8_t)(tim.prect->y % 256);
+		}
+	}
+	DrawSync(0);
+
 	scene->color_mtx = color_mtx;
 	gte_SetColorMatrix(&color_mtx);
 	gte_SetBackColor(header->ambient[0], header->ambient[1], header->ambient[2]);
@@ -697,6 +751,8 @@ uint8_t* Scene_Draw(const Scene* scene, const MATRIX* view, uint32_t* ot,
 		addPrim(&ot[otz], halo);
 		packet += sizeof(POLY_F4);
 	}
+
+	packet = Ui_Draw(scene, ot, packet, packet_limit);
 
 	return packet;
 }

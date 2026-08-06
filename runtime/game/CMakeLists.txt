@@ -18,6 +18,7 @@ psn00bsdk_add_executable(game GPREL
 	scripts/registry.c
 	${PROJECT_SOURCE_DIR}/../engine/pmd.c
 	${PROJECT_SOURCE_DIR}/../engine/scene.c
+	${PROJECT_SOURCE_DIR}/../engine/ui.c
 	${PROJECT_SOURCE_DIR}/../engine/gameapi.c
 	${PROJECT_SOURCE_DIR}/../engine/sfx.c
 )
