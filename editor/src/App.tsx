@@ -1065,6 +1065,8 @@ export default function App() {
   }>({ seq: 0, kind: "3d" });
   const [dither, setDither] = useState(true);
   const [culling, setCulling] = useState(false);
+  /* Aperçu du HUD superposé à la vue 3D (off : l'UI vit dans la vue Canvas). */
+  const [showHud, setShowHud] = useState(false);
 
   /* Mode projet (Tauri). */
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -2318,6 +2320,13 @@ export default function App() {
                   >
                     ◪
                   </button>
+                  <button
+                    className={showHud ? "active" : ""}
+                    title="Superposer le HUD (canvas UI) sur la vue 3D — l'édition se fait dans la vue Canvas"
+                    onClick={() => setShowHud(!showHud)}
+                  >
+                    ▤
+                  </button>
                 </div>
                 <Viewport
                   scene={scene}
@@ -2331,6 +2340,7 @@ export default function App() {
                   culling={culling}
                   onModelDrop={isTauri && sceneDoc ? addModelEntity : undefined}
                   viewPreset={viewPreset}
+                  showUi={showHud}
                 />
               </div>
             )}

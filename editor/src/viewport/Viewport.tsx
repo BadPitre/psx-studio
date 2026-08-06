@@ -50,6 +50,9 @@ export interface ViewportProps {
   onModelDrop?: (out: string, pos: [number, number, number]) => void;
   /** Preset de vue (seq incrémenté à chaque clic) : 3d, dessus, face, côté. */
   viewPreset?: { seq: number; kind: "3d" | "top" | "front" | "side" };
+  /** Superposer le HUD (canvas UI) sur la vue 3D (défaut : non — l'UI
+   * s'édite dans la vue Canvas). */
+  showUi?: boolean;
 }
 
 const MOVE_SPEED = 420; // unités monde / seconde
@@ -72,6 +75,7 @@ export function Viewport({
   culling = false,
   onModelDrop,
   viewPreset,
+  showUi = false,
 }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -82,9 +86,13 @@ export function Viewport({
    * par-dessus la 3D, comme sur console. Redessiné à chaque rebuild. */
   useEffect(() => {
     const ctx = uiRef.current?.getContext("2d");
-    if (!ctx || !scene) return;
+    if (!ctx) return;
+    if (!scene || !showUi) {
+      ctx.clearRect(0, 0, PS1_RESOLUTION.x, PS1_RESOLUTION.y);
+      return;
+    }
     import("./uiOverlay").then(({ drawUi }) => drawUi(ctx, scene));
-  }, [scene]);
+  }, [scene, showUi]);
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer;
     camera: THREE.PerspectiveCamera;
