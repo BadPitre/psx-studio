@@ -255,7 +255,7 @@ void    Ui_FocusClear(void);
 Comme dans Unity, un canvas ne vit **pas forcément dans une scène** :
 il peut être sauvegardé en **Prefab** et réutilisé partout.
 
-- **Fichier** : `prefabs/<nom>.json` — le même schéma d'entités que le
+- **Fichier** : `<nom>.json` (dans le dossier de ton choix) — le même schéma d'entités que le
   `scene.json` (un sous-arbre avec **exactement une racine**, ici
   typiquement un canvas), plus ses besoins d'assets (modèles,
   textures, polices). Un prefab se crée en glissant une entité de la

@@ -815,19 +815,35 @@ pub struct ProjectFile {
     pub out: Option<String>,
 }
 
-fn kind_for(section: &str, ext: &str) -> &'static str {
+/// Type d'une entrée d'après son extension — et, pour les `.json`
+/// (scène ou prefab, même schéma), d'après ce que le projet en sait :
+/// `is_scene` vient de project.json, sinon un tableau `entities` fait
+/// un prefab. L'utilisateur range ses fichiers où il veut : le dossier
+/// n'est plus qu'un indice de dernier recours.
+fn kind_for(ext: &str, is_scene: bool, json_has_entities: bool) -> &'static str {
     match ext {
         "gltf" | "glb" => "model",
         "png" => "texture",
         "wav" | "vag" => "audio",
         "bin" => "buffer",
-        "json" if section == "scenes" => "scene",
-        "json" if section == "prefabs" => "prefab",
+        "json" if is_scene => "scene",
+        "json" if json_has_entities => "prefab",
         // PSX Script : compilé dans la scène qui l'utilise (pas
         // d'enregistrement dans project.json).
         "psxs" => "script",
         _ => "other",
     }
+}
+
+/// Dossiers et fichiers que le panneau Project n'a pas à montrer :
+/// artefacts générés et fichiers cachés.
+fn is_hidden_entry(rel: &str, name: &str) -> bool {
+    name.starts_with('.')
+        // Sorties du build (Library/ = cache de conversion, Build/ = ISO).
+        || rel == "Library"
+        || rel == "Build"
+        || rel == "build"
+        || rel == "project.json"
 }
 
 /// Liste le contenu du projet pour le panneau Project : les fichiers des
@@ -860,13 +876,24 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
     collect(&project["music"], None);
     collect(&project["scenes"], None);
 
-    // Parcours récursif : les dossiers (même vides) apparaissent, pour que
-    // l'utilisateur puisse ranger ses fichiers comme il veut.
+    // Chemins de scènes déclarés (un .json est une scène s'il y figure).
+    let scene_paths: std::collections::BTreeSet<String> = project["scenes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .map(|s| s.replace('\\', "/"))
+        .collect();
+
+    /* Parcours récursif du projet ENTIER : l'arborescence appartient à
+     * l'utilisateur (rien n'impose « scripts/ », « prefabs/ »…), seuls
+     * les artefacts générés sont masqués. Les dossiers vides
+     * apparaissent aussi, pour pouvoir y ranger quelque chose. */
     fn walk(
         dir: &Path,
         prefix: &str,
-        section: &str,
         registered: &std::collections::BTreeMap<String, Option<String>>,
+        scene_paths: &std::collections::BTreeSet<String>,
         files: &mut Vec<ProjectFile>,
         seen: &mut std::collections::BTreeSet<String>,
     ) {
@@ -882,36 +909,48 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
             .collect();
         names.sort();
         for (name, is_dir) in names {
-            // Library/ et fichiers cachés n'ont rien à faire dans le panneau.
-            if name.starts_with('.') {
+            let rel = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            if is_hidden_entry(&rel, &name) {
                 continue;
             }
-            let rel = format!("{prefix}/{name}");
+            let section = rel.split('/').next().unwrap_or("").to_string();
             if is_dir {
                 let child = dir.join(&name);
                 files.push(ProjectFile {
                     path: rel.clone(),
                     name,
-                    section: section.into(),
+                    section,
                     kind: "dir".into(),
                     size: 0,
                     registered: true,
                     exists: true,
                     out: None,
                 });
-                walk(&child, &rel, section, registered, files, seen);
+                walk(&child, &rel, registered, scene_paths, files, seen);
                 continue;
             }
             let ext = std::path::Path::new(&name)
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            let kind = kind_for(section, &ext);
-            let size = std::fs::metadata(dir.join(&name)).map(|m| m.len()).unwrap_or(0);
+            let full = dir.join(&name);
+            // Scène ou prefab : le contenu tranche (même schéma JSON).
+            let json_has_entities = ext == "json"
+                && !scene_paths.contains(&rel)
+                && std::fs::read_to_string(&full)
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                    .is_some_and(|v| v["entities"].is_array());
+            let kind = kind_for(&ext, scene_paths.contains(&rel), json_has_entities);
+            let size = std::fs::metadata(&full).map(|m| m.len()).unwrap_or(0);
             seen.insert(rel.clone());
             files.push(ProjectFile {
                 name,
-                section: section.into(),
+                section,
                 kind: kind.into(),
                 size,
                 // Les compagnons/inconnus ne sont pas importables : pas de badge.
@@ -929,16 +968,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
 
     let mut files = Vec::new();
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for section in ["scenes", "assets", "audio", "prefabs", "scripts"] {
-        walk(
-            &project_dir.join(section),
-            section,
-            section,
-            &registered,
-            &mut files,
-            &mut seen,
-        );
-    }
+    walk(project_dir, "", &registered, &scene_paths, &mut files, &mut seen);
 
     // Entrées de project.json dont le fichier a disparu (ex. asset supprimé
     // à la main) : montrées avec le badge « manquant ».
@@ -956,7 +986,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
             path: rel.clone(),
             name: name.to_string(),
             section: section.to_string(),
-            kind: kind_for(section, &ext).into(),
+            kind: kind_for(&ext, scene_paths.contains(rel), false).into(),
             size: 0,
             registered: true,
             exists: false,
@@ -965,6 +995,25 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
     }
 
     Ok(files)
+}
+
+/// Garde-fou des dossiers venus du panneau Project : "" = racine du
+/// projet (l'utilisateur peut ranger à la racine), sinon un chemin
+/// relatif propre.
+fn check_dir_path(rel: &str) -> Result<(), String> {
+    if rel.is_empty() {
+        return Ok(());
+    }
+    check_rel_path(rel)
+}
+
+/// Chemin d'un enfant de `parent` ("" = racine du projet).
+fn join_rel(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        name.to_string()
+    } else {
+        format!("{parent}/{name}")
+    }
 }
 
 /// Garde-fou des chemins venus du panneau Project : relatifs, en avant,
@@ -983,7 +1032,7 @@ fn check_rel_path(rel: &str) -> Result<(), String> {
 
 /// Crée un dossier dans le projet (menu « Créer ▸ Dossier » du panneau).
 pub fn create_folder(project_dir: &Path, parent_rel: &str, name: &str) -> Result<String, String> {
-    check_rel_path(parent_rel)?;
+    check_dir_path(parent_rel)?;
     let clean: String = name
         .trim()
         .chars()
@@ -998,7 +1047,7 @@ pub fn create_folder(project_dir: &Path, parent_rel: &str, name: &str) -> Result
     if clean.is_empty() {
         return Err("nom de dossier vide".into());
     }
-    let rel = format!("{parent_rel}/{clean}");
+    let rel = join_rel(parent_rel, &clean);
     let path = project_dir.join(&rel);
     if path.exists() {
         return Err(format!("{rel} existe déjà"));
@@ -1013,7 +1062,7 @@ pub fn create_folder(project_dir: &Path, parent_rel: &str, name: &str) -> Result
 /// relative au même dossier). Retourne le nouveau chemin relatif.
 pub fn move_entry(project_dir: &Path, from_rel: &str, to_dir_rel: &str) -> Result<String, String> {
     check_rel_path(from_rel)?;
-    check_rel_path(to_dir_rel)?;
+    check_dir_path(to_dir_rel)?;
     let src = project_dir.join(from_rel);
     if !src.is_file() {
         return Err(format!("{from_rel} n'est pas un fichier du projet"));
@@ -1023,7 +1072,7 @@ pub fn move_entry(project_dir: &Path, from_rel: &str, to_dir_rel: &str) -> Resul
         return Err(format!("{to_dir_rel} n'est pas un dossier du projet"));
     }
     let name = from_rel.rsplit('/').next().unwrap().to_string();
-    let new_rel = format!("{to_dir_rel}/{name}");
+    let new_rel = join_rel(to_dir_rel, &name);
     if new_rel == from_rel {
         return Ok(new_rel);
     }
@@ -1039,7 +1088,7 @@ pub fn move_entry(project_dir: &Path, from_rel: &str, to_dir_rel: &str) -> Resul
         let bin_name = format!("{}.bin", &name[..name.len() - 5]);
         let bin_from = format!("{}/{bin_name}", from_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or(""));
         if project_dir.join(&bin_from).is_file() {
-            let bin_to = format!("{to_dir_rel}/{bin_name}");
+            let bin_to = join_rel(to_dir_rel, &bin_name);
             std::fs::rename(project_dir.join(&bin_from), project_dir.join(&bin_to))
                 .map_err(|e| format!("déplacement du .bin : {e}"))?;
             moved.push((bin_from, bin_to));
@@ -1085,8 +1134,15 @@ pub fn move_entry(project_dir: &Path, from_rel: &str, to_dir_rel: &str) -> Resul
 }
 
 /// Sauvegarde un prefab (sous-arbre d'entités + assets, même schéma que
-/// le scene.json) dans `prefabs/<slug>.json`. Retourne le chemin relatif.
-pub fn save_prefab(project_dir: &Path, name: &str, contents: &str) -> Result<String, String> {
+/// le scene.json) dans `<dossier>/<slug>.json` — le dossier vient du
+/// panneau Project ("" = racine). Retourne le chemin relatif.
+pub fn save_prefab(
+    project_dir: &Path,
+    parent_rel: &str,
+    name: &str,
+    contents: &str,
+) -> Result<String, String> {
+    check_dir_path(parent_rel)?;
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("nom de prefab vide".into());
@@ -1096,8 +1152,10 @@ pub fn save_prefab(project_dir: &Path, name: &str, contents: &str) -> Result<Str
     if !value["entities"].is_array() {
         return Err("prefab invalide : pas de tableau \"entities\"".into());
     }
-    let rel = format!("prefabs/{}.json", sanitize_id(trimmed));
-    std::fs::create_dir_all(project_dir.join("prefabs")).map_err(|e| e.to_string())?;
+    let rel = join_rel(parent_rel, &format!("{}.json", sanitize_id(trimmed)));
+    if let Some(dir) = project_dir.join(&rel).parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     std::fs::write(
         project_dir.join(&rel),
         serde_json::to_string_pretty(&value).map_err(|e| e.to_string())? + "\n",
@@ -1106,14 +1164,17 @@ pub fn save_prefab(project_dir: &Path, name: &str, contents: &str) -> Result<Str
     Ok(rel)
 }
 
-/// Crée une scène vide `scenes/<slug>.json` et l'enregistre dans
-/// project.json (menu « Créer ▸ Scène » du panneau Project).
-pub fn create_scene(project_dir: &Path, name: &str) -> Result<String, String> {
+/// Crée une scène vide `<dossier>/<slug>.json` et l'enregistre dans
+/// project.json (menu « Créer ▸ Scène » du panneau Project). Le dossier
+/// est celui du clic droit ("" = racine) : le rangement appartient à
+/// l'utilisateur.
+pub fn create_scene(project_dir: &Path, parent_rel: &str, name: &str) -> Result<String, String> {
+    check_dir_path(parent_rel)?;
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("nom de scène vide".into());
     }
-    let rel = format!("scenes/{}.json", sanitize_id(trimmed));
+    let rel = join_rel(parent_rel, &format!("{}.json", sanitize_id(trimmed)));
     let path = project_dir.join(&rel);
     if path.exists() {
         return Err(format!("{rel} existe déjà"));
@@ -1141,7 +1202,9 @@ pub fn create_scene(project_dir: &Path, name: &str) -> Result<String, String> {
         .unwrap()
         .push(serde_json::Value::String(rel.clone()));
 
-    std::fs::create_dir_all(project_dir.join("scenes")).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     std::fs::write(
         &path,
         serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "\n",
@@ -1156,17 +1219,18 @@ pub fn create_scene(project_dir: &Path, name: &str) -> Result<String, String> {
     Ok(rel)
 }
 
-/// Crée un PSX Script `scripts/<slug>.psxs` avec un squelette prêt à
+/// Crée un PSX Script `<dossier>/<slug>.psxs` avec un squelette prêt à
 /// l'emploi (menu « Créer ▸ Script » du panneau Project). Les scripts
 /// ne s'enregistrent pas dans project.json : ils sont compilés dans la
 /// scène qui les référence.
-pub fn create_script(project_dir: &Path, name: &str) -> Result<String, String> {
+pub fn create_script(project_dir: &Path, parent_rel: &str, name: &str) -> Result<String, String> {
+    check_dir_path(parent_rel)?;
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("nom de script vide".into());
     }
     let slug = sanitize_id(trimmed);
-    let rel = format!("scripts/{slug}.psxs");
+    let rel = join_rel(parent_rel, &format!("{slug}.psxs"));
     let path = project_dir.join(&rel);
     if path.exists() {
         return Err(format!("{rel} existe déjà"));
@@ -1189,28 +1253,49 @@ pub fn create_script(project_dir: &Path, name: &str) -> Result<String, String> {
     .replace('\t', "    ");
     // Garantie : le squelette proposé compile.
     crate::psxs::compile(&body).map_err(|e| format!("squelette invalide : {e}"))?;
-    std::fs::create_dir_all(project_dir.join("scripts")).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     std::fs::write(&path, body).map_err(|e| format!("{} : {e}", path.display()))?;
     Ok(rel)
+}
+
+/// Tous les PSX Scripts du projet, `nom` -> chemin du fichier — cherchés
+/// PARTOUT (l'utilisateur range ses scripts où il veut ; un script est
+/// désigné par son nom de fichier dans la scène). Le premier trouvé dans
+/// l'ordre alphabétique des chemins gagne en cas d'homonymes.
+pub fn find_scripts(project_dir: &Path) -> std::collections::BTreeMap<String, PathBuf> {
+    fn walk(dir: &Path, prefix: &str, out: &mut std::collections::BTreeMap<String, PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut names: Vec<(String, bool)> = entries
+            .flatten()
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path().is_dir()))
+            .collect();
+        names.sort();
+        for (name, is_dir) in names {
+            let rel = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+            if is_hidden_entry(&rel, &name) {
+                continue;
+            }
+            let path = dir.join(&name);
+            if is_dir {
+                walk(&path, &rel, out);
+            } else if path.extension().and_then(|x| x.to_str()) == Some("psxs") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    out.entry(stem.to_string()).or_insert(path);
+                }
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(project_dir, "", &mut out);
+    out
 }
 
 /// Liste les PSX Scripts du projet (noms sans extension), pour le menu
 /// « Ajouter un composant » de l'éditeur.
 pub fn list_scripts(project_dir: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let dir = project_dir.join("scripts");
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) == Some("psxs") {
-                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                    out.push(stem.to_string());
-                }
-            }
-        }
-    }
-    out.sort();
-    out
+    find_scripts(project_dir).into_keys().collect()
 }
 
 /// Scène de démarrage = première entrée de `project.json.scenes` (elle
@@ -1271,7 +1356,7 @@ pub fn create_project(dir: &Path, name: &str) -> Result<(), String> {
         serde_json::to_string_pretty(&project).map_err(|e| e.to_string())? + "\n",
     )
     .map_err(|e| e.to_string())?;
-    create_scene(dir, "scene0")?;
+    create_scene(dir, "scenes", "scene0")?;
     Ok(())
 }
 

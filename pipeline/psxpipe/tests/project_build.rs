@@ -234,7 +234,7 @@ fn create_scene_registers_and_stays_buildable() {
     let dir = tempfile::tempdir().unwrap();
     setup_project(dir.path());
 
-    let rel = project::create_scene(dir.path(), "Niveau 2 !").unwrap();
+    let rel = project::create_scene(dir.path(), "scenes", "Niveau 2 !").unwrap();
     assert_eq!(rel, "scenes/niveau_2__.json");
     assert!(dir.path().join(&rel).exists());
     let text = std::fs::read_to_string(dir.path().join("project.json")).unwrap();
@@ -245,8 +245,8 @@ fn create_scene_registers_and_stays_buildable() {
     assert_eq!(report.scenes.len(), 3);
 
     // Doublon et nom vide : erreurs claires.
-    assert!(project::create_scene(dir.path(), "Niveau 2 !").is_err());
-    assert!(project::create_scene(dir.path(), "   ").is_err());
+    assert!(project::create_scene(dir.path(), "scenes", "Niveau 2 !").is_err());
+    assert!(project::create_scene(dir.path(), "scenes", "   ").is_err());
 }
 
 #[test]
@@ -306,12 +306,12 @@ fn create_script_startup_scene_and_new_project() {
     assert!(project::create_project(&root, "monjeu").is_err());
 
     // Script : squelette compilable, liste, pas de doublon.
-    let rel = project::create_script(&root, "Mon Script").unwrap();
+    let rel = project::create_script(&root, "scripts", "Mon Script").unwrap();
     assert_eq!(rel, "scripts/mon_script.psxs");
     let src = std::fs::read_to_string(root.join(&rel)).unwrap();
     psxpipe::psxs::compile(&src).expect("le squelette doit compiler");
     assert_eq!(project::list_scripts(&root), vec!["mon_script".to_string()]);
-    assert!(project::create_script(&root, "mon_script").is_err());
+    assert!(project::create_script(&root, "scripts", "mon_script").is_err());
 
     // Le panneau Project voit le script (section scripts, kind script).
     let files = project::list_files(&root).unwrap();
@@ -320,11 +320,82 @@ fn create_script_startup_scene_and_new_project() {
         .any(|f| f.path == "scripts/mon_script.psxs" && f.kind == "script" && f.registered));
 
     // Scene de demarrage : la scene visee passe en tete de project.json.
-    project::create_scene(&root, "niveau2").unwrap();
+    project::create_scene(&root, "scenes", "niveau2").unwrap();
     assert_eq!(scenes_of(&root)[0], "scenes/scene0.json");
     project::set_startup_scene(&root, "scenes/niveau2.json").unwrap();
     let after = scenes_of(&root);
     assert_eq!(after[0], "scenes/niveau2.json");
     assert_eq!(after.len(), 2);
     assert!(project::set_startup_scene(&root, "scenes/absente.json").is_err());
+}
+
+#[test]
+fn free_form_folders() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    setup_project(root);
+
+    /* L'utilisateur range comme il veut : un dossier à lui, un script
+     * dedans, une scène à la racine du projet. */
+    let folder = project::create_folder(root, "", "monjeu").unwrap();
+    assert_eq!(folder, "monjeu");
+    let sub = project::create_folder(root, "monjeu", "cerveaux").unwrap();
+    assert_eq!(sub, "monjeu/cerveaux");
+    let script = project::create_script(root, &sub, "tourne").unwrap();
+    assert_eq!(script, "monjeu/cerveaux/tourne.psxs");
+
+    // Le script est trouvé où qu'il soit (menu « Ajouter un composant »).
+    assert!(project::list_scripts(root).contains(&"tourne".to_string()));
+
+    // Une scène qui l'utilise se builde : le bytecode est bien embarqué.
+    let scene = serde_json::json!({
+        "name": "libre",
+        "assets": { "textures": [], "models": [] },
+        "entities": [{ "name": "girouette", "scripts": ["tourne"] }]
+    });
+    std::fs::write(
+        root.join("scenes/scene1.json"),
+        serde_json::to_string_pretty(&scene).unwrap(),
+    )
+    .unwrap();
+    project::build(root, true).unwrap();
+    let psc = std::fs::read(root.join("Build/SCENE1.PSC")).unwrap();
+    assert!(
+        psc.windows(4).any(|w| w == b"PSB2"),
+        "le script d'un dossier libre doit être compilé dans la scène"
+    );
+
+    // Scène créée à la RACINE du projet, enregistrée telle quelle.
+    let rel = project::create_scene(root, "", "niveau libre").unwrap();
+    assert_eq!(rel, "niveau_libre.json");
+    let text = std::fs::read_to_string(root.join("project.json")).unwrap();
+    assert!(text.contains("\"niveau_libre.json\""), "{text}");
+
+    // Prefab rangé dans le dossier de l'utilisateur.
+    let prefab = project::save_prefab(
+        root,
+        "monjeu",
+        "caillou",
+        r#"{"entities":[{"name":"caillou"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(prefab, "monjeu/caillou.json");
+
+    /* Le panneau Project montre l'arborescence réelle : les dossiers de
+     * l'utilisateur, et RIEN de généré (Library/, Build/). */
+    let files = project::list_files(root).unwrap();
+    let mut roots: Vec<&str> = files
+        .iter()
+        .filter(|f| f.kind == "dir" && !f.path.contains('/'))
+        .map(|f| f.path.as_str())
+        .collect();
+    roots.sort();
+    assert_eq!(roots, vec!["assets", "audio", "monjeu", "scenes"]);
+    let find = |p: &str| files.iter().find(|f| f.path == p).map(|f| f.kind.as_str());
+    assert_eq!(find("niveau_libre.json"), Some("scene"));
+    assert_eq!(find("monjeu/caillou.json"), Some("prefab"));
+    assert_eq!(find("monjeu/cerveaux/tourne.psxs"), Some("script"));
+    assert!(!files.iter().any(|f| f.path.starts_with("Library")));
+    assert!(!files.iter().any(|f| f.path.starts_with("Build")));
+    assert!(!files.iter().any(|f| f.path == "project.json"));
 }

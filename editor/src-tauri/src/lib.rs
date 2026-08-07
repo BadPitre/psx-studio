@@ -234,8 +234,8 @@ fn import_asset_bytes(
 
 /// Crée un PSX Script (menu « Créer ▸ Script ») ; retourne son chemin.
 #[tauri::command(async)]
-fn create_script(project_dir: String, name: String) -> Result<String, String> {
-    psxpipe::project::create_script(&PathBuf::from(project_dir), &name)
+fn create_script(project_dir: String, parent: String, name: String) -> Result<String, String> {
+    psxpipe::project::create_script(&PathBuf::from(project_dir), &parent, &name)
 }
 
 /// Champs `public` d'un script (widgets de l'inspecteur) : compile le
@@ -336,14 +336,19 @@ fn list_project_files(
 /// Crée une scène vide et l'enregistre (menu « Créer ▸ Scène »).
 /// Retourne son chemin relatif.
 #[tauri::command(async)]
-fn create_scene(project_dir: String, name: String) -> Result<String, String> {
-    psxpipe::project::create_scene(&PathBuf::from(project_dir), &name)
+fn create_scene(project_dir: String, parent: String, name: String) -> Result<String, String> {
+    psxpipe::project::create_scene(&PathBuf::from(project_dir), &parent, &name)
 }
 
 /// Sauvegarde un prefab (drag hiérarchie -> panneau Project).
 #[tauri::command(async)]
-fn save_prefab(project_dir: String, name: String, contents: String) -> Result<String, String> {
-    psxpipe::project::save_prefab(&PathBuf::from(project_dir), &name, &contents)
+fn save_prefab(
+    project_dir: String,
+    parent: String,
+    name: String,
+    contents: String,
+) -> Result<String, String> {
+    psxpipe::project::save_prefab(&PathBuf::from(project_dir), &parent, &name, &contents)
 }
 
 /// Crée un dossier (menu « Créer ▸ Dossier ») ; retourne son chemin relatif.

@@ -84,11 +84,12 @@ export const api = {
   listProjectFiles: (projectDir: string) =>
     tauriInvoke<ProjectFile[]>("list_project_files", { projectDir }),
   /** Crée une scène vide enregistrée ; retourne son chemin relatif. */
-  createScene: (projectDir: string, name: string) =>
-    tauriInvoke<string>("create_scene", { projectDir, name }),
+  /** `parent` : dossier du projet ("" = racine — l'utilisateur range où il veut). */
+  createScene: (projectDir: string, parent: string, name: string) =>
+    tauriInvoke<string>("create_scene", { projectDir, parent, name }),
   /** Crée un PSX Script (squelette) ; retourne son chemin relatif. */
-  createScript: (projectDir: string, name: string) =>
-    tauriInvoke<string>("create_script", { projectDir, name }),
+  createScript: (projectDir: string, parent: string, name: string) =>
+    tauriInvoke<string>("create_script", { projectDir, parent, name }),
   /** Champs `public` d'un script (widgets de l'inspecteur). */
   scriptFields: (projectDir: string, name: string) =>
     tauriInvoke<ScriptField[]>("script_fields", { projectDir, name }),
@@ -109,8 +110,8 @@ export const api = {
   createProject: (dir: string, name: string) =>
     tauriInvoke<void>("create_project", { dir, name }),
   /** Sauvegarde un prefab (JSON d'entités + assets) ; retourne son chemin. */
-  savePrefab: (projectDir: string, name: string, contents: string) =>
-    tauriInvoke<string>("save_prefab", { projectDir, name, contents }),
+  savePrefab: (projectDir: string, parent: string, name: string, contents: string) =>
+    tauriInvoke<string>("save_prefab", { projectDir, parent, name, contents }),
   createFolder: (projectDir: string, parent: string, name: string) =>
     tauriInvoke<string>("create_folder", { projectDir, parent, name }),
   /** Déplace un fichier vers un dossier et met à jour project.json. */

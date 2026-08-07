@@ -1,8 +1,9 @@
 # PSX Script — le gameplay sans C
 
 PSX Script est le langage de script de PSX Studio : un fichier
-`scripts/<nom>.psxs` dans ton projet, attaché à une entité par la carte
-**Script** de l'inspecteur (le nom du fichier, sans extension). Pas de
+`<nom>.psxs` rangé où tu veux dans ton projet, attaché à une entité par
+la carte **Script** de l'inspecteur (le nom du fichier, sans extension —
+c'est lui qui compte, pas le dossier). Pas de
 compilation du jeu, pas de toolchain : psxpipe compile le script en
 **bytecode** embarqué dans la scène (`.psc`), et la petite **VM** du
 runtime l'exécute. Édite → Play → c'est là.
@@ -242,7 +243,7 @@ au même endroit : le script marche même « nu ».
 
 ## 6. Sous le capot (format)
 
-- psxpipe compile chaque `scripts/<nom>.psxs` référencé par la scène en
+- psxpipe compile chaque `<nom>.psxs` du projet référencé par la scène en
   blob **PSB1** : en-tête 16 octets (magic, nb constantes, taille code,
   points d'entrée start/frame, taille chaînes), constantes i32, code
   (u32 par instruction : op/a/b/c), chaînes.

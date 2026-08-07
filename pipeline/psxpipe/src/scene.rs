@@ -903,20 +903,19 @@ pub fn build_with_options(
      * sur le registre C — compilé en bytecode PSB1 embarqué dans le
      * .psc, avec une table d'offsets (0 = script C) juste après la
      * table de hashes, signalée par le bit 0 des flags d'en-tête. */
-    let script_dir = options
-        .prefab_dir
-        .as_deref()
-        .unwrap_or(base_dir)
-        .join("scripts");
+    /* Les scripts sont cherchés dans TOUT le projet (le rangement
+     * appartient à l'utilisateur) : un seul parcours, puis lookup par
+     * nom de fichier. */
+    let project_root = options.prefab_dir.as_deref().unwrap_or(base_dir);
+    let script_paths = crate::project::find_scripts(project_root);
     let mut vm_blobs: Vec<Option<Vec<u8>>> = Vec::with_capacity(script_names.len());
     // Champs `public` de chaque script (pour résoudre les valeurs réglées
     // dans l'inspecteur).
     let mut script_fields: Vec<Vec<crate::psxs::PubField>> =
         Vec::with_capacity(script_names.len());
     for name in &script_names {
-        let path = script_dir.join(format!("{name}.psxs"));
-        if path.is_file() {
-            let src = std::fs::read_to_string(&path)
+        if let Some(path) = script_paths.get(name.as_str()) {
+            let src = std::fs::read_to_string(path)
                 .map_err(|e| format!("{} : {e}", path.display()))?;
             let compiled = crate::psxs::compile(&src)
                 .map_err(|e| format!("script '{name}' ({}) : {e}", path.display()))?;

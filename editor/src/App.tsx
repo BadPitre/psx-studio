@@ -1574,10 +1574,10 @@ export default function App() {
   );
 
   const createScriptFromPanel = useCallback(
-    async (name: string) => {
+    async (parent: string, name: string) => {
       if (!project) return;
       try {
-        const rel = await api.createScript(project.dir, name);
+        const rel = await api.createScript(project.dir, parent, name);
         refreshFiles(project.dir);
         const where = await api.openExternal(project.dir, rel);
         setNotice(`script créé : ${rel} (ouvert dans ${where})`);
@@ -1630,10 +1630,10 @@ export default function App() {
   }, [openProject]);
 
   const createSceneFromPanel = useCallback(
-    async (name: string) => {
+    async (parent: string, name: string) => {
       if (!project) return;
       try {
-        const rel = await api.createScene(project.dir, name);
+        const rel = await api.createScene(project.dir, parent, name);
         // project.json a changé : recharge la liste des scènes du menu.
         const proj = await api.openProject(project.dir);
         setProject(proj);
@@ -1970,7 +1970,7 @@ export default function App() {
      prefabs/<nom>.json ; glisser un prefab vers la hiérarchie l'instancie
      (v1 : copie — le lien vivant viendra avec le Prefab Mode). */
   const createPrefabFromEntity = useCallback(
-    async (entityName: string) => {
+    async (entityName: string, parent: string) => {
       if (!project || !sceneDoc) return;
       const all = sceneDoc.entities ?? [];
       const root = all.find((e) => e.name === entityName);
@@ -2005,7 +2005,7 @@ export default function App() {
         | undefined ?? []).filter((f) => fontIds.has(f.id));
       const prefab = { name: entityName, assets: { models, textures, fonts }, entities };
       try {
-        const rel = await api.savePrefab(project.dir, entityName, JSON.stringify(prefab));
+        const rel = await api.savePrefab(project.dir, parent, entityName, JSON.stringify(prefab));
         setNotice(`prefab sauvegardé : ${rel} (${entities.length} entité${entities.length > 1 ? "s" : ""})`);
         refreshFiles(project.dir);
       } catch (e) {
@@ -2908,7 +2908,13 @@ export default function App() {
                     ? [
                         {
                           label: "🧩 Sauvegarder comme prefab",
-                          onClick: () => createPrefabFromEntity(selectedName),
+                          onClick: () =>
+                            createPrefabFromEntity(
+                              selectedName,
+                              scenePath.includes("/")
+                                ? scenePath.slice(0, scenePath.lastIndexOf("/"))
+                                : "",
+                            ),
                         },
                       ]
                     : []),
@@ -3199,8 +3205,11 @@ export default function App() {
                 const kind = naming.kind;
                 setNaming(null);
                 if (!value) return;
-                if (kind === "scene") createSceneFromPanel(value);
-                else createScriptFromPanel(value);
+                const here = scenePath.includes("/")
+                  ? scenePath.slice(0, scenePath.lastIndexOf("/"))
+                  : "";
+                if (kind === "scene") createSceneFromPanel(here, value);
+                else createScriptFromPanel(here, value);
               }}
             />
             <div className="hint">Entrée pour valider · Échap pour annuler</div>

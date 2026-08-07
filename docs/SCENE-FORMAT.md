@@ -76,7 +76,8 @@ Conventions :
   0 = pas de suivi —, hauteur dans scale.pad) → **exclusif avec les
   composants caméra et lumière** (erreur claire au build).
 - `prefab` (éditeur/pipeline, optionnel) : chemin d'un
-  `prefabs/<nom>.json` (même schéma, une seule racine). Le build
+  `<nom>.json` rangé où l'auteur veut (même schéma, une seule racine ;
+  la scène le désigne par son chemin). Le build
   **inline** son sous-arbre à la place de l'entité : la racine prend
   nom/parent/transform/`active` de l'instance, les enfants deviennent
   `instance.enfant`, les assets sont fusionnés (dédupliqués par id).
@@ -86,7 +87,7 @@ Conventions :
   la matrice lumière GTE).
 - Chemins `pmd`/`tim` relatifs au fichier JSON. Les assets sont **embarqués**
   dans le `.psc`.
-- **PSX Script (v1.5)** : si `scripts/<nom>.psxs` existe dans le projet,
+- **PSX Script (v1.5)** : si un `<nom>.psxs` existe quelque part dans le projet,
   psxpipe le compile en blob bytecode **PSB1** embarqué dans le `.psc`
   et pose le bit 0 des flags d'en-tête ; une **table d'offsets** (un u32
   par script, 0 = script C) suit alors la table de hashes. Le blob prime

@@ -45,14 +45,6 @@ export interface LogEntry {
   text: string;
 }
 
-const ROOTS: { id: string; label: string }[] = [
-  { id: "scenes", label: "Scènes" },
-  { id: "scripts", label: "Scripts" },
-  { id: "prefabs", label: "Prefabs" },
-  { id: "assets", label: "Assets" },
-  { id: "audio", label: "Audio" },
-];
-
 const ICONS: Record<ProjectFile["kind"], string> = {
   dir: "📁",
   scene: "🎬",
@@ -103,14 +95,15 @@ export function ProjectPanel({
   onOpenPrefab?: (path: string) => void;
   /** Ouvre un script dans l'éditeur externe (VS Code…). */
   onOpenScript?: (path: string) => void;
-  onCreateScript?: (name: string) => void;
+  onCreateScript?: (parent: string, name: string) => void;
   /** Définit la scène de démarrage (première du project.json). */
   onSetStartupScene?: (path: string) => void;
   /** Chemin de la scène de démarrage (badge « démarrage »). */
   startupScene?: string;
   /** (Ré)importe un asset gltf/glb/png (chemin relatif projet). */
   onImport: (path: string) => void;
-  onCreateScene: (name: string) => void;
+  /** Crée une scène dans `parent` ("" = racine du projet). */
+  onCreateScene: (parent: string, name: string) => void;
   onCreateFolder: (parent: string, name: string) => void;
   /** Déplace un fichier vers un dossier (chemins relatifs projet). */
   onMove: (from: string, toDir: string) => void;
@@ -119,7 +112,7 @@ export function ProjectPanel({
   /** Aperçu rendu d'une tuile (null : icône). */
   getThumb?: (f: ProjectFile) => Promise<string | null>;
   /** Drop d'une entité de la hiérarchie : sauvegarder en prefab. */
-  onCreatePrefab?: (entityName: string) => void;
+  onCreatePrefab?: (entityName: string, parent: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [tab, setTab] = useState<"project" | "console">("project");
@@ -132,7 +125,7 @@ export function ProjectPanel({
     Number(localStorage.getItem("projectTreeWidth")) || 150,
   );
   const [selectedDir, setSelectedDir] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["scenes", "assets", "audio"]));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; file: ProjectFile | null } | null>(
     null,
@@ -177,7 +170,7 @@ export function ProjectPanel({
 
   const actionsFor = (f: ProjectFile | null): MenuAction[] => {
     // Le dossier visé : la tuile/le nœud cliqué, sinon le dossier courant.
-    const parent = f?.kind === "dir" ? f.path : selectedDir || "assets";
+    const parent = f?.kind === "dir" ? f.path : selectedDir;
     const create: MenuAction = {
       label: "Créer",
       children: [
@@ -228,8 +221,8 @@ export function ProjectPanel({
     const req = naming;
     setNaming(null);
     if (!name || !req) return;
-    if (req.kind === "scene") onCreateScene(name);
-    else if (req.kind === "script") onCreateScript?.(name);
+    if (req.kind === "scene") onCreateScene(req.parent, name);
+    else if (req.kind === "script") onCreateScript?.(req.parent, name);
     else onCreateFolder(req.parent, name);
   };
 
@@ -249,7 +242,7 @@ export function ProjectPanel({
       setDropTarget("");
       const entity = e.dataTransfer.getData("text/psx-entity");
       if (entity && onCreatePrefab) {
-        onCreatePrefab(entity);
+        onCreatePrefab(entity, dir);
         return;
       }
       const from = e.dataTransfer.getData("text/psx-path");
@@ -400,26 +393,21 @@ export function ProjectPanel({
           >
             <div
               className={`project-node ${selectedDir === "" ? "selected" : ""}`}
+              title="Racine du projet — dépose ici pour ranger à la racine"
               onClick={() => setSelectedDir("")}
+              {...dropProps("")}
             >
               Tout
               <span className="project-count">
                 {files.filter((f) => f.kind !== "dir").length}
               </span>
             </div>
-            {ROOTS.map((root) => {
-              const node = dirs.find((d) => d.path === root.id) ?? {
-                path: root.id,
-                name: root.label,
-                section: root.id,
-                kind: "dir" as const,
-                size: 0,
-                registered: true,
-                exists: true,
-                out: null,
-              };
-              return renderDir({ ...node, name: root.label }, 0);
-            })}
+            {/* L'arborescence est celle du disque : uniquement les
+                dossiers de l'utilisateur (aucun dossier imposé). */}
+            {dirs.filter((d) => !d.path.includes("/")).map((d) => renderDir(d, 0))}
+            {dirs.length === 0 && (
+              <div className="hint">Aucun dossier — clic droit pour en créer.</div>
+            )}
           </div>
           <div
             className="project-hresize"

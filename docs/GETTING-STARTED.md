@@ -48,7 +48,10 @@ Croix directionnelle pour marcher, ✕ près du PNJ pour parler.
 ## 3. Créer ton propre projet
 
 Un projet se crée depuis l'éditeur : **Fichier ▸ Nouveau projet…**
-(dossiers + `project.json` + une première scène). Son arborescence :
+(`project.json`, une première scène et une arborescence de départ). Elle
+n'a **rien d'obligatoire** : l'organisation t'appartient — scènes,
+scripts, prefabs et assets vivent où tu veux, le panneau Project montre
+tes dossiers et rien d'autre. Le point de départ proposé :
 
 ```
 monjeu/
@@ -60,8 +63,13 @@ monjeu/
   scenes/             .json éditables (la 1re de project.json = démarrage)
   scripts/            .psxs (PSX Script)
   prefabs/            .json réutilisables
-  Library/, Build/    générés (jamais versionnés)
+  Library/, Build/    générés (jamais versionnés, invisibles dans l'éditeur)
 ```
+
+Range-les autrement si ça t'arrange (`monjeu/niveaux/`,
+`monjeu/cerveaux/`…) : les assets et les scènes sont référencés par
+chemin dans `project.json`, les prefabs par chemin dans la scène, et un
+script est trouvé **par son nom de fichier** où qu'il soit.
 
 Le `project.json` correspondant :
 
@@ -177,7 +185,8 @@ de triangles — surveille l'avertissement de budget.)
   génère un squelette prêt à l'emploi.
 - **Prefabs** (comme Unity) : glisse une entité de la hiérarchie vers
   le panneau Project (ou clic droit → « Sauvegarder comme prefab ») →
-  elle devient un `prefabs/<nom>.json` réutilisable. Glisse le prefab dans la hiérarchie d'une scène → une
+  elle devient un `<nom>.json` réutilisable, rangé dans le dossier
+  visé. Glisse le prefab dans la hiérarchie d'une scène → une
   **instance liée** (en bleu 🧩) : la scène ne stocke qu'une référence,
   le contenu est incorporé au build. Double-clic sur le prefab (ou
   « Ouvrir le prefab » dans l'inspecteur) → **Prefab Mode** : édition
@@ -199,9 +208,9 @@ de triangles — surveille l'avertissement de budget.)
 
 Deux voies, mixables librement :
 
-**PSX Script (recommandé pour commencer)** — un fichier
-`scripts/<nom>.psxs` dans ton projet, attaché par la carte Script de
-l'inspecteur. Compilé en bytecode dans la scène : édite → Play, **sans
+**PSX Script (recommandé pour commencer)** — un fichier `<nom>.psxs`
+rangé où tu veux dans ton projet, attaché par la carte Script de
+l'inspecteur (c'est le nom du fichier qui compte, pas le dossier). Compilé en bytecode dans la scène : édite → Play, **sans
 recompiler le jeu**, et un script buggé ne peut pas planter la console.
 La girouette du village de démo en est un :
 
@@ -219,7 +228,7 @@ boutons…) : [`PSX-SCRIPT.md`](PSX-SCRIPT.md).
 **Le C natif** pour les cas qui demandent toute la vitesse ou l'API
 complète (le `player` de la démo). Dans ta copie de `runtime/game/` :
 
-1. Écris un script dans `scripts/` :
+1. Écris un script (n'importe où dans le projet, ici `scripts/`) :
 
 ```c
 #include "engine.h"
