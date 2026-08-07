@@ -21,6 +21,7 @@ import { ProjectPanel, type LogEntry } from "./ProjectPanel";
 import { ContextMenu } from "./ContextMenu";
 import { MenuBar, type Menu } from "./MenuBar";
 import { thumbFor } from "./thumbs";
+import { localAfterReparent } from "./transforms";
 import type { ScriptField } from "./bridge";
 
 type Transform = {
@@ -724,6 +725,7 @@ function Inspector({
   focusNameSignal,
   prefabSource,
   onOpenPrefab,
+  parentName,
 }: {
   scene: PscScene;
   name: string;
@@ -786,6 +788,8 @@ function Inspector({
   uiJson?: Record<string, unknown> | null;
   onUiMutate?: (mut: (e: Record<string, unknown>) => void, histKey?: string) => void;
   focusNameSignal?: number;
+  /** Nom du parent (les transforms sont locales, comme dans Unity). */
+  parentName?: string | null;
   /** Racine d'instance de prefab : chemin du prefab source. */
   prefabSource?: string | null;
   onOpenPrefab?: (rel: string) => void;
@@ -853,9 +857,11 @@ function Inspector({
       {uiJson && onUiMutate && <UiCards ui={uiJson} mutate={onUiMutate} />}
       {!uiJson && (
       <div className="field-group">
-        <div className="field-group-title">Transform</div>
+        <div className="field-group-title">
+          Transform{parentName ? ` · locale (parent : ${parentName})` : ""}
+        </div>
         <Vec3Field
-          label="Position"
+          label={parentName ? "Position (relative au parent)" : "Position"}
           step={10}
           value={transform.pos}
           onChange={(pos) => onChange({ ...transform, pos })}
@@ -1894,16 +1900,31 @@ export default function App() {
           });
           return last + 1;
         };
+        /* Les transforms du format sont LOCALES : changer de parent
+           recalcule la locale pour que l'objet ne bouge pas à l'écran
+           (comportement Unity). Calculé AVANT de réécrire `parent`. */
+        const oldParent = rootEnt.parent as string | undefined;
+        const reparent = (newParent: string | undefined) => {
+          if (newParent === oldParent) return;
+          const local = localAfterReparent(all, dragged, newParent);
+          rootEnt.position = local.position;
+          if (local.rotation.some((v) => v !== 0)) rootEnt.rotation = local.rotation;
+          else delete rootEnt.rotation;
+          if (local.scale.some((v) => v !== 1)) rootEnt.scale = local.scale;
+          else delete rootEnt.scale;
+          if (newParent) rootEnt.parent = newParent;
+          else delete rootEnt.parent;
+        };
+
         if (zone === "root" || !target) {
-          delete rootEnt.parent;
+          reparent(undefined);
           rest.push(...subtree);
         } else if (zone === "into") {
-          rootEnt.parent = target;
+          reparent(target);
           rest.splice(subtreeEnd(target), 0, ...subtree);
         } else {
           const tEnt = rest.find((e) => e.name === target);
-          if (tEnt?.parent) rootEnt.parent = tEnt.parent as string;
-          else delete rootEnt.parent;
+          reparent((tEnt?.parent as string | undefined) ?? undefined);
           const idx =
             zone === "before" ? rest.findIndex((e) => e.name === target) : subtreeEnd(target);
           rest.splice(idx, 0, ...subtree);
@@ -3058,6 +3079,12 @@ export default function App() {
                 controller={currentController}
                 onControllerChange={
                   isTauri && sceneDoc ? setEntityController : undefined
+                }
+                parentName={
+                  scene.entities[selected]?.parent >= 0
+                    ? entityNames[scene.entities[selected].parent] ??
+                      `entité ${scene.entities[selected].parent}`
+                    : null
                 }
                 prefabSource={selectedPrefabSource}
                 onOpenPrefab={isTauri && sceneDoc ? openPrefab : undefined}

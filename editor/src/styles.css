@@ -457,10 +457,17 @@ body {
 .project-body { display: flex; flex: 1; min-height: 0; }
 .project-tree {
   width: 150px;
-  border-right: 1px solid var(--panel-border);
+  flex: 0 0 auto;
   overflow: auto;
   padding: 6px 0;
 }
+/* Poignée de largeur de l'arborescence (comme la barre de Unity). */
+.project-hresize {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: var(--panel-border);
+}
+.project-hresize:hover { background: var(--accent); }
 .project-node {
   display: flex;
   justify-content: space-between;

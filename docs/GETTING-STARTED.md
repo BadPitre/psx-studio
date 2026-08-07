@@ -133,6 +133,9 @@ de triangles — surveille l'avertissement de budget.)
   **Aide**.
 - **Hiérarchie** : ＋ ajoute, clic droit = menu, Ctrl+C/V/D copie/colle/
   duplique, Suppr supprime, F2 renomme, Ctrl+Z/Ctrl+Y annule/rétablit.
+  **Parenter** un objet (glisser sur un autre) garde sa position à
+  l'écran : sa transform devient **locale** au parent (comme Unity), et
+  l'inspecteur l'indique (« Position (relative au parent) »).
 - **Viewport** : clic gauche sélectionne/orbite, clic droit tenu = caméra
   FPS (ZQSD, Shift rapide), molette avance. Gizmos **1/2/3**
   (déplacer/rotation/échelle), Ctrl = snap. Rendu 320×240 authentique
@@ -166,7 +169,9 @@ de triangles — surveille l'avertissement de budget.)
   donc fidèle à la console), et **glisser un modèle dans le viewport
   l'instancie** comme entité à l'endroit visé (dans la hiérarchie : à
   l'origine). L'onglet **Console** à côté garde le journal des imports,
-  builds et erreurs. La section **Scripts** liste tes `.psxs` :
+  builds et erreurs. La barre entre l'arborescence et la grille se
+  **redimensionne** (comme la hauteur du panneau). La section
+  **Scripts** liste tes `.psxs` :
   double-clic (ou clic droit → « Ouvrir dans l'éditeur ») les ouvre
   dans **VS Code** (ou l'éditeur par défaut), et **Créer ▸ Script**
   génère un squelette prêt à l'emploi.

@@ -127,6 +127,10 @@ export function ProjectPanel({
   const [height, setHeight] = useState(() =>
     Number(localStorage.getItem("projectPanelHeight")) || 218,
   );
+  /* Largeur de l'arbre des dossiers (poignée verticale), mémorisée. */
+  const [treeWidth, setTreeWidth] = useState(() =>
+    Number(localStorage.getItem("projectTreeWidth")) || 150,
+  );
   const [selectedDir, setSelectedDir] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["scenes", "assets", "audio"]));
   const [search, setSearch] = useState("");
@@ -386,6 +390,7 @@ export function ProjectPanel({
         <div className="project-body">
           <div
             className="project-tree"
+            style={{ width: treeWidth }}
             onContextMenu={(e) => {
               // Clic droit dans le vide de l'arbre (ou sur « Tout ») :
               // menu Créer ▸ (dossier/scène) sur le dossier courant.
@@ -416,6 +421,28 @@ export function ProjectPanel({
               return renderDir({ ...node, name: root.label }, 0);
             })}
           </div>
+          <div
+            className="project-hresize"
+            title="Largeur de l'arborescence"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startW = treeWidth;
+              const move = (ev: PointerEvent) => {
+                const w = Math.min(420, Math.max(110, startW + ev.clientX - startX));
+                setTreeWidth(w);
+              };
+              const up = () => {
+                window.removeEventListener("pointermove", move);
+                window.removeEventListener("pointerup", up);
+                localStorage.setItem("projectTreeWidth", String(
+                  document.querySelector<HTMLElement>(".project-tree")?.offsetWidth ?? 150,
+                ));
+              };
+              window.addEventListener("pointermove", move);
+              window.addEventListener("pointerup", up);
+            }}
+          />
           <div
             className="project-grid"
             onContextMenu={(e) => {
