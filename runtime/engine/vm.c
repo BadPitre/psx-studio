@@ -32,6 +32,8 @@
 #define PSB_START(b)	(*(const uint16_t*)((b) + 10))
 #define PSB_UPDATE(b)	(*(const uint16_t*)((b) + 12))
 #define PSB_NO_PC		0xFFFF
+/* En-tete PSB2 : 20 octets (les 4 derniers = nb de champs publics). */
+#define PSB_HEADER		20
 
 /* Opcodes (miroir de psxs.rs). */
 enum
@@ -44,7 +46,9 @@ enum
 	OP_ADDROTY, OP_MOVE, OP_HELD, OP_PRESSED, OP_DIST, OP_FIND,
 	OP_DIALOG, OP_DLGOPEN, OP_DLGCLOSE, OP_SHOW, OP_SWITCH, OP_RAND,
 	/* Fonctions utilisateur (frames sur pile statique). */
-	OP_ENTER, OP_CALL, OP_RETV, OP_RET0, OP_GLOAD, OP_GSTORE
+	OP_ENTER, OP_CALL, OP_RETV, OP_RET0, OP_GLOAD, OP_GSTORE,
+	/* Champ `public` : surcharge de l'inspecteur si l'instance en a une. */
+	OP_INITPUB
 };
 
 /* Pile d'appels des fonctions utilisateur : frames statiques (zero
@@ -66,6 +70,7 @@ static VmCall	call_stack[VM_CALL_DEPTH];
 typedef struct
 {
 	int16_t			entity;
+	int16_t			script;		/* indice table + 1 (valeurs publiques) */
 	const uint8_t*	blob;
 	int32_t			regs[VM_REGS];
 } VmInstance;
@@ -95,8 +100,9 @@ static int32_t DistXZ(const Entity* a, const Entity* b)
 static void Run(Scene* scene, VmInstance* in, uint16_t pc)
 {
 	const uint8_t* blob = in->blob;
-	const int32_t* K = (const int32_t*)(blob + 16);
-	const uint32_t* code = (const uint32_t*)(blob + 16 + PSB_CONSTS(blob) * 4);
+	const int32_t* K = (const int32_t*)(blob + PSB_HEADER);
+	const uint32_t* code =
+		(const uint32_t*)(blob + PSB_HEADER + PSB_CONSTS(blob) * 4);
 	const char* strings = (const char*)(code + PSB_CODELEN(blob));
 	int32_t* R = in->regs;
 	int depth = 0;
@@ -239,6 +245,21 @@ static void Run(Scene* scene, VmInstance* in, uint16_t pc)
 		}
 		case OP_GLOAD: R[a] = in->regs[b]; break;
 		case OP_GSTORE: in->regs[a] = R[b]; break;
+		case OP_INITPUB:
+			/* Valeur reglee dans l'inspecteur pour CETTE instance : elle
+			 * ecrase le defaut du script (la table est courte, lue une
+			 * seule fois au demarrage). */
+			for (int j = 0; j < scene->script_value_count; j++)
+			{
+				const PscScriptValue* v = &scene->script_values[j];
+				if (v->entity == in->entity && v->script == in->script &&
+					v->field == b)
+				{
+					R[a] = v->value;
+					break;
+				}
+			}
+			break;
 		default: return; /* opcode inconnu : on coupe, pas de plantage */
 		}
 	}
@@ -252,10 +273,11 @@ static void AddInstance(Scene* scene, int entity, int script_index)
 	if (instance_count >= VM_MAX_INSTANCES || script_index <= 0)
 		return;
 	const uint8_t* blob = scene->vm_code[script_index - 1];
-	if (!blob || memcmp(blob, "PSB1", 4) != 0)
+	if (!blob || memcmp(blob, "PSB2", 4) != 0)
 		return;
 	VmInstance* in = &instances[instance_count++];
 	in->entity = (int16_t)entity;
+	in->script = (int16_t)script_index;
 	in->blob = blob;
 	memset(in->regs, 0, sizeof(in->regs));
 	if (PSB_START(blob) != PSB_NO_PC)

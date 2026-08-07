@@ -1175,10 +1175,11 @@ pub fn create_script(project_dir: &Path, name: &str) -> Result<String, String> {
         "# {slug} — PSX Script (docs/PSX-SCRIPT.md)\n\
          # Attache-le à un objet : inspecteur → ＋ Ajouter un composant.\n\
          \n\
-         var speed = 8\n\
+         # « public » expose le champ dans l'inspecteur (réglable par objet).\n\
+         public var speed = 8\n\
+         public var target : entity\n\
          \n\
          on start\n\
-         \tspeed = 8\n\
          end\n\
          \n\
          every frame\n\

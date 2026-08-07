@@ -125,9 +125,11 @@ pub struct EntityJson {
     pub script: Option<String>,
     /// Scripts additionnels (v1.6) : une entité porte autant de
     /// composants script qu'elle veut. `script` (v1.1) reste accepté et
-    /// vaut le premier de la liste.
+    /// vaut le premier de la liste. Chaque entrée est un nom, ou un
+    /// objet `{ "name": "...", "values": { "champ": v } }` portant les
+    /// valeurs réglées dans l'inspecteur (champs `public`, v1.7).
     #[serde(default)]
-    pub scripts: Vec<String>,
+    pub scripts: Vec<ScriptRef>,
     /// Composant lumière directionnelle (v1.2) : la rotation de l'entité
     /// donne la direction (la lumière éclaire le long de son axe -Z
     /// local, comme les modèles font face à -Z). 2 max par scène : la
@@ -177,13 +179,40 @@ pub struct EntityJson {
     pub layout: Option<UiLayoutJson>,
 }
 
+/// Une entrée de `scripts` : simple nom, ou nom + valeurs publiques.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum ScriptRef {
+    Name(String),
+    WithValues {
+        name: String,
+        #[serde(default)]
+        values: std::collections::BTreeMap<String, serde_json::Value>,
+    },
+}
+
+impl ScriptRef {
+    pub fn name(&self) -> &String {
+        match self {
+            ScriptRef::Name(n) => n,
+            ScriptRef::WithValues { name, .. } => name,
+        }
+    }
+    pub fn values(&self) -> Option<&std::collections::BTreeMap<String, serde_json::Value>> {
+        match self {
+            ScriptRef::Name(_) => None,
+            ScriptRef::WithValues { values, .. } => Some(values),
+        }
+    }
+}
+
 impl EntityJson {
     /// Scripts attachés, dans l'ordre d'exécution : `script` (v1.1) puis
     /// `scripts` (v1.6), sans doublon.
     pub fn script_list(&self) -> Vec<&String> {
         let mut out: Vec<&String> = Vec::new();
-        for s in self.script.iter().chain(self.scripts.iter()) {
-            if !out.iter().any(|n| *n == s) {
+        for s in self.script.iter().chain(self.scripts.iter().map(|r| r.name())) {
+            if !out.contains(&s) {
                 out.push(s);
             }
         }
@@ -880,6 +909,10 @@ pub fn build_with_options(
         .unwrap_or(base_dir)
         .join("scripts");
     let mut vm_blobs: Vec<Option<Vec<u8>>> = Vec::with_capacity(script_names.len());
+    // Champs `public` de chaque script (pour résoudre les valeurs réglées
+    // dans l'inspecteur).
+    let mut script_fields: Vec<Vec<crate::psxs::PubField>> =
+        Vec::with_capacity(script_names.len());
     for name in &script_names {
         let path = script_dir.join(format!("{name}.psxs"));
         if path.is_file() {
@@ -887,12 +920,79 @@ pub fn build_with_options(
                 .map_err(|e| format!("{} : {e}", path.display()))?;
             let compiled = crate::psxs::compile(&src)
                 .map_err(|e| format!("script '{name}' ({}) : {e}", path.display()))?;
+            script_fields.push(compiled.fields);
             vm_blobs.push(Some(compiled.bytecode));
         } else {
+            script_fields.push(Vec::new());
             vm_blobs.push(None);
         }
     }
     let has_vm = vm_blobs.iter().any(Option::is_some);
+
+    /* Valeurs publiques réglées dans l'inspecteur (v1.7) : (entité,
+     * script, champ, valeur). Les références d'entité sont résolues en
+     * index ici — la console ne manipule que des nombres. */
+    let mut script_values: Vec<(u16, u16, u8, i32)> = Vec::new();
+    for &i in &order {
+        let e = &scene.entities[i];
+        for r in &e.scripts {
+            let Some(values) = r.values() else { continue };
+            if values.is_empty() {
+                continue;
+            }
+            let name = r.name();
+            let si = script_names.iter().position(|n| n == name).unwrap();
+            let fields = &script_fields[si];
+            for (key, value) in values {
+                let Some(fi) = fields.iter().position(|f| f.name == *key) else {
+                    report.warnings.push(format!(
+                        "entité '{}' : le script '{name}' n'expose pas de champ                          public '{key}' (valeur ignorée)",
+                        e.name
+                    ));
+                    continue;
+                };
+                let field = &fields[fi];
+                let resolved = match field.kind {
+                    crate::psxs::PubType::Entity => match value {
+                        serde_json::Value::Null => -1,
+                        serde_json::Value::String(target) if target.is_empty() => -1,
+                        serde_json::Value::String(target) => {
+                            let pos = name_to_pos.get(target.as_str()).ok_or(format!(
+                                "entité '{}' : script '{name}', champ '{key}' —                                  entité '{target}' introuvable dans la scène",
+                                e.name
+                            ))?;
+                            pos_to_sorted[*pos] as i32
+                        }
+                        other => {
+                            return Err(format!(
+                                "entité '{}' : script '{name}', champ '{key}' attend                                  un nom d'entité (reçu {other})",
+                                e.name
+                            ))
+                        }
+                    },
+                    _ => match value {
+                        serde_json::Value::Bool(b) => *b as i32,
+                        serde_json::Value::Number(n) => n.as_i64().ok_or(format!(
+                            "entité '{}' : script '{name}', champ '{key}' — entier attendu",
+                            e.name
+                        ))? as i32,
+                        other => {
+                            return Err(format!(
+                                "entité '{}' : script '{name}', champ '{key}' attend un                                  nombre (reçu {other})",
+                                e.name
+                            ))
+                        }
+                    },
+                };
+                script_values.push((
+                    pos_to_sorted[i],
+                    (si + 1) as u16,
+                    fi as u8,
+                    resolved,
+                ));
+            }
+        }
+    }
 
     /* Serialize entities in sorted order. */
     let mut entities = Vec::with_capacity(n * ENTITY_SIZE);
@@ -1351,7 +1451,15 @@ pub fn build_with_options(
     } else {
         4 + script_comps.len() * 4
     };
-    let lights_offset = scripts_offset + scripts_table_len + comps_len;
+    // v1.7 : table des valeurs publiques (12 o par entrée), après les
+    // composants — l'en-tête porte lights_offset, rien ne bouge pour un
+    // lecteur ancien.
+    let values_len = if script_values.is_empty() {
+        0
+    } else {
+        4 + script_values.len() * 12
+    };
+    let lights_offset = scripts_offset + scripts_table_len + comps_len + values_len;
     let align4 = |v: usize| (v + 3) & !3;
     let ui_offset = align4(lights_offset + lights.len() * LIGHT_ENTRY_SIZE);
     let fonts_offset = ui_offset + ui_recs.len();
@@ -1419,8 +1527,9 @@ pub fn build_with_options(
     out.extend_from_slice(&VERSION.to_le_bytes());
     // Flags d'en-tête : bit 0 = table d'offsets bytecode (v1.5),
     // bit 1 = table des composants script (v1.6).
-    let header_flags =
-        if has_vm { 1u16 } else { 0 } | if script_comps.is_empty() { 0 } else { 2 };
+    let header_flags = if has_vm { 1u16 } else { 0 }
+        | if script_comps.is_empty() { 0 } else { 2 }
+        | if script_values.is_empty() { 0 } else { 4 };
     out.extend_from_slice(&header_flags.to_le_bytes());
     out.extend_from_slice(&(total_size as u32).to_le_bytes());
     // Le 4e compteur (réservé jusqu'à la v1.2) devient le nombre de
@@ -1471,6 +1580,18 @@ pub fn build_with_options(
         for (entity, script) in &script_comps {
             out.extend_from_slice(&entity.to_le_bytes());
             out.extend_from_slice(&script.to_le_bytes());
+        }
+    }
+    if !script_values.is_empty() {
+        out.extend_from_slice(&(script_values.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        for (entity, script, field, value) in &script_values {
+            out.extend_from_slice(&entity.to_le_bytes());
+            out.extend_from_slice(&script.to_le_bytes());
+            out.push(*field);
+            out.push(0);
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&value.to_le_bytes());
         }
     }
     for (entity, color, intensity) in &lights {
@@ -1573,6 +1694,32 @@ pub fn parse_script_comps(data: &[u8], h: &PscHeader) -> Vec<(u16, u16)> {
             (
                 u16::from_le_bytes([data[o], data[o + 1]]),
                 u16::from_le_bytes([data[o + 2], data[o + 3]]),
+            )
+        })
+        .collect()
+}
+
+/// Valeurs publiques par instance (v1.7, flag bit 2) : (entité, script,
+/// champ, valeur).
+pub fn parse_script_values(data: &[u8], h: &PscHeader) -> Vec<(u16, u16, u8, i32)> {
+    if h.flags & 4 == 0 {
+        return Vec::new();
+    }
+    let mut base = h.scripts_offset as usize
+        + h.script_count as usize * 4 * if h.flags & 1 != 0 { 2 } else { 1 };
+    if h.flags & 2 != 0 {
+        let n = u16::from_le_bytes([data[base], data[base + 1]]) as usize;
+        base += 4 + n * 4;
+    }
+    let count = u16::from_le_bytes([data[base], data[base + 1]]) as usize;
+    (0..count)
+        .map(|i| {
+            let o = base + 4 + i * 12;
+            (
+                u16::from_le_bytes([data[o], data[o + 1]]),
+                u16::from_le_bytes([data[o + 2], data[o + 3]]),
+                data[o + 4],
+                i32::from_le_bytes(data[o + 8..o + 12].try_into().unwrap()),
             )
         })
         .collect()

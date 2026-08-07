@@ -124,7 +124,45 @@ end
   allocation) — un appel coûte quelques instructions, la récursion de
   `fact(5)` à chaque frame ne se voit pas au chronomètre.
 
-## 4. Fonctions du moteur
+## 4. Champs `public` (réglables dans l'inspecteur)
+
+Préfixe une déclaration par `public` et elle apparaît dans la carte du
+composant, **réglable par objet** — comme un champ sérialisé d'un
+MonoBehaviour Unity :
+
+```
+public var speed = 24          # nombre (défaut 24)
+public var actif : bool = 1    # case à cocher
+public var target : entity     # sélecteur d'objet de la scène
+```
+
+- Types : `int` (défaut), `bool`, `entity`. Un champ `entity` liste les
+  objets de la scène (GameObject, **caméra**, lumière…) et donne au
+  script l'entité choisie, utilisable directement :
+  `distance(self, target)`, `pos_x(target)`, `move(target, …)`.
+- La valeur réglée dans l'inspecteur **écrase le défaut du script**
+  avant `on start` ; sans réglage, le défaut s'applique.
+- Chaque objet a ses propres valeurs (deux tourelles, deux vitesses).
+- Côté scène, ça s'écrit
+  `"scripts": [{ "name": "turret", "values": { "speed": 42, "target": "cible" } }]` ;
+  les références sont résolues en index d'entité **au build** (la
+  console ne manipule que des nombres), et un objet introuvable est une
+  erreur claire.
+
+Exemple — une tourelle qui vise un objet réglé dans l'inspecteur :
+
+```
+public var speed = 8
+public var target : entity
+
+every frame
+    if target != nil and distance(self, target) < 300 then
+        rotate_y(self, speed)
+    end
+end
+```
+
+## 5. Fonctions du moteur
 
 | Fonction | Effet |
 |---|---|
@@ -146,12 +184,16 @@ end
 Les textes sont translittérés vers le charset des polices `.fnt`
 (majuscules, accents aplatis).
 
-## 5. Sous le capot (format)
+## 6. Sous le capot (format)
 
 - psxpipe compile chaque `scripts/<nom>.psxs` référencé par la scène en
   blob **PSB1** : en-tête 16 octets (magic, nb constantes, taille code,
   points d'entrée start/frame, taille chaînes), constantes i32, code
   (u32 par instruction : op/a/b/c), chaînes.
+- Champs publics (v1.7, bit 2 des flags) : le bytecode passe en
+  « PSB2 » (en-tête 20 o + table des registres publics) et la scène
+  porte une table `(entité, script, champ, valeur)` ; l'opcode
+  `INITPUB` applique la valeur au démarrage du script.
 - Plusieurs scripts sur une entité (v1.6, bit 1 des flags) : une table
   de composants `(entité, script)` suit la table des scripts ; le JSON
   s'écrit `"scripts": ["a", "b"]` (`"script": "a"` reste valide pour un
@@ -165,7 +207,7 @@ Les textes sont translittérés vers le charset des polices `.fnt`
   jeu de registres par entité scriptée (24 instances max) et exécute
   `on start` puis `every frame`.
 
-## 6. Limites v1 (assumées)
+## 7. Limites v1 (assumées)
 
 - Pas de tableaux ni de chaînes manipulables ; 12 champs/script,
   12 paramètres + locales par function.

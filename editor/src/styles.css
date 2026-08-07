@@ -372,6 +372,7 @@ body {
   position: absolute;
   left: calc(100% - 4px);
   top: -5px;
+  /* Legacy : le rendu passe désormais par .context-submenu-fixed. */
   min-width: 160px;
   background: #23252e;
   border: 1px solid #3a3d4a;
@@ -633,12 +634,18 @@ body {
 }
 .menu-bar-item:hover, .menu-bar-item.active { background: #2a2d38; }
 
-/* Menus longs (liste des scripts) : scroll au lieu d'être coupés. */
-.context-menu, .context-submenu {
+/* Menus longs (liste des scripts) : défilement VERTICAL seulement —
+ * jamais de barre horizontale, et les sous-menus sont rendus en
+ * position fixe (hors du conteneur défilant) donc jamais rognés. */
+.context-menu {
   max-height: min(60vh, 420px);
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
+.context-item.has-submenu.open { background: var(--select); }
+.context-submenu-fixed { position: fixed; min-width: 200px; }
 
 /* Boîte de nom des menus (nouvelle scène / nouveau script). */
 .naming-overlay {

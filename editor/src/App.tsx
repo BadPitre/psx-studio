@@ -21,6 +21,7 @@ import { ProjectPanel, type LogEntry } from "./ProjectPanel";
 import { ContextMenu } from "./ContextMenu";
 import { MenuBar, type Menu } from "./MenuBar";
 import { thumbFor } from "./thumbs";
+import type { ScriptField } from "./bridge";
 
 type Transform = {
   pos: [number, number, number];
@@ -694,6 +695,10 @@ function Inspector({
   onScriptsChange,
   availableScripts,
   onOpenScript,
+  scriptFields,
+  scriptValues,
+  onScriptValueChange,
+  entityNames,
   subdiv,
   onSubdivChange,
   light,
@@ -736,6 +741,13 @@ function Inspector({
   availableScripts?: string[];
   /** Ouvre le .psxs dans l'éditeur externe (si le fichier existe). */
   onOpenScript?: (name: string) => void;
+  /** Champs `public var` par script (widgets de l'inspecteur). */
+  scriptFields?: Record<string, ScriptField[]>;
+  /** Valeurs réglées sur CETTE entité, par script puis par champ. */
+  scriptValues?: Record<string, Record<string, unknown>>;
+  onScriptValueChange?: (script: string, field: string, value: unknown) => void;
+  /** Noms d'entités de la scène (champs de type `entity`). */
+  entityNames?: string[];
   subdiv?: number | null;
   onSubdivChange?: (subdiv: number | null) => void;
   light?: [number, number, number] | null;
@@ -1156,6 +1168,50 @@ function Inspector({
               </button>
             )}
           </div>
+          {/* Champs `public var` du script : réglables par objet, comme
+              les champs sérialisés d'un MonoBehaviour Unity. */}
+          {(scriptFields?.[name] ?? []).map((f) => {
+            const current = scriptValues?.[name]?.[f.name];
+            const set = (v: unknown) => onScriptValueChange?.(name, f.name, v);
+            if (f.type === "bool") {
+              const on = current === undefined ? f.default !== 0 : Boolean(current);
+              return (
+                <label className="component-row" key={f.name}>
+                  <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
+                  {f.name}
+                </label>
+              );
+            }
+            if (f.type === "entity") {
+              return (
+                <div className="field" key={f.name}>
+                  <label>{f.name} (objet)</label>
+                  <select
+                    className="scene-select model-select"
+                    value={typeof current === "string" ? current : ""}
+                    onChange={(e) => set(e.target.value)}
+                  >
+                    <option value="">(aucun)</option>
+                    {(entityNames ?? []).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            }
+            return (
+              <div className="field" key={f.name}>
+                <label>{f.name}</label>
+                <input
+                  type="number"
+                  value={typeof current === "number" ? current : f.default}
+                  onChange={(e) => set(Number(e.target.value))}
+                />
+              </div>
+            );
+          })}
         </ComponentCard>
       ))}
 
@@ -1269,6 +1325,8 @@ export default function App() {
   /* Scripts attachables : les .psxs du projet + les scripts C du
      runtime de démo (résolus par hash au chargement de la scène). */
   const [projectScripts, setProjectScripts] = useState<string[]>([]);
+  /* Champs `public` des scripts (compilés à la volée par le backend). */
+  const [scriptFields, setScriptFields] = useState<Record<string, ScriptField[]>>({});
   const availableScripts = useMemo(() => {
     const builtin = ["player", "npc", "torche", "hud", "dialogue", "pause"];
     return [...projectScripts, ...builtin.filter((b) => !projectScripts.includes(b))];
@@ -2033,10 +2091,22 @@ export default function App() {
       mutateDoc((doc) => {
         const entity = doc.entities?.find((e) => e.name === name);
         if (!entity) return;
+        // Les valeurs publiques déjà réglées survivent au ré-ordonnancement.
+        const kept: Record<string, Record<string, unknown>> = {};
+        for (const r of (entity.scripts as unknown[] | undefined) ?? []) {
+          if (r && typeof r === "object") {
+            const o = r as { name?: string; values?: Record<string, unknown> };
+            if (o.name && o.values && Object.keys(o.values).length) kept[o.name] = o.values;
+          }
+        }
         delete entity.script;
         delete entity.scripts;
-        if (clean.length === 1) entity.script = clean[0];
-        else if (clean.length > 1) entity.scripts = clean;
+        if (clean.length === 1 && !kept[clean[0]]) entity.script = clean[0];
+        else if (clean.length > 0) {
+          entity.scripts = clean.map((n) =>
+            kept[n] ? { name: n, values: kept[n] } : n,
+          );
+        }
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -2077,6 +2147,34 @@ export default function App() {
           delete entity.light;
           delete entity.controller;
         }
+      }, name);
+    },
+    [mutateDoc, selected, entityNames],
+  );
+
+  /* Valeur publique d'un script sur l'entité sélectionnée : le JSON
+     passe en forme objet { name, values } dès qu'une valeur est réglée. */
+  const setScriptValue = useCallback(
+    (script: string, field: string, value: unknown) => {
+      if (selected < 0) return;
+      const name = entityNames[selected];
+      mutateDoc((doc) => {
+        const entity = doc.entities?.find((e) => e.name === name);
+        if (!entity) return;
+        const list: unknown[] =
+          (entity.scripts as unknown[] | undefined) ??
+          (typeof entity.script === "string" ? [entity.script] : []);
+        delete entity.script;
+        entity.scripts = list.map((r) => {
+          const n = typeof r === "string" ? r : (r as { name?: string })?.name ?? "";
+          if (n !== script) return r;
+          const values = {
+            ...((typeof r === "object" ? (r as { values?: Record<string, unknown> }).values : {}) ??
+              {}),
+            [field]: value,
+          };
+          return { name: script, values };
+        });
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -2374,12 +2472,28 @@ export default function App() {
       : null;
   const selectedPrefabSource = selectedName ? prefabRoots.get(selectedName) ?? null : null;
   const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
+  /* Valeurs publiques réglées sur l'entité (par script). */
+  const currentScriptValues = useMemo(() => {
+    const out: Record<string, Record<string, unknown>> = {};
+    for (const r of (selectedJsonEntity?.scripts as unknown[] | undefined) ?? []) {
+      if (r && typeof r === "object") {
+        const o = r as { name?: string; values?: Record<string, unknown> };
+        if (o.name && o.values) out[o.name] = o.values;
+      }
+    }
+    return out;
+  }, [selectedJsonEntity]);
+
   const currentScripts = useMemo(() => {
     const out: string[] = [];
     const one = selectedJsonEntity?.script;
     if (typeof one === "string" && one.trim()) out.push(one.trim());
-    for (const s of (selectedJsonEntity?.scripts as string[] | undefined) ?? []) {
-      if (typeof s === "string" && s.trim() && !out.includes(s.trim())) out.push(s.trim());
+    for (const s of (selectedJsonEntity?.scripts as unknown[] | undefined) ?? []) {
+      const n =
+        typeof s === "string"
+          ? s
+          : ((s as { name?: string } | null)?.name ?? "");
+      if (n.trim() && !out.includes(n.trim())) out.push(n.trim());
     }
     return out;
   }, [selectedJsonEntity]);
@@ -2442,6 +2556,27 @@ export default function App() {
       : (pscEntity?.flags ?? 0) & 32
         ? false
         : (pscEntity?.model ?? -1) >= 0;
+
+  /* Champs publics des scripts attachés : compilés par le backend (le
+     compilateur est la seule source de vérité), mis en cache par nom. */
+  useEffect(() => {
+    if (!isTauri || !project || currentScripts.length === 0) return;
+    let stale = false;
+    (async () => {
+      const found: Record<string, ScriptField[]> = {};
+      for (const name of currentScripts) {
+        try {
+          found[name] = await api.scriptFields(project.dir, name);
+        } catch {
+          found[name] = [];
+        }
+      }
+      if (!stale) setScriptFields((prev) => ({ ...prev, ...found }));
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [project, currentScripts]);
 
   /* Seuil de subdivision du modèle sélectionné (lu dans project.json). */
   const [modelSubdiv, setModelSubdiv] = useState<number | null>(null);
@@ -2869,6 +3004,10 @@ export default function App() {
                 scripts={currentScripts}
                 onScriptsChange={isTauri && sceneDoc ? setEntityScripts : undefined}
                 availableScripts={availableScripts}
+                scriptFields={scriptFields}
+                scriptValues={currentScriptValues}
+                onScriptValueChange={isTauri && sceneDoc ? setScriptValue : undefined}
+                entityNames={entityNames}
                 onOpenScript={
                   isTauri && project
                     ? (n) =>

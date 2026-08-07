@@ -97,6 +97,12 @@ Conventions :
   après la table des scripts et signalée par le bit 1 des flags ; le
   champ `script` de l'entité garde le premier (compat). Une scène
   mono-script par entité ne porte pas cette table.
+- Valeurs publiques (v1.7, optionnel) : une entrée de `scripts` peut
+  être un objet `{ "name": "turret", "values": { "speed": 42,
+  "target": "cible" } }` — les champs `public var` du script. Encodage :
+  table `(entité u16, script u16, champ u8, pad, valeur i32)` après la
+  table des composants, bit 2 des flags ; les références d'entité sont
+  résolues en index au build.
 - `script` (v1.1, optionnel) : nom d'un script runtime. Le binaire ne stocke
   que son **hash FNV-1a 32 bits** (nom passé en minuscules) ; le runtime le
   résout au chargement contre sa table `g_scripts` compilée dans le jeu.

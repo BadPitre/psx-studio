@@ -98,6 +98,19 @@ typedef struct {
 
 #define SCENE_MAX_SCRIPT_COMPS	64
 
+/* Valeur publique reglee dans l'inspecteur (v1.7) : le script expose des
+ * champs `public`, la scene porte les valeurs par instance. */
+typedef struct {
+	uint16_t	entity;
+	uint16_t	script;		/* indice table + 1 */
+	uint8_t		field;		/* index du champ public */
+	uint8_t		pad0;
+	uint16_t	pad1;
+	int32_t		value;		/* entier, ou index d'entite (type entity) */
+} PscScriptValue;
+
+#define SCENE_MAX_SCRIPT_VALUES	96
+
 /* Une entree de la table des lumieres (v1.2) : l'entite donne la
  * direction (elle eclaire le long de son axe -Z local), la couleur est
  * ici. */
@@ -184,6 +197,9 @@ typedef struct {
 	 * `script`), sinon cette table fait foi. */
 	const PscScriptComp*	script_comps;
 	int					script_comp_count;
+	/* Valeurs publiques par instance (v1.7). */
+	const PscScriptValue*	script_values;
+	int					script_value_count;
 	/* Lumieres : ligne 0 = soleil des settings (fixe), lignes 1-2 =
 	 * entites-lumieres directionnelles, re-derivees chaque frame de
 	 * leur rotation. */

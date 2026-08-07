@@ -75,6 +75,10 @@ pub const OP_RETV: u8 = 40; // r
 pub const OP_RET0: u8 = 41;
 pub const OP_GLOAD: u8 = 42; // r local <- champ global b
 pub const OP_GSTORE: u8 = 43; // champ global a <- r local b
+/// Champ `public` : si l'instance porte une surcharge (valeur réglée
+/// dans l'inspecteur), l'écrit dans le registre — sinon laisse la valeur
+/// par défaut du script. a = registre, b = index du champ public.
+pub const OP_INITPUB: u8 = 44;
 
 pub const REG_COUNT: usize = 16;
 const NO_PC: u16 = 0xFFFF;
@@ -198,6 +202,7 @@ fn lex(src: &str) -> Result<Lexer, String> {
                             '(' => "(",
                             ')' => ")",
                             ',' => ",",
+                            ':' => ":",
                             '<' => "<",
                             '>' => ">",
                             '=' => "=",
@@ -525,10 +530,47 @@ impl Parser {
 
 /* ------------------------------------------------------------ codegen -- */
 
+/// Type d'un champ `public` (widget de l'inspecteur).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PubType {
+    /// Entier (unités monde, angles, compteurs).
+    Int,
+    /// Case à cocher (0/1).
+    Bool,
+    /// Référence à une entité de la scène (GameObject, caméra, lumière…) :
+    /// la valeur stockée est l'index d'entité résolu au build.
+    Entity,
+}
+
+impl PubType {
+    fn parse(name: &str) -> Option<PubType> {
+        match name {
+            "int" | "number" => Some(PubType::Int),
+            "bool" => Some(PubType::Bool),
+            "entity" | "object" => Some(PubType::Entity),
+            _ => None,
+        }
+    }
+}
+
+/// Un champ exposé à l'inspecteur (`public var vitesse = 8`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PubField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: PubType,
+    /// Valeur par défaut littérale (si l'init est une constante).
+    pub default: i32,
+}
+
 #[derive(Debug)]
 pub struct Compiled {
     pub bytecode: Vec<u8>,
     pub reg_used: usize,
+    /// Champs `public`, dans l'ordre de déclaration (index = celui du
+    /// bytecode et des surcharges de scène).
+    pub fields: Vec<PubField>,
 }
 
 struct Gen {
@@ -972,6 +1014,9 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
 
     // Déclarations `var` + blocs + fonctions.
     let mut vars: Vec<(String, Option<Expr>, u32)> = Vec::new();
+    /* Champs `public` : exposés dans l'inspecteur (nom, type, défaut). */
+    let mut pubs: Vec<PubField> = Vec::new();
+    let mut pub_regs: Vec<u8> = Vec::new();
     let mut start_block: Option<Vec<Stmt>> = None;
     let mut update_block: Option<Vec<Stmt>> = None;
     let mut funcs: Vec<FuncDef> = Vec::new();
@@ -996,12 +1041,69 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
         let line = p.line();
         match p.next() {
             None => break,
-            Some(Tok::Ident(k)) if k == "var" => {
-                let decl = parse_var_decl(&mut p, line)?;
-                if vars.iter().any(|(n, _, _)| *n == decl.0) {
-                    return Err(format!("ligne {line}: variable '{}' déjà déclarée", decl.0));
+            Some(Tok::Ident(k)) if k == "var" || k == "public" => {
+                let is_public = k == "public";
+                if is_public {
+                    match p.next() {
+                        Some(Tok::Ident(v)) if v == "var" => {}
+                        _ => {
+                            return Err(format!(
+                                "ligne {line}: « public » se met devant « var »                                  (public var vitesse = 8)"
+                            ))
+                        }
+                    }
                 }
-                vars.push(decl);
+                let name = match p.next() {
+                    Some(Tok::Ident(n)) => n,
+                    _ => return Err(format!("ligne {line}: nom de variable attendu")),
+                };
+                // Annotation de type facultative : `: int|bool|entity`.
+                let mut kind = PubType::Int;
+                if matches!(p.peek(), Some(Tok::Sym(":"))) {
+                    p.pos += 1;
+                    let tname = match p.next() {
+                        Some(Tok::Ident(t)) => t,
+                        _ => return Err(format!("ligne {line}: type attendu après « : »")),
+                    };
+                    kind = PubType::parse(&tname).ok_or(format!(
+                        "ligne {line}: type '{tname}' inconnu (int, bool, entity)"
+                    ))?;
+                    if !is_public {
+                        return Err(format!(
+                            "ligne {line}: le type ne sert qu'aux champs « public »"
+                        ));
+                    }
+                }
+                let init = if matches!(p.peek(), Some(Tok::Sym("="))) {
+                    p.pos += 1;
+                    Some(p.parse_expr()?)
+                } else {
+                    None
+                };
+                p.end_of_stmt()?;
+                if vars.iter().any(|(n, _, _)| *n == name) {
+                    return Err(format!("ligne {line}: variable '{name}' déjà déclarée"));
+                }
+                if is_public {
+                    // La valeur par défaut montrée dans l'inspecteur : le
+                    // littéral s'il y en a un (sinon 0 / aucune entité).
+                    let default = match (&init, kind) {
+                        (Some(Expr::Int(v)), _) => *v,
+                        (Some(Expr::Neg(inner)), _) => match **inner {
+                            Expr::Int(v) => -v,
+                            _ => 0,
+                        },
+                        (_, PubType::Entity) => -1,
+                        _ => 0,
+                    };
+                    pub_regs.push(vars.len() as u8);
+                    pubs.push(PubField {
+                        name: name.clone(),
+                        kind,
+                        default,
+                    });
+                }
+                vars.push((name, init, line));
             }
             Some(Tok::Ident(k)) if k == "function" => {
                 let name = match p.next() {
@@ -1142,6 +1244,11 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
                 None => g.code.push(insn16(OP_LOADI, r, 0)),
             }
         }
+        // Surcharges de l'inspecteur : écrasent les défauts, avant que
+        // le code utilisateur de `on start` ne tourne (comme Unity).
+        for (i, reg) in pub_regs.iter().enumerate() {
+            g.code.push(insn(OP_INITPUB, *reg, i as u8, 0));
+        }
         if let Some(stmts) = &start_block {
             g.emit_stmts(stmts)?;
         }
@@ -1211,14 +1318,20 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
     }
 
     /* Blob PSB1. */
+    if pubs.len() > 255 {
+        return Err("trop de champs publics (255 max)".into());
+    }
     let mut out = Vec::new();
-    out.extend_from_slice(b"PSB1");
+    out.extend_from_slice(b"PSB2");
     out.extend_from_slice(&(g.temp_base as u16 + 4).to_le_bytes()); // registres info
     out.extend_from_slice(&(g.consts.len() as u16).to_le_bytes());
     out.extend_from_slice(&(g.code.len() as u16).to_le_bytes());
     out.extend_from_slice(&start_pc.to_le_bytes());
     out.extend_from_slice(&update_pc.to_le_bytes());
     out.extend_from_slice(&(g.strings.len() as u16).to_le_bytes());
+    // v2 : registre de chaque champ public (la VM y écrit la surcharge).
+    out.extend_from_slice(&(pubs.len() as u16).to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // pad (en-tête sur 20 o)
     for k in &g.consts {
         out.extend_from_slice(&k.to_le_bytes());
     }
@@ -1229,9 +1342,16 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
     while out.len() % 4 != 0 {
         out.push(0);
     }
+    for reg in &pub_regs {
+        out.push(*reg);
+    }
+    while out.len() % 4 != 0 {
+        out.push(0);
+    }
     Ok(Compiled {
         bytecode: out,
         reg_used: g.temp_base as usize,
+        fields: pubs,
     })
 }
 
@@ -1242,7 +1362,7 @@ mod tests {
     fn ops(bc: &[u8]) -> Vec<u8> {
         let consts = u16::from_le_bytes([bc[6], bc[7]]) as usize;
         let code_len = u16::from_le_bytes([bc[8], bc[9]]) as usize;
-        let code_off = 16 + consts * 4;
+        let code_off = 20 + consts * 4;
         (0..code_len)
             .map(|i| bc[code_off + i * 4 + 3]) // little-endian : op = octet haut
             .collect()
@@ -1251,7 +1371,7 @@ mod tests {
     #[test]
     fn tourne_compile() {
         let c = compile("every frame\n    rotate_y(self, 12)\nend\n").unwrap();
-        assert_eq!(&c.bytecode[0..4], b"PSB1");
+        assert_eq!(&c.bytecode[0..4], b"PSB2");
         let o = ops(&c.bytecode);
         // start implicite : RET ; frame : SELF, LOADI, ADDROTY, RET.
         assert_eq!(o, vec![OP_RET, OP_SELF, OP_LOADI, OP_ADDROTY, OP_RET]);
@@ -1305,6 +1425,27 @@ mod tests {
         // Fonction inconnue reste une erreur claire.
         let e = compile("every frame\n    show(self, mystere())\nend\n").unwrap_err();
         assert!(e.contains("mystere"), "{e}");
+    }
+
+    #[test]
+    fn champs_publics() {
+        let src = "public var speed = 24\npublic var target : entity\npublic var actif : bool = 1\nvar prive = 5\n\nevery frame\n    rotate_y(self, speed)\nend\n";
+        let c = compile(src).unwrap();
+        assert_eq!(c.fields.len(), 3);
+        assert_eq!(c.fields[0].name, "speed");
+        assert_eq!((c.fields[0].kind, c.fields[0].default), (PubType::Int, 24));
+        assert_eq!((c.fields[1].kind, c.fields[1].default), (PubType::Entity, -1));
+        assert_eq!((c.fields[2].kind, c.fields[2].default), (PubType::Bool, 1));
+        // Un OP_INITPUB par champ, dans le bloc start.
+        assert_eq!(ops(&c.bytecode).iter().filter(|o| **o == OP_INITPUB).count(), 3);
+
+        // Erreurs claires.
+        let e = compile("public speed = 1\nevery frame\nend\n").unwrap_err();
+        assert!(e.contains("public"), "{e}");
+        let e = compile("public var x : couleur\nevery frame\nend\n").unwrap_err();
+        assert!(e.contains("couleur"), "{e}");
+        let e = compile("var x : entity\nevery frame\nend\n").unwrap_err();
+        assert!(e.contains("public"), "{e}");
     }
 
     #[test]

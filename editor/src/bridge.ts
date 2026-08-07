@@ -68,6 +68,13 @@ export interface ProjectFile {
   out: string | null;
 }
 
+/** Un champ `public var` exposé par un script. */
+export interface ScriptField {
+  name: string;
+  type: "int" | "bool" | "entity";
+  default: number;
+}
+
 export const api = {
   importAsset: (projectDir: string, srcPath: string) =>
     tauriInvoke<ImportedAsset>("import_asset", { projectDir, srcPath }),
@@ -82,6 +89,9 @@ export const api = {
   /** Crée un PSX Script (squelette) ; retourne son chemin relatif. */
   createScript: (projectDir: string, name: string) =>
     tauriInvoke<string>("create_script", { projectDir, name }),
+  /** Champs `public` d'un script (widgets de l'inspecteur). */
+  scriptFields: (projectDir: string, name: string) =>
+    tauriInvoke<ScriptField[]>("script_fields", { projectDir, name }),
   /** Noms des PSX Scripts du projet (composants attachables). */
   listScripts: (projectDir: string) =>
     tauriInvoke<string[]>("list_scripts", { projectDir }),

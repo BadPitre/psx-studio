@@ -238,6 +238,25 @@ fn create_script(project_dir: String, name: String) -> Result<String, String> {
     psxpipe::project::create_script(&PathBuf::from(project_dir), &name)
 }
 
+/// Champs `public` d'un script (widgets de l'inspecteur) : compile le
+/// .psxs à la volée. Un script C (pas de fichier) n'expose rien.
+#[tauri::command(async)]
+fn script_fields(
+    project_dir: String,
+    name: String,
+) -> Result<Vec<psxpipe::psxs::PubField>, String> {
+    let path = PathBuf::from(project_dir)
+        .join("scripts")
+        .join(format!("{name}.psxs"));
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let src = std::fs::read_to_string(&path).map_err(|e| format!("{} : {e}", path.display()))?;
+    Ok(psxpipe::psxs::compile(&src)
+        .map_err(|e| format!("script '{name}' : {e}"))?
+        .fields)
+}
+
 /// Noms des PSX Scripts du projet (menu « Ajouter un composant »).
 #[tauri::command(async)]
 fn list_scripts(project_dir: String) -> Vec<String> {
@@ -479,6 +498,7 @@ pub fn run() {
             create_scene,
             create_script,
             list_scripts,
+            script_fields,
             read_text_file,
             write_text_file,
             open_external,

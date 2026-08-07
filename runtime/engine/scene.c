@@ -252,15 +252,28 @@ static int Scene_Parse(Scene* scene, uint8_t* data)
 	 * `script` de chaque entite fait foi, comme avant. */
 	scene->script_comps = 0;
 	scene->script_comp_count = 0;
-	if (header->flags & 2)
+	scene->script_values = 0;
+	scene->script_value_count = 0;
 	{
 		const uint8_t* base = (const uint8_t*)script_table
 			+ header->script_count * 4 * ((header->flags & 1) ? 2 : 1);
-		int count = *(const uint16_t*)base;
-		if (count > SCENE_MAX_SCRIPT_COMPS)
-			count = SCENE_MAX_SCRIPT_COMPS;
-		scene->script_comps = (const PscScriptComp*)(base + 4);
-		scene->script_comp_count = count;
+		if (header->flags & 2)
+		{
+			int count = *(const uint16_t*)base;
+			scene->script_comps = (const PscScriptComp*)(base + 4);
+			scene->script_comp_count = count > SCENE_MAX_SCRIPT_COMPS
+				? SCENE_MAX_SCRIPT_COMPS : count;
+			base += 4 + count * (int)sizeof(PscScriptComp);
+		}
+		/* Valeurs publiques (v1.7) : appliquees aux registres au demarrage
+		 * des scripts (opcode INITPUB). */
+		if (header->flags & 4)
+		{
+			int count = *(const uint16_t*)base;
+			scene->script_values = (const PscScriptValue*)(base + 4);
+			scene->script_value_count = count > SCENE_MAX_SCRIPT_VALUES
+				? SCENE_MAX_SCRIPT_VALUES : count;
+		}
 	}
 
 	/* Entites : transforms locales mutables. */

@@ -556,7 +556,7 @@ fn psx_script_embedded_in_psc() {
     assert_eq!(offs.len(), 2);
     assert!(offs[0] > 0 && offs[1] == 0);
     let blob = &bytes[offs[0] as usize..];
-    assert_eq!(&blob[0..4], b"PSB1");
+    assert_eq!(&blob[0..4], b"PSB2");
 
     // Sans .psxs : pas de flag, pas de table (retrocompatible).
     std::fs::remove_file(dir.path().join("scripts/spinner.psxs")).unwrap();
@@ -621,4 +621,52 @@ fn multiple_scripts_per_entity() {
     let h2 = scene::parse_header(&b2).unwrap();
     assert_eq!(h2.flags & 2, 0);
     assert!(scene::parse_script_comps(&b2, &h2).is_empty());
+}
+
+#[test]
+fn public_script_values_in_scene() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+    std::fs::write(
+        dir.path().join("scripts/turret.psxs"),
+        "public var speed = 10\npublic var target : entity\npublic var actif : bool = 1\n\nevery frame\n    rotate_y(self, speed)\nend\n",
+    )
+    .unwrap();
+    let json = r#"{
+      "name": "pub",
+      "assets": { "textures": [], "models": [{ "id": "cube", "pmd": "cube.pmd" }] },
+      "entities": [
+        { "name": "cible", "model": "cube" },
+        { "name": "tourelle", "model": "cube",
+          "scripts": [{ "name": "turret",
+                        "values": { "speed": 42, "target": "cible", "actif": false } }] }
+      ]
+    }"#;
+    let json_path = dir.path().join("s.json");
+    std::fs::write(&json_path, json).unwrap();
+    let (bytes, _) = scene::build_file(&json_path).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    // Flag v1.7 pose, 3 valeurs pour l'entite 1 (tourelle), script 1.
+    assert_eq!(h.flags & 4, 4);
+    let values = scene::parse_script_values(&bytes, &h);
+    assert_eq!(values.len(), 3);
+    assert!(values.iter().all(|(e, s, _, _)| *e == 1 && *s == 1));
+    let by_field = |f: u8| values.iter().find(|(_, _, ff, _)| *ff == f).unwrap().3;
+    assert_eq!(by_field(0), 42); // speed
+    assert_eq!(by_field(1), 0); // target -> index de l'entite "cible"
+    assert_eq!(by_field(2), 0); // actif = false
+
+    // Reference d'entite inconnue : erreur claire.
+    let bad = json.replace("\"target\": \"cible\"", "\"target\": \"fantome\"");
+    std::fs::write(&json_path, bad).unwrap();
+    let err = scene::build_file(&json_path).unwrap_err();
+    assert!(err.contains("fantome") && err.contains("introuvable"), "{err}");
+
+    // Champ inconnu : simple avertissement, la scene se construit.
+    let warn = json.replace("\"speed\": 42", "\"vitesse\": 42");
+    std::fs::write(&json_path, warn).unwrap();
+    let (_, report) = scene::build_file(&json_path).unwrap();
+    assert!(report.warnings.iter().any(|w| w.contains("vitesse")), "{:?}", report.warnings);
 }
