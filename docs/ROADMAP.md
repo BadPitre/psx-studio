@@ -172,7 +172,10 @@ hashes — un blob prime sur le registre C, rétrocompatible), VM
 seulement), langage à mots-clés anglais : var / on start / every frame /
 if-else / while / and-or-not + 17 fonctions moteur (transforms, move
 avec collisions, boutons, distance, find, dialog, show, switch_scene,
-random), girouette de démo (spinner.psxs) dans le village, banc d'essai
+random), **fonctions utilisateur** (`function`/`return`, paramètres,
+locales, récursion bornée sur pile de frames statique, champs
+accessibles — un .psxs se lit comme une classe : champs + méthodes +
+cycle de vie), girouette de démo (spinner.psxs) dans le village, banc d'essai
 natif hôte (le vrai blob exécuté par la vraie VM : 100 000 frames en
 7 ms).
 
