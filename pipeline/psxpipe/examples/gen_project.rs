@@ -17,10 +17,10 @@ fn main() {
     let scripts = dir.join("scripts");
     std::fs::create_dir_all(&scripts).expect("failed to create scripts/");
     std::fs::write(
-        scripts.join("tourniquet.psxs"),
-        psxpipe::samples::demo_tourniquet_psxs(),
+        scripts.join("spinner.psxs"),
+        psxpipe::samples::demo_spinner_psxs(),
     )
-    .expect("failed to write tourniquet.psxs");
+    .expect("failed to write spinner.psxs");
     let scenes = dir.join("scenes");
     std::fs::create_dir_all(&scenes).expect("failed to create scenes/");
     std::fs::write(scenes.join("scene0.json"), psxpipe::samples::scene_village_json())

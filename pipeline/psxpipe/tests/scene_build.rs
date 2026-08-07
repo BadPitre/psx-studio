@@ -165,7 +165,7 @@ fn scripts_table_and_entity_refs() {
     assert_eq!(script_ref(3), 2); // npc (partage)
 
     // Le village de démo embarque player/npc, les scripts UI (hud,
-    // dialogue, pause) et le PSX Script tourniquet.
+    // dialogue, pause) et le PSX Script spinner.
     let (bytes2, _) = scene::build_file(&{
         let p = dir.path().join("s2.json");
         std::fs::write(&p, samples::scene_village_json()).unwrap();
@@ -531,15 +531,15 @@ fn psx_script_embedded_in_psc() {
     samples::build_demo_assets(dir.path()).unwrap();
     std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
     std::fs::write(
-        dir.path().join("scripts/tourniquet.psxs"),
-        "var vitesse = 12\nchaque frame\n    tourner_y(moi, vitesse)\nfin\n",
+        dir.path().join("scripts/spinner.psxs"),
+        "var speed = 12\nevery frame\n    rotate_y(self, speed)\nend\n",
     )
     .unwrap();
     let json = r#"{
       "name": "vm",
       "assets": { "textures": [], "models": [{ "id": "cube", "pmd": "cube.pmd" }] },
       "entities": [
-        { "name": "girouette", "model": "cube", "script": "tourniquet" },
+        { "name": "girouette", "model": "cube", "script": "spinner" },
         { "name": "pnj", "model": "cube", "script": "npc" }
       ]
     }"#;
@@ -548,7 +548,7 @@ fn psx_script_embedded_in_psc() {
     let (bytes, _) = scene::build_file(&json_path).unwrap();
     let h = scene::parse_header(&bytes).unwrap();
 
-    // Flag v1.5 pose, table d'offsets : tourniquet -> blob PSB1, npc -> 0
+    // Flag v1.5 pose, table d'offsets : spinner -> blob PSB1, npc -> 0
     // (registre C). Le blob est un PSB1 valide au bon endroit.
     assert_eq!(h.flags & 1, 1);
     assert_eq!(h.script_count, 2);
@@ -559,20 +559,20 @@ fn psx_script_embedded_in_psc() {
     assert_eq!(&blob[0..4], b"PSB1");
 
     // Sans .psxs : pas de flag, pas de table (retrocompatible).
-    std::fs::remove_file(dir.path().join("scripts/tourniquet.psxs")).unwrap();
+    std::fs::remove_file(dir.path().join("scripts/spinner.psxs")).unwrap();
     let (bytes2, _) = scene::build_file(&json_path).unwrap();
     let h2 = scene::parse_header(&bytes2).unwrap();
     assert_eq!(h2.flags & 1, 0);
 
     // Erreur de compilation : nom du script + ligne dans le message.
     std::fs::write(
-        dir.path().join("scripts/tourniquet.psxs"),
-        "chaque frame\n    tourne(moi)\nfin\n",
+        dir.path().join("scripts/spinner.psxs"),
+        "every frame\n    turn(self)\nend\n",
     )
     .unwrap();
     let err = scene::build_file(&json_path).unwrap_err();
     assert!(
-        err.contains("tourniquet") && err.contains("ligne 2"),
+        err.contains("spinner") && err.contains("ligne 2"),
         "unexpected: {err}"
     );
 }

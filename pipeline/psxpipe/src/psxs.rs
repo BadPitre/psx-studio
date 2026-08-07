@@ -7,22 +7,22 @@
 //! fixes** décidés à la compilation (zéro allocation, zéro GC), les
 //! opérations lourdes restent des appels natifs du moteur.
 //!
-//! Le langage (mots-clés français, volontairement minimal) :
+//! Le langage (mots-clés anglais, volontairement minimal) :
 //!
 //! ```text
-//! # girouette : tourne, et salue le joueur proche
-//! var vitesse = 12
+//! # spinner : tourne, et salue le joueur proche
+//! var speed = 12
 //!
-//! quand demarre
-//!     vitesse = 20
-//! fin
+//! on start
+//!     speed = 20
+//! end
 //!
-//! chaque frame
-//!     tourner_y(moi, vitesse)
-//!     si distance(moi, trouve("player")) < 120 et touche_pressee(CROIX) alors
-//!         dialogue("BONJOUR !")
-//!     fin
-//! fin
+//! every frame
+//!     rotate_y(self, speed)
+//!     if distance(self, find("player")) < 120 and pressed(CROSS) then
+//!         dialog("BONJOUR !")
+//!     end
+//! end
 //! ```
 
 use std::collections::HashMap;
@@ -76,14 +76,14 @@ const NO_PC: u16 = 0xFFFF;
 const BUTTONS: [(&str, u16); 10] = [
     ("SELECT", 0x0001),
     ("START", 0x0008),
-    ("HAUT", 0x0010),
-    ("DROITE", 0x0020),
-    ("BAS", 0x0040),
-    ("GAUCHE", 0x0080),
+    ("UP", 0x0010),
+    ("RIGHT", 0x0020),
+    ("DOWN", 0x0040),
+    ("LEFT", 0x0080),
     ("TRIANGLE", 0x1000),
-    ("ROND", 0x2000),
-    ("CROIX", 0x4000),
-    ("CARRE", 0x8000),
+    ("CIRCLE", 0x2000),
+    ("CROSS", 0x4000),
+    ("SQUARE", 0x8000),
 ];
 
 /* -------------------------------------------------------------- lexer -- */
@@ -290,15 +290,15 @@ impl Parser {
             match self.peek() {
                 None => {
                     return Err(format!(
-                        "ligne {}: « fin » manquant avant la fin du fichier",
+                        "ligne {}: « end » manquant avant la fin du fichier",
                         self.line()
                     ))
                 }
-                Some(Tok::Ident(k)) if k == "fin" => {
+                Some(Tok::Ident(k)) if k == "end" => {
                     self.pos += 1;
                     return Ok((out, false));
                 }
-                Some(Tok::Ident(k)) if allow_else && k == "sinon" => {
+                Some(Tok::Ident(k)) if allow_else && k == "else" => {
                     self.pos += 1;
                     return Ok((out, true));
                 }
@@ -311,9 +311,9 @@ impl Parser {
         let line = self.line();
         match self.next() {
             Some(Tok::Ident(name)) => match name.as_str() {
-                "si" => {
+                "if" => {
                     let cond = self.parse_expr()?;
-                    self.expect_kw("alors")?;
+                    self.expect_kw("then")?;
                     self.end_of_stmt()?;
                     let (then, has_else) = self.parse_block(true)?;
                     let els = if has_else {
@@ -324,9 +324,9 @@ impl Parser {
                     };
                     Ok(Stmt::If(cond, then, els))
                 }
-                "tantque" => {
+                "while" => {
                     let cond = self.parse_expr()?;
-                    self.expect_kw("faire")?;
+                    self.expect_kw("do")?;
                     self.end_of_stmt()?;
                     let (body, _) = self.parse_block(false)?;
                     Ok(Stmt::While(cond, body))
@@ -379,17 +379,17 @@ impl Parser {
     }
     fn parse_or(&mut self) -> Result<Expr, String> {
         let mut e = self.parse_and()?;
-        while matches!(self.peek(), Some(Tok::Ident(k)) if k == "ou") {
+        while matches!(self.peek(), Some(Tok::Ident(k)) if k == "or") {
             self.pos += 1;
-            e = Expr::Bin("ou", Box::new(e), Box::new(self.parse_and()?));
+            e = Expr::Bin("or", Box::new(e), Box::new(self.parse_and()?));
         }
         Ok(e)
     }
     fn parse_and(&mut self) -> Result<Expr, String> {
         let mut e = self.parse_cmp()?;
-        while matches!(self.peek(), Some(Tok::Ident(k)) if k == "et") {
+        while matches!(self.peek(), Some(Tok::Ident(k)) if k == "and") {
             self.pos += 1;
-            e = Expr::Bin("et", Box::new(e), Box::new(self.parse_cmp()?));
+            e = Expr::Bin("and", Box::new(e), Box::new(self.parse_cmp()?));
         }
         Ok(e)
     }
@@ -446,7 +446,7 @@ impl Parser {
                 self.pos += 1;
                 Ok(Expr::Neg(Box::new(self.parse_unary()?)))
             }
-            Some(Tok::Ident(k)) if k == "non" => {
+            Some(Tok::Ident(k)) if k == "not" => {
                 self.pos += 1;
                 Ok(Expr::Not(Box::new(self.parse_unary()?)))
             }
@@ -463,10 +463,10 @@ impl Parser {
                 Ok(e)
             }
             Some(Tok::Ident(name)) => {
-                if name == "moi" {
+                if name == "self" {
                     return Ok(Expr::Me);
                 }
-                if name == "rien" {
+                if name == "nil" {
                     return Ok(Expr::Nil);
                 }
                 if let Some((_, mask)) = BUTTONS.iter().find(|(n, _)| *n == name) {
@@ -571,7 +571,7 @@ impl Gen {
             Expr::Me => self.code.push(insn(OP_SELF, dst, 0, 0)),
             Expr::Button(_) => {
                 return Err(
-                    "un bouton (CROIX...) ne s'utilise que dans touche()/touche_pressee()"
+                    "un bouton (CROSS...) ne s'utilise que dans held()/pressed()"
                         .into(),
                 )
             }
@@ -608,8 +608,8 @@ impl Gen {
                     ">=" => (OP_LE, rt, dst),
                     "==" => (OP_EQ, dst, rt),
                     "!=" => (OP_NE, dst, rt),
-                    "et" => (OP_AND, dst, rt),
-                    "ou" => (OP_OR, dst, rt),
+                    "and" => (OP_AND, dst, rt),
+                    "or" => (OP_OR, dst, rt),
                     other => return Err(format!("opérateur interne inconnu {other}")),
                 };
                 self.code.push(insn(opc, dst, a, b));
@@ -670,13 +670,13 @@ impl Gen {
                 };
                 self.code.push(insn(OP_GETPOS, d, e, axis));
             }
-            "poser_x" | "poser_y" | "poser_z" => {
+            "set_x" | "set_y" | "set_z" => {
                 Self::arity(name, args, 2, line)?;
                 let e = self.arg_reg(args, 0, name, line)?;
                 let v = self.arg_reg(args, 1, name, line)?;
                 let axis = match name {
-                    "poser_x" => 0,
-                    "poser_y" => 1,
+                    "set_x" => 0,
+                    "set_y" => 1,
                     _ => 2,
                 };
                 self.code.push(insn(OP_SETPOS, e, axis, v));
@@ -687,21 +687,21 @@ impl Gen {
                 let e = self.arg_reg(args, 0, name, line)?;
                 self.code.push(insn(OP_GETROTY, d, e, 0));
             }
-            "poser_rot_y" | "tourner_y" => {
+            "set_rot_y" | "rotate_y" => {
                 Self::arity(name, args, 2, line)?;
                 let e = self.arg_reg(args, 0, name, line)?;
                 let v = self.arg_reg(args, 1, name, line)?;
-                let opc = if name == "tourner_y" { OP_ADDROTY } else { OP_SETROTY };
+                let opc = if name == "rotate_y" { OP_ADDROTY } else { OP_SETROTY };
                 self.code.push(insn(opc, e, v, 0));
             }
-            "bouger" => {
+            "move" => {
                 Self::arity(name, args, 3, line)?;
                 let e = self.arg_reg(args, 0, name, line)?;
                 let dx = self.arg_reg(args, 1, name, line)?;
                 let dz = self.arg_reg(args, 2, name, line)?;
                 self.code.push(insn(OP_MOVE, e, dx, dz));
             }
-            "touche" | "touche_pressee" => {
+            "held" | "pressed" => {
                 Self::arity(name, args, 1, line)?;
                 let d = need_dst(dst)?;
                 let mask = match args.first() {
@@ -709,11 +709,11 @@ impl Gen {
                     _ => {
                         return Err(format!(
                             "ligne {line}: {name}() attend un bouton \
-                             (CROIX, ROND, CARRE, TRIANGLE, HAUT, BAS, GAUCHE, DROITE, START, SELECT)"
+                             (CROSS, CIRCLE, SQUARE, TRIANGLE, UP, DOWN, LEFT, RIGHT, START, SELECT)"
                         ))
                     }
                 };
-                let opc = if name == "touche" { OP_HELD } else { OP_PRESSED };
+                let opc = if name == "held" { OP_HELD } else { OP_PRESSED };
                 self.code.push(insn16(opc, d, mask));
             }
             "distance" => {
@@ -723,27 +723,27 @@ impl Gen {
                 let b = self.arg_reg(args, 1, name, line)?;
                 self.code.push(insn(OP_DIST, d, a, b));
             }
-            "trouve" => {
+            "find" => {
                 Self::arity(name, args, 1, line)?;
                 let d = need_dst(dst)?;
                 let s = match args.first() {
                     Some(Arg::Str(s)) => s.clone(),
                     _ => {
                         return Err(format!(
-                            "ligne {line}: trouve() attend un nom de script entre guillemets"
+                            "ligne {line}: find() attend un nom de script entre guillemets"
                         ))
                     }
                 };
                 let k = self.konst(crate::scene::script_hash(&s) as i32)?;
                 self.code.push(insn(OP_FIND, d, k, 0));
             }
-            "dialogue" => {
+            "dialog" => {
                 Self::arity(name, args, 1, line)?;
                 let s = match args.first() {
                     Some(Arg::Str(s)) => s.clone(),
                     _ => {
                         return Err(format!(
-                            "ligne {line}: dialogue() attend un texte entre guillemets \
+                            "ligne {line}: dialog() attend un texte entre guillemets \
                              (3 lignes max, séparées par /)"
                         ))
                     }
@@ -751,26 +751,26 @@ impl Gen {
                 let k = self.string(&s.replace(" / ", "\n").replace('/', "\n"))?;
                 self.code.push(insn(OP_DIALOG, k, 0, 0));
             }
-            "dialogue_ouvert" => {
+            "dialog_open" => {
                 Self::arity(name, args, 0, line)?;
                 let d = need_dst(dst)?;
                 self.code.push(insn(OP_DLGOPEN, d, 0, 0));
             }
-            "fermer_dialogue" => {
+            "close_dialog" => {
                 Self::arity(name, args, 0, line)?;
                 self.code.push(insn(OP_DLGCLOSE, 0, 0, 0));
             }
-            "montrer" => {
+            "show" => {
                 Self::arity(name, args, 2, line)?;
                 let e = self.arg_reg(args, 0, name, line)?;
                 let v = self.arg_reg(args, 1, name, line)?;
                 self.code.push(insn(OP_SHOW, e, v, 0));
             }
-            "changer_scene" => {
+            "switch_scene" => {
                 Self::arity(name, args, 0, line)?;
                 self.code.push(insn(OP_SWITCH, 0, 0, 0));
             }
-            "hasard" => {
+            "random" => {
                 Self::arity(name, args, 1, line)?;
                 let d = need_dst(dst)?;
                 let n = self.arg_reg(args, 0, name, line)?;
@@ -871,31 +871,31 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
                 }
                 vars.push((name, init, line));
             }
-            Some(Tok::Ident(k)) if k == "quand" => {
-                p.expect_kw("demarre")?;
+            Some(Tok::Ident(k)) if k == "on" => {
+                p.expect_kw("start")?;
                 p.end_of_stmt()?;
                 if start_block.is_some() {
-                    return Err(format!("ligne {line}: « quand demarre » en double"));
+                    return Err(format!("ligne {line}: « on start » en double"));
                 }
                 start_block = Some(p.parse_block(false)?.0);
             }
-            Some(Tok::Ident(k)) if k == "chaque" => {
+            Some(Tok::Ident(k)) if k == "every" => {
                 p.expect_kw("frame")?;
                 p.end_of_stmt()?;
                 if update_block.is_some() {
-                    return Err(format!("ligne {line}: « chaque frame » en double"));
+                    return Err(format!("ligne {line}: « every frame » en double"));
                 }
                 update_block = Some(p.parse_block(false)?.0);
             }
             Some(_) => {
                 return Err(format!(
-                    "ligne {line}: attendu « var », « quand demarre » ou « chaque frame »"
+                    "ligne {line}: attendu « var », « on start » ou « every frame »"
                 ))
             }
         }
     }
     if start_block.is_none() && update_block.is_none() {
-        return Err("script vide : ajoute un bloc « chaque frame ... fin »".into());
+        return Err("script vide : ajoute un bloc « every frame ... end »".into());
     }
     if vars.len() > 12 {
         return Err(format!(
@@ -987,16 +987,16 @@ mod tests {
 
     #[test]
     fn tourne_compile() {
-        let c = compile("chaque frame\n    tourner_y(moi, 12)\nfin\n").unwrap();
+        let c = compile("every frame\n    rotate_y(self, 12)\nend\n").unwrap();
         assert_eq!(&c.bytecode[0..4], b"PSB1");
         let o = ops(&c.bytecode);
-        // demarre implicite : RET ; frame : SELF, LOADI, ADDROTY, RET.
+        // start implicite : RET ; frame : SELF, LOADI, ADDROTY, RET.
         assert_eq!(o, vec![OP_RET, OP_SELF, OP_LOADI, OP_ADDROTY, OP_RET]);
     }
 
     #[test]
     fn si_sinon_saute_correctement() {
-        let src = "var x\nchaque frame\n    si x < 3 alors\n        x = x + 1\n    sinon\n        x = 0\n    fin\nfin\n";
+        let src = "var x\nevery frame\n    if x < 3 then\n        x = x + 1\n    else\n        x = 0\n    end\nend\n";
         let c = compile(src).unwrap();
         let o = ops(&c.bytecode);
         assert!(o.contains(&OP_JZ) && o.contains(&OP_JMP) && o.contains(&OP_LT));
@@ -1004,19 +1004,19 @@ mod tests {
 
     #[test]
     fn erreurs_claires() {
-        let e = compile("chaque frame\n    tourne(moi, 2)\nfin\n").unwrap_err();
+        let e = compile("every frame\n    turn(self, 2)\nend\n").unwrap_err();
         assert!(e.contains("ligne 2") && e.contains("fonction inconnue"), "{e}");
-        let e = compile("chaque frame\n    x = 1\nfin\n").unwrap_err();
+        let e = compile("every frame\n    x = 1\nend\n").unwrap_err();
         assert!(e.contains("variable inconnue"), "{e}");
-        let e = compile("chaque frame\n    si 1 alors\nfin\n").unwrap_err();
-        assert!(e.contains("fin"), "{e}");
-        let e = compile("chaque frame\n    touche(1)\nfin\n").unwrap_err();
+        let e = compile("every frame\n    if 1 then\nend\n").unwrap_err();
+        assert!(e.contains("end"), "{e}");
+        let e = compile("every frame\n    held(1)\nend\n").unwrap_err();
         assert!(e.contains("bouton") || e.contains("renvoie"), "{e}");
     }
 
     #[test]
     fn dialogue_et_chaines() {
-        let c = compile("chaque frame\n    dialogue(\"salut / ça va\")\nfin\n").unwrap();
+        let c = compile("every frame\n    dialog(\"salut / ça va\")\nend\n").unwrap();
         let s = String::from_utf8_lossy(&c.bytecode);
         assert!(s.contains("SALUT\nCA VA"), "chaîne translittérée attendue");
     }

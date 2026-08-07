@@ -169,10 +169,10 @@ sable (bornes, division par zéro, garde-fou de boucle). Spec :
 dans le `.psc` (v1.5 : bit 0 des flags + table d'offsets après les
 hashes — un blob prime sur le registre C, rétrocompatible), VM
 `engine/vm.c` (16 registres/entité, 24 instances, liée par le jeu
-seulement), langage : var / quand demarre / chaque frame / si-sinon /
-tantque / et-ou-non + 17 fonctions moteur (transforms, bouger avec
-collisions, boutons, distance, trouve, dialogue, montrer,
-changer_scene, hasard), girouette de démo dans le village, banc d'essai
+seulement), langage à mots-clés anglais : var / on start / every frame /
+if-else / while / and-or-not + 17 fonctions moteur (transforms, move
+avec collisions, boutons, distance, find, dialog, show, switch_scene,
+random), girouette de démo (spinner.psxs) dans le village, banc d'essai
 natif hôte (le vrai blob exécuté par la vraie VM : 100 000 frames en
 7 ms).
 

@@ -174,11 +174,11 @@ recompiler le jeu**, et un script buggé ne peut pas planter la console.
 La girouette du village de démo en est un :
 
 ```
-var vitesse = 24
+var speed = 24
 
-chaque frame
-    tourner_y(moi, vitesse)
-fin
+every frame
+    rotate_y(self, speed)
+end
 ```
 
 Référence complète (variables, si/tantque, dialogue, collisions,
