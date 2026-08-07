@@ -22,6 +22,8 @@ fn main() {
         psxpipe::samples::demo_spinner_psxs(),
     )
     .expect("failed to write spinner.psxs");
+    std::fs::write(scripts.join("fps.psxs"), psxpipe::samples::demo_fps_psxs())
+        .expect("failed to write fps.psxs");
     let scenes = dir.join("scenes");
     std::fs::create_dir_all(&scenes).expect("failed to create scenes/");
     std::fs::write(scenes.join("scene0.json"), psxpipe::samples::scene_village_json())

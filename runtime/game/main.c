@@ -179,6 +179,9 @@ int main(int argc, const char** argv)
 		}
 
 		Scene_UpdateWorld(&scene);
+		/* Camera reclamee par un script PSX Script : maintenant que les
+		 * matrices monde sont a jour. */
+		Camera_ApplyRequest();
 
 		MATRIX view;
 		Camera_GetViewMatrix(&view);

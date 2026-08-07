@@ -829,6 +829,7 @@ pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(&scripts).map_err(|e| e.to_string())?;
     std::fs::write(scripts.join("spinner.psxs"), demo_spinner_psxs())
         .map_err(|e| e.to_string())?;
+    std::fs::write(scripts.join("fps.psxs"), demo_fps_psxs()).map_err(|e| e.to_string())?;
 
     for (gltf_name, pmd_name) in [
         ("cube.gltf", "cube.pmd"),
@@ -966,6 +967,110 @@ var speed = 24
 
 every frame
     rotate_y(self, speed)
+end
+"#
+}
+
+/// PSX Script de démo : contrôleur **caméra FPS** complet — regard,
+/// déplacement relatif au regard, strafe, collisions — sans une ligne
+/// de C. Réglages exposés à l'inspecteur (`public var`).
+pub fn demo_fps_psxs() -> &'static str {
+    r#"# fps.psxs — contrôleur à la première personne (PSX Script).
+#
+# Attache-le à l'objet joueur (menu ＋ Ajouter un composant), puis glisse
+# ta caméra dans le champ « cam » de la carte du script : c'est elle qui
+# devient la vue (elle garde son FOV et sa distance de rendu). Sans
+# caméra réglée, une vue libre est posée à la place.
+#
+# Manette : D-pad haut/bas = avancer/reculer, gauche/droite = tourner,
+# L1/R1 = pas de côté, L2/R2 = lever/baisser le regard, CROIX = courir.
+#
+# Angles : 4096 = un tour complet, cap 0 = regard vers -Z (comme les
+# modèles). sin/cos rendent du 4.12 (4096 = 1.0), d'où les « / 4096 »
+# après chaque multiplication.
+
+public var cam : entity        # la caméra de la scène à piloter
+public var speed = 6           # vitesse de marche (unités / frame)
+public var turn_speed = 48     # vitesse de rotation
+public var eye_height = 150    # hauteur des yeux au-dessus du pivot
+public var run_factor = 2      # multiplicateur de course (CROIX)
+public var look_limit = 700    # débattement vertical max du regard
+
+var yaw = 0
+var pitch = 0
+var step = 0
+var dx = 0
+var dz = 0
+
+# Avance de `amount` dans la direction du regard, `side` sur le côté
+# (droite de l'écran positive) — avec collisions.
+function walk(amount, side)
+    dx = (0 - sin(yaw) * amount - cos(yaw) * side) / 4096
+    dz = (sin(yaw) * side - cos(yaw) * amount) / 4096
+    if dx != 0 or dz != 0 then
+        move(self, dx, dz)
+    end
+end
+
+on start
+    yaw = rot_y(self)
+    # Le corps n'est pas visible depuis ses propres yeux.
+    show(self, 0)
+end
+
+every frame
+    # --- regard ---
+    if held(LEFT) then
+        yaw = yaw - turn_speed
+    end
+    if held(RIGHT) then
+        yaw = yaw + turn_speed
+    end
+    if yaw < 0 then
+        yaw = yaw + 4096
+    end
+    if yaw >= 4096 then
+        yaw = yaw - 4096
+    end
+    if held(L2) and pitch < look_limit then
+        pitch = pitch + 24
+    end
+    if held(R2) and pitch > 0 - look_limit then
+        pitch = pitch - 24
+    end
+
+    # --- déplacement (relatif au regard, avec collisions) ---
+    step = speed
+    if held(CROSS) then
+        step = speed * run_factor
+    end
+    if held(UP) then
+        walk(step, 0)
+    end
+    if held(DOWN) then
+        walk(0 - step, 0)
+    end
+    if held(L1) then
+        walk(0, 0 - step)
+    end
+    if held(R1) then
+        walk(0, step)
+    end
+
+    # Le corps suit le regard (utile si d'autres le voient en réseau/miroir).
+    set_rot_y(self, yaw)
+
+    # --- caméra à hauteur des yeux ---
+    if cam != nil then
+        set_x(cam, pos_x(self))
+        set_y(cam, pos_y(self) - eye_height)
+        set_z(cam, pos_z(self))
+        set_rot_y(cam, yaw)
+        set_rot_x(cam, pitch)
+        camera(cam)
+    else
+        camera(pos_x(self), pos_y(self) - eye_height, pos_z(self), yaw, pitch)
+    end
 end
 "#
 }

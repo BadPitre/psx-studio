@@ -670,3 +670,26 @@ fn public_script_values_in_scene() {
     let (_, report) = scene::build_file(&json_path).unwrap();
     assert!(report.warnings.iter().any(|w| w.contains("vitesse")), "{:?}", report.warnings);
 }
+
+#[test]
+fn fps_controller_script_compiles() {
+    let c = psxpipe::psxs::compile(psxpipe::samples::demo_fps_psxs()).expect("fps.psxs");
+    // Champs réglables dans l'inspecteur.
+    let names: Vec<&str> = c.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["cam", "speed", "turn_speed", "eye_height", "run_factor", "look_limit"]
+    );
+    // La caméra s'attache dans l'inspecteur (sélecteur d'entité).
+    assert!(matches!(c.fields[0].kind, psxpipe::psxs::PubType::Entity));
+    assert_eq!(c.fields[1].default, 6);
+    assert_eq!(&c.bytecode[0..4], b"PSB2");
+    // Les deux formes de camera() sont compilées (entité + vue libre).
+    let u16at = |o: usize| u16::from_le_bytes([c.bytecode[o], c.bytecode[o + 1]]) as usize;
+    let (nk, code_len) = (u16at(6), u16at(8));
+    let code = &c.bytecode[20 + nk * 4..20 + nk * 4 + code_len * 4];
+    let ops: Vec<u8> = code.chunks(4).map(|w| w[3]).collect();
+    assert!(ops.contains(&psxpipe::psxs::OP_CAMENT), "camera(entité)");
+    assert!(ops.contains(&psxpipe::psxs::OP_CAMERA), "camera(x, y, z, ...)");
+    assert!(ops.contains(&psxpipe::psxs::OP_SETROTX), "set_rot_x");
+}

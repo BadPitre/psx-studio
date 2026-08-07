@@ -69,6 +69,26 @@ void Camera_Set(int32_t x, int32_t y, int32_t z, int yaw, int pitch)
 	cam_pitch = pitch;
 }
 
+/* Camera reclamee par un script (PSX Script : camera(entite)) — -1 =
+ * aucune. Consommee une fois par frame par Camera_ApplyRequest(). */
+static int camera_request = -1;
+
+void Camera_Request(int32_t entity)
+{
+	camera_request = (int)entity;
+}
+
+int Camera_ApplyRequest(void)
+{
+	Scene* scene = Scene_Current();
+	int e = camera_request;
+	camera_request = -1;
+	if (!scene || e < 0 || e >= scene->entity_count)
+		return 0;
+	scene->camera_entity = (int16_t)e;
+	return Scene_ApplyCamera();
+}
+
 int g_scene_switch_request;
 
 int Scene_ApplyCamera(void)

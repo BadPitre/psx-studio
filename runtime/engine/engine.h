@@ -82,6 +82,14 @@ void Camera_Set(int32_t x, int32_t y, int32_t z, int yaw, int pitch);
  * scripts peuvent ensuite reprendre la main a chaque frame. */
 int Scene_ApplyCamera(void);
 
+/* Un script demande qu'une entite de la scene devienne la vue (elle
+ * garde son FOV et sa distance de rendu). La demande est appliquee par
+ * la boucle de jeu APRES Scene_UpdateWorld (matrices monde a jour) et
+ * ne dure qu'une frame : un script FPS la repose a chaque frame, un
+ * script qui arrete de la poser rend la main a la camera precedente. */
+void	Camera_Request(int32_t entity);
+int		Camera_ApplyRequest(void);
+
 /* Streaming : un script le met a 1 pour demander la bascule vers la
  * scene prechargee (portail). La boucle de jeu consomme la demande
  * quand le prechargement est pret. */

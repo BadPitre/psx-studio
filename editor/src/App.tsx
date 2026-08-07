@@ -1764,7 +1764,13 @@ export default function App() {
      couleur chaude) ou caméra (recul + regard vers l'origine, la scène
      dans le cadre). */
   const addEntity = useCallback(
-    (kind: "empty" | "light" | "camera" | "canvas" | "uiimage" | "uitext" | "uibutton" | "vlist" | "hlist") => {
+    (
+      kind: "empty" | "light" | "camera" | "canvas" | "uiimage" | "uitext" | "uibutton" | "vlist" | "hlist",
+      /* Clic droit sur un objet -> « Créer un enfant » : le nouvel objet
+         naît sous lui, avec une position LOCALE nulle (il apparaît donc
+         pile sur son parent). */
+      parentName?: string,
+    ) => {
       const base = { light: "lumiere", camera: "camera", canvas: "canvas", uiimage: "image", uitext: "texte", uibutton: "bouton", vlist: "liste", hlist: "liste" }[
         kind as string
       ] ?? "entite";
@@ -1772,32 +1778,41 @@ export default function App() {
       const isUiChild =
         kind === "uiimage" || kind === "uitext" || kind === "uibutton" ||
         kind === "vlist" || kind === "hlist";
-      /* Widget UI : sous le canvas sélectionné, sinon le premier. */
-      const uiParent = isUiChild
-        ? ((selected >= 0 &&
+      /* Widget UI : sous le parent demandé, sinon le canvas sélectionné,
+         sinon le premier. */
+      const uiParent = !isUiChild
+        ? undefined
+        : parentName ??
+          ((selected >= 0 &&
             sceneDoc?.entities?.find(
               (e) => e.name === entityNames[selected] && (e.canvas === true || e.rect),
             )?.name) ||
-          (sceneDoc?.entities?.find((e) => e.canvas === true)?.name as string | undefined))
-        : undefined;
+            (sceneDoc?.entities?.find((e) => e.canvas === true)?.name as
+              | string
+              | undefined));
       if (isUiChild && !uiParent) {
         setError("Ajoute d'abord un Canvas (menu ＋ → Canvas UI).");
         return;
       }
       mutateDoc((doc) => {
         doc.entities = doc.entities ?? [];
+        /* Sous un parent, les transforms sont LOCAUX : un enfant naît
+           sur son parent (0, 0, 0) plutôt qu'au préréglage monde. */
+        const child = parentName ? { parent: parentName } : {};
         if (kind === "light") {
           doc.entities.push({
             name,
-            position: [0, -200, 0],
+            ...child,
+            position: parentName ? [0, 0, 0] : [0, -200, 0],
             rotation: [45, 30, 0],
             light: { color: [255, 235, 200] },
           });
         } else if (kind === "camera") {
           doc.entities.push({
             name,
-            position: [0, -200, -420],
-            rotation: [-21, 180, 0],
+            ...child,
+            position: parentName ? [0, 0, 0] : [0, -200, -420],
+            rotation: parentName ? [0, 0, 0] : [-21, 180, 0],
             camera: true,
           });
         } else if (kind === "canvas") {
@@ -1848,7 +1863,7 @@ export default function App() {
                 },
           );
         } else {
-          doc.entities.push({ name, position: [0, 0, 0] });
+          doc.entities.push({ name, ...child, position: [0, 0, 0] });
         }
       }, name);
     },
@@ -2492,6 +2507,12 @@ export default function App() {
       ? selectedName.split(".")[0]
       : null;
   const selectedPrefabSource = selectedName ? prefabRoots.get(selectedName) ?? null : null;
+  /* Objet d'interface (canvas ou widget) : ses enfants sont des widgets,
+     pas des objets 3D — le menu « Créer un enfant » s'adapte. */
+  const selectedIsUi = !!(
+    selectedJsonEntity &&
+    (selectedJsonEntity.canvas === true || selectedJsonEntity.rect)
+  );
   const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
   /* Valeurs publiques réglées sur l'entité (par script). */
   const currentScriptValues = useMemo(() => {
@@ -2855,6 +2876,25 @@ export default function App() {
                 y={menu.y}
                 onClose={() => setMenu(null)}
                 actions={[
+                  /* Créer directement sous l'objet visé (comme Unity) :
+                     le parent est celui du clic droit, pas la sélection
+                     au moment où l'on choisit le type. */
+                  {
+                    label: "＋ Créer un enfant",
+                    children: selectedIsUi
+                      ? [
+                          { label: "🖼 Image UI", onClick: () => addEntity("uiimage", selectedName) },
+                          { label: "🅰 Texte UI", onClick: () => addEntity("uitext", selectedName) },
+                          { label: "🔘 Bouton UI", onClick: () => addEntity("uibutton", selectedName) },
+                          { label: "☰ Liste verticale UI", onClick: () => addEntity("vlist", selectedName) },
+                          { label: "☷ Liste horizontale UI", onClick: () => addEntity("hlist", selectedName) },
+                        ]
+                      : [
+                          { label: "▣ GameObject", onClick: () => addEntity("empty", selectedName) },
+                          { label: "🎥 Caméra", onClick: () => addEntity("camera", selectedName) },
+                          { label: "☀ Lumière directionnelle", onClick: () => addEntity("light", selectedName) },
+                        ],
+                  },
                   {
                     label: "Renommer",
                     shortcut: "F2",

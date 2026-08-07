@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <psxgte.h>
+
 #include "engine.h"
 #include "scene.h"
 
@@ -48,8 +50,18 @@ enum
 	/* Fonctions utilisateur (frames sur pile statique). */
 	OP_ENTER, OP_CALL, OP_RETV, OP_RET0, OP_GLOAD, OP_GSTORE,
 	/* Champ `public` : surcharge de l'inspecteur si l'instance en a une. */
-	OP_INITPUB
+	OP_INITPUB,
+	/* Camera (5 registres consecutifs) et trigonometrie 4.12. */
+	OP_CAMERA, OP_SIN, OP_COS,
+	/* Camera = une entite de la scene, et tangage (rot X). */
+	OP_CAMENT, OP_GETROTX, OP_SETROTX
 };
+
+/* Angles : le projet compte 4096 = un tour, comme isin/icos du SDK
+ * (leur en-tete annonce 131072, mais l'implementation isin_S4 a bien une
+ * periode de 4096 — verifie numeriquement). Retour en 4.12 (4096 = 1.0).
+ * On ramene dans [0, 4096[ pour rester loin des debordements. */
+#define ANGLE_TO_SDK(a)	((a) & 4095)
 
 /* Pile d'appels des fonctions utilisateur : frames statiques (zero
  * allocation), recursion bornee — un appel au-dela de la profondeur max
@@ -243,6 +255,29 @@ static void Run(Scene* scene, VmInstance* in, uint16_t pc)
 			R[call_stack[depth].ret_slot] = val;
 			break;
 		}
+		case OP_CAMERA:
+			/* R[a..a+4] = x, y, z, yaw, pitch (unites monde / 4096 = tour),
+			 * MEME convention qu'une entite camera : cap 0 = regard vers
+			 * -Z, tangage positif = vers le haut. */
+			Camera_Set(R[a], R[a + 1], R[a + 2],
+				(2048 - R[a + 3]) & 4095, -R[a + 4]);
+			break;
+		case OP_CAMENT:
+			/* L'entite devient la vue : appliquee apres Scene_UpdateWorld
+			 * (sa matrice monde doit etre a jour), avec son FOV et sa
+			 * distance de rendu. */
+			Camera_Request(R[a]);
+			break;
+		case OP_GETROTX:
+			e = EntityAt(scene, R[b]);
+			R[a] = e ? e->rot.vx : 0;
+			break;
+		case OP_SETROTX:
+			e = EntityAt(scene, R[a]);
+			if (e) e->rot.vx = (int16_t)R[b];
+			break;
+		case OP_SIN: R[a] = isin(ANGLE_TO_SDK(R[b])); break;
+		case OP_COS: R[a] = icos(ANGLE_TO_SDK(R[b])); break;
 		case OP_GLOAD: R[a] = in->regs[b]; break;
 		case OP_GSTORE: in->regs[a] = R[b]; break;
 		case OP_INITPUB:

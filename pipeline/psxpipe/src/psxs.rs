@@ -79,21 +79,37 @@ pub const OP_GSTORE: u8 = 43; // champ global a <- r local b
 /// dans l'inspecteur), l'écrit dans le registre — sinon laisse la valeur
 /// par défaut du script. a = registre, b = index du champ public.
 pub const OP_INITPUB: u8 = 44;
+/// Caméra : 5 registres consécutifs (x, y, z, yaw, pitch) à partir de a.
+pub const OP_CAMERA: u8 = 45;
+/// Trigonométrie 4.12 (4096 = 1.0), angle en unités projet (4096 = tour).
+pub const OP_SIN: u8 = 46;
+pub const OP_COS: u8 = 47;
+/// Caméra : l'entité du registre a devient la vue (elle garde son FOV et
+/// sa distance de rendu réglés dans l'inspecteur).
+pub const OP_CAMENT: u8 = 48;
+/// Tangage (rotation X) : lire / écrire, positif = regard vers le haut.
+pub const OP_GETROTX: u8 = 49;
+pub const OP_SETROTX: u8 = 50;
 
 pub const REG_COUNT: usize = 16;
 const NO_PC: u16 = 0xFFFF;
 
 /// Noms réservés du moteur (une `function` ne peut pas les redéfinir).
-const BUILTINS: [&str; 20] = [
+const BUILTINS: [&str; 25] = [
     "pos_x", "pos_y", "pos_z", "set_x", "set_y", "set_z", "rot_y", "set_rot_y",
-    "rotate_y", "move", "held", "pressed", "distance", "find", "dialog",
-    "dialog_open", "close_dialog", "show", "switch_scene", "random",
+    "rotate_y", "rot_x", "set_rot_x", "move", "held", "pressed", "distance",
+    "find", "dialog", "dialog_open", "close_dialog", "show", "switch_scene",
+    "random", "camera", "sin", "cos",
 ];
 
 /* Boutons : masques matériels PS1 (psxpad.h), stables à jamais. */
-const BUTTONS: [(&str, u16); 10] = [
+const BUTTONS: [(&str, u16); 14] = [
     ("SELECT", 0x0001),
     ("START", 0x0008),
+    ("L2", 0x0100),
+    ("R2", 0x0200),
+    ("L1", 0x0400),
+    ("R1", 0x0800),
     ("UP", 0x0010),
     ("RIGHT", 0x0020),
     ("DOWN", 0x0040),
@@ -791,6 +807,18 @@ impl Gen {
                 let opc = if name == "rotate_y" { OP_ADDROTY } else { OP_SETROTY };
                 self.code.push(insn(opc, e, v, 0));
             }
+            "rot_x" => {
+                Self::arity(name, args, 1, line)?;
+                let d = need_dst(dst)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                self.code.push(insn(OP_GETROTX, d, e, 0));
+            }
+            "set_rot_x" => {
+                Self::arity(name, args, 2, line)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                let v = self.arg_reg(args, 1, name, line)?;
+                self.code.push(insn(OP_SETROTX, e, v, 0));
+            }
             "move" => {
                 Self::arity(name, args, 3, line)?;
                 let e = self.arg_reg(args, 0, name, line)?;
@@ -866,6 +894,44 @@ impl Gen {
             "switch_scene" => {
                 Self::arity(name, args, 0, line)?;
                 self.code.push(insn(OP_SWITCH, 0, 0, 0));
+            }
+            /* Une entité de la scène devient la vue : elle garde le FOV et
+             * la distance de rendu réglés dans l'inspecteur, et le script
+             * n'a qu'à la placer (set_x/set_rot_y/set_rot_x). */
+            "camera" if args.len() == 1 => {
+                let e = self.arg_reg(args, 0, name, line)?;
+                self.code.push(insn(OP_CAMENT, e, 0, 0));
+            }
+            "camera" => {
+                if args.len() != 5 {
+                    return Err(format!(
+                        "ligne {line}: camera() attend une entité caméra, \
+                         ou 5 nombres (x, y, z, yaw, pitch)"
+                    ));
+                }
+                /* 5 registres CONSECUTIFS (x, y, z, yaw, pitch), comme
+                 * une frame d'appel : la VM les lit d'un bloc. */
+                let abase = self.temp_base + self.temp;
+                for k in 0..5 {
+                    let r = self.alloc_temp(line)?;
+                    debug_assert_eq!(r, abase + k as u8);
+                    match &args[k] {
+                        Arg::Expr(e) => self.emit_expr(e, r)?,
+                        Arg::Str(_) => {
+                            return Err(format!(
+                                "ligne {line}: camera() attend des nombres"
+                            ))
+                        }
+                    }
+                }
+                self.code.push(insn(OP_CAMERA, abase, 0, 0));
+            }
+            "sin" | "cos" => {
+                Self::arity(name, args, 1, line)?;
+                let d = need_dst(dst)?;
+                let a = self.arg_reg(args, 0, name, line)?;
+                self.code
+                    .push(insn(if name == "sin" { OP_SIN } else { OP_COS }, d, a, 0));
             }
             "random" => {
                 Self::arity(name, args, 1, line)?;
@@ -1077,6 +1143,10 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
                 let init = if matches!(p.peek(), Some(Tok::Sym("="))) {
                     p.pos += 1;
                     Some(p.parse_expr()?)
+                } else if matches!(kind, PubType::Entity) {
+                    // Un champ `entity` non réglé vaut `nil` (-1), pas
+                    // l'entité 0 : `if target != nil then` doit être faux.
+                    Some(Expr::Int(-1))
                 } else {
                     None
                 };
@@ -1359,6 +1429,18 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
 mod tests {
     use super::*;
 
+    fn words(bc: &[u8]) -> Vec<u32> {
+        let consts = u16::from_le_bytes([bc[6], bc[7]]) as usize;
+        let code_len = u16::from_le_bytes([bc[8], bc[9]]) as usize;
+        let code_off = 20 + consts * 4;
+        (0..code_len)
+            .map(|i| {
+                let o = code_off + i * 4;
+                u32::from_le_bytes([bc[o], bc[o + 1], bc[o + 2], bc[o + 3]])
+            })
+            .collect()
+    }
+
     fn ops(bc: &[u8]) -> Vec<u8> {
         let consts = u16::from_le_bytes([bc[6], bc[7]]) as usize;
         let code_len = u16::from_le_bytes([bc[8], bc[9]]) as usize;
@@ -1438,6 +1520,12 @@ mod tests {
         assert_eq!((c.fields[2].kind, c.fields[2].default), (PubType::Bool, 1));
         // Un OP_INITPUB par champ, dans le bloc start.
         assert_eq!(ops(&c.bytecode).iter().filter(|o| **o == OP_INITPUB).count(), 3);
+        // Un champ `entity` non réglé démarre à nil (-1), pas à l'entité 0.
+        let src = "public var target : entity\nvar touche = 0\n\nevery frame\n    if target != nil then\n        touche = 1\n    end\nend\n";
+        let c = compile(src).unwrap();
+        let init = words(&c.bytecode)[0];
+        assert_eq!(init >> 24, OP_LOADI as u32);
+        assert_eq!((init & 0xFFFF) as i16, -1);
 
         // Erreurs claires.
         let e = compile("public speed = 1\nevery frame\nend\n").unwrap_err();

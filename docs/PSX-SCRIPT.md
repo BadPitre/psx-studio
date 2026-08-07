@@ -139,7 +139,8 @@ public var target : entity     # sélecteur d'objet de la scène
 - Types : `int` (défaut), `bool`, `entity`. Un champ `entity` liste les
   objets de la scène (GameObject, **caméra**, lumière…) et donne au
   script l'entité choisie, utilisable directement :
-  `distance(self, target)`, `pos_x(target)`, `move(target, …)`.
+  `distance(self, target)`, `pos_x(target)`, `move(target, …)`,
+  `camera(target)`. Non réglé, il vaut `nil` (`if target != nil then`).
 - La valeur réglée dans l'inspecteur **écrase le défaut du script**
   avant `on start` ; sans réglage, le défaut s'applique.
 - Chaque objet a ses propres valeurs (deux tourelles, deux vitesses).
@@ -173,7 +174,11 @@ end
 | `set_x(e, v)` `set_y` `set_z` | téléporte sur un axe |
 | `move(e, dx, dz)` | déplace **avec collisions** (glisse sur les murs) |
 | `rot_y(e)` / `set_rot_y(e, v)` / `rotate_y(e, delta)` | cap (4096 = un tour) |
-| `held(B)` / `pressed(B)` | bouton tenu / vient d'être pressé — B : `CROSS CIRCLE SQUARE TRIANGLE UP DOWN LEFT RIGHT START SELECT` |
+| `rot_x(e)` / `set_rot_x(e, v)` | tangage (positif = regard vers le haut) |
+| `camera(e)` | l'entité **devient la vue** (elle garde son FOV et sa distance de rendu) |
+| `camera(x, y, z, cap, tangage)` | vue libre, sans entité caméra |
+| `sin(a)` / `cos(a)` | trigonométrie en 4.12 (`4096` = 1.0), angle en unités projet |
+| `held(B)` / `pressed(B)` | bouton tenu / vient d'être pressé — B : `CROSS CIRCLE SQUARE TRIANGLE UP DOWN LEFT RIGHT L1 R1 L2 R2 START SELECT` |
 | `distance(a, b)` | distance XZ approchée (rapide, ~4 %) en unités monde |
 | `dialog("L1 / L2 / L3")` | boîte de dialogue (3 lignes, `/` = retour) |
 | `dialog_open()` / `close_dialog()` | état / fermeture |
@@ -183,6 +188,38 @@ end
 
 Les textes sont translittérés vers le charset des polices `.fnt`
 (majuscules, accents aplatis).
+
+**Repères** : cap 0 = regard vers **-Z** (comme les modèles), le cap
+tourne vers la droite de l'écran quand il augmente ; +Y va vers le
+**bas**. Un champ `entity` non réglé vaut `nil` — teste-le avant usage.
+
+## 5 bis. Caméra à la première personne
+
+Le projet démo contient `scripts/fps.psxs`, un contrôleur FPS complet
+(~60 lignes, aucune ligne de C) : regard, marche relative au regard,
+pas de côté, course, collisions, butée du regard.
+
+1. Sélectionne l'objet joueur → **＋ Ajouter un composant → fps**.
+2. Ajoute une caméra (clic droit dans la hiérarchie → **Créer un
+   enfant → Caméra**, ou le menu ＋), puis glisse-la dans le champ
+   **cam** de la carte du script.
+3. Règle si besoin `speed`, `turn_speed`, `eye_height`, `run_factor`,
+   `look_limit` — par objet, sans recompiler le jeu.
+
+Manette : D-pad haut/bas avance/recule, gauche/droite tourne, L1/R1
+pas de côté, L2/R2 lève/baisse le regard, CROIX court.
+
+Le cœur tient en trois lignes — la caméra est une entité comme une
+autre, le script la place :
+
+```
+set_x(cam, pos_x(self))
+set_rot_y(cam, yaw)
+camera(cam)              # cette entité devient la vue
+```
+
+Sans caméra réglée, `camera(x, y, z, cap, tangage)` pose une vue libre
+au même endroit : le script marche même « nu ».
 
 ## 6. Sous le capot (format)
 
@@ -202,6 +239,13 @@ Les textes sont translittérés vers le charset des polices `.fnt`
   d'offsets** juste après la table de hashes de scripts : un u32 par
   script, 0 = script C du registre, sinon l'offset du blob. Un runtime
   ancien ignore flag et table — rétrocompatible.
+- `camera(entité)` ne pose pas la vue tout de suite : elle est
+  **réclamée**, puis appliquée par la boucle de jeu après la mise à jour
+  des matrices monde (la caméra suit donc son parent au pixel près), et
+  la demande ne dure qu'une frame — un script qui cesse de la poser rend
+  la main à la caméra précédente.
+- `sin`/`cos` tapent directement dans `isin`/`icos` du SDK : même unité
+  d'angle que le projet (4096 = un tour), résultat en 4.12.
 - Au chargement, un blob présent **prime sur le registre C** pour ce
   nom. La VM (`engine/vm.c`, liée par le jeu seulement) instancie un
   jeu de registres par entité scriptée (24 instances max) et exécute
