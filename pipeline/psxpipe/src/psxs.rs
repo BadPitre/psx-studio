@@ -90,16 +90,22 @@ pub const OP_CAMENT: u8 = 48;
 /// Tangage (rotation X) : lire / écrire, positif = regard vers le haut.
 pub const OP_GETROTX: u8 = 49;
 pub const OP_SETROTX: u8 = 50;
+/// Stick analogique : b = axe (0 = X gauche, 1 = Y gauche, 2 = X droit,
+/// 3 = Y droit), résultat -128..127 (0 sur une manette numérique).
+pub const OP_AXIS: u8 = 51;
+/// 1 si la manette est en mode analogique (sticks lisibles).
+pub const OP_ANALOG: u8 = 52;
 
 pub const REG_COUNT: usize = 16;
 const NO_PC: u16 = 0xFFFF;
 
 /// Noms réservés du moteur (une `function` ne peut pas les redéfinir).
-const BUILTINS: [&str; 25] = [
+const BUILTINS: [&str; 30] = [
     "pos_x", "pos_y", "pos_z", "set_x", "set_y", "set_z", "rot_y", "set_rot_y",
     "rotate_y", "rot_x", "set_rot_x", "move", "held", "pressed", "distance",
     "find", "dialog", "dialog_open", "close_dialog", "show", "switch_scene",
     "random", "camera", "sin", "cos",
+    "lstick_x", "lstick_y", "rstick_x", "rstick_y", "analog",
 ];
 
 /* Boutons : masques matériels PS1 (psxpad.h), stables à jamais. */
@@ -840,6 +846,24 @@ impl Gen {
                 };
                 let opc = if name == "held" { OP_HELD } else { OP_PRESSED };
                 self.code.push(insn16(opc, d, mask));
+            }
+            /* Sticks analogiques : -128..127, 0 au repos (et 0 sur une
+             * manette numérique — un script marche dans les deux cas). */
+            "lstick_x" | "lstick_y" | "rstick_x" | "rstick_y" => {
+                Self::arity(name, args, 0, line)?;
+                let d = need_dst(dst)?;
+                let axis = match name {
+                    "lstick_x" => 0,
+                    "lstick_y" => 1,
+                    "rstick_x" => 2,
+                    _ => 3,
+                };
+                self.code.push(insn(OP_AXIS, d, axis, 0));
+            }
+            "analog" => {
+                Self::arity(name, args, 0, line)?;
+                let d = need_dst(dst)?;
+                self.code.push(insn(OP_ANALOG, d, 0, 0));
             }
             "distance" => {
                 Self::arity(name, args, 2, line)?;

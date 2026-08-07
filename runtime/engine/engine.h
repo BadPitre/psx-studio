@@ -72,6 +72,13 @@ Entity*	Scene_FindByScript(const char* name);
 uint16_t Input_Held(void);
 uint16_t Input_Pressed(void);
 
+/* Sticks analogiques (DualShock en mode analogique) : valeur -128..127,
+ * 0 au repos. axis : 0 = X gauche, 1 = Y gauche, 2 = X droit, 3 = Y
+ * droit ; Y negatif = vers le haut. Une manette numerique rend 0.
+ * Input_HasAnalog() dit si les sticks sont lisibles. */
+int Input_Axis(int axis);
+int Input_HasAnalog(void);
+
 /* -------------------------------------------------------------- camera -- */
 /* La camera est pilotee par les scripts (position monde + angles). */
 

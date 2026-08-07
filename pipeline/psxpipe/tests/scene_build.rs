@@ -678,7 +678,10 @@ fn fps_controller_script_compiles() {
     let names: Vec<&str> = c.fields.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(
         names,
-        vec!["cam", "speed", "turn_speed", "eye_height", "run_factor", "look_limit"]
+        vec![
+            "cam", "speed", "turn_speed", "look_speed", "eye_height", "run_factor",
+            "look_limit", "deadzone"
+        ]
     );
     // La caméra s'attache dans l'inspecteur (sélecteur d'entité).
     assert!(matches!(c.fields[0].kind, psxpipe::psxs::PubType::Entity));
@@ -692,4 +695,13 @@ fn fps_controller_script_compiles() {
     assert!(ops.contains(&psxpipe::psxs::OP_CAMENT), "camera(entité)");
     assert!(ops.contains(&psxpipe::psxs::OP_CAMERA), "camera(x, y, z, ...)");
     assert!(ops.contains(&psxpipe::psxs::OP_SETROTX), "set_rot_x");
+    // Sticks analogiques : les 4 axes sont lus (déplacement + regard).
+    let axes: Vec<u8> = code
+        .chunks(4)
+        .filter(|w| w[3] == psxpipe::psxs::OP_AXIS)
+        .map(|w| w[1])
+        .collect();
+    for axis in 0..4u8 {
+        assert!(axes.contains(&axis), "axe {axis} lu par fps.psxs");
+    }
 }

@@ -179,6 +179,8 @@ end
 | `camera(x, y, z, cap, tangage)` | vue libre, sans entité caméra |
 | `sin(a)` / `cos(a)` | trigonométrie en 4.12 (`4096` = 1.0), angle en unités projet |
 | `held(B)` / `pressed(B)` | bouton tenu / vient d'être pressé — B : `CROSS CIRCLE SQUARE TRIANGLE UP DOWN LEFT RIGHT L1 R1 L2 R2 START SELECT` |
+| `lstick_x()` `lstick_y()` `rstick_x()` `rstick_y()` | sticks analogiques, **-128..127** (0 au repos, Y négatif = vers le haut) |
+| `analog()` | 1 si la manette est en mode analogique (sticks lisibles) |
 | `distance(a, b)` | distance XZ approchée (rapide, ~4 %) en unités monde |
 | `dialog("L1 / L2 / L3")` | boîte de dialogue (3 lignes, `/` = retour) |
 | `dialog_open()` / `close_dialog()` | état / fermeture |
@@ -203,13 +205,30 @@ pas de côté, course, collisions, butée du regard.
 2. Ajoute une caméra (clic droit dans la hiérarchie → **Créer un
    enfant → Caméra**, ou le menu ＋), puis glisse-la dans le champ
    **cam** de la carte du script.
-3. Règle si besoin `speed`, `turn_speed`, `eye_height`, `run_factor`,
-   `look_limit` — par objet, sans recompiler le jeu.
+3. Règle si besoin `speed`, `turn_speed`, `look_speed`, `eye_height`,
+   `run_factor`, `look_limit`, `deadzone` — par objet, sans recompiler
+   le jeu.
 
-Manette : D-pad haut/bas avance/recule, gauche/droite tourne, L1/R1
-pas de côté, L2/R2 lève/baisse le regard, CROIX court.
+**Manette analogique** (DualShock, LED rouge) : stick **gauche** =
+déplacement (dosé : à mi-course on marche, à fond on file), stick
+**droit** = regard. **Manette numérique** — ou en plus : D-pad haut/bas
+avance/recule, gauche/droite tourne, L1/R1 pas de côté, L2/R2 lève et
+baisse le regard. CROIX court dans les deux cas.
 
-Le cœur tient en trois lignes — la caméra est une entité comme une
+Les sticks ne demandent aucun réglage côté moteur : `lstick_x()` et
+compagnie rendent 0 sur une manette numérique, le même script marche
+donc dans les deux cas. Sous émulateur, pense à choisir une manette
+analogique dans la configuration des contrôleurs.
+
+Le regard tient en deux lignes (zone morte comprise, `dead()` est une
+`function` du script) :
+
+```
+yaw = yaw + dead(rstick_x()) * turn_speed / 128
+pitch = pitch - dead(rstick_y()) * look_speed / 128
+```
+
+Le cœur de la caméra tient en trois lignes — c'est une entité comme une
 autre, le script la place :
 
 ```

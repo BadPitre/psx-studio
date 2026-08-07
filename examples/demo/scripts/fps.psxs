@@ -5,34 +5,101 @@
 # devient la vue (elle garde son FOV et sa distance de rendu). Sans
 # caméra réglée, une vue libre est posée à la place.
 #
-# Manette : D-pad haut/bas = avancer/reculer, gauche/droite = tourner,
-# L1/R1 = pas de côté, L2/R2 = lever/baisser le regard, CROIX = courir.
+# Manette analogique : stick GAUCHE = déplacement, stick DROIT = regard.
+# Manette numérique (ou en plus) : D-pad haut/bas = avancer/reculer,
+# gauche/droite = tourner, L1/R1 = pas de côté, L2/R2 = regard vertical.
+# CROIX = courir dans les deux cas.
 #
 # Angles : 4096 = un tour complet, cap 0 = regard vers -Z (comme les
 # modèles). sin/cos rendent du 4.12 (4096 = 1.0), d'où les « / 4096 »
-# après chaque multiplication.
+# après chaque multiplication. Les sticks rendent -128..127 (0 au repos,
+# 0 aussi sur une manette numérique), d'où les « / 128 ».
 
 public var cam : entity        # la caméra de la scène à piloter
 public var speed = 6           # vitesse de marche (unités / frame)
-public var turn_speed = 48     # vitesse de rotation
+public var turn_speed = 48     # vitesse de rotation (stick droit + D-pad)
+public var look_speed = 40     # vitesse du regard vertical
 public var eye_height = 150    # hauteur des yeux au-dessus du pivot
 public var run_factor = 2      # multiplicateur de course (CROIX)
 public var look_limit = 700    # débattement vertical max du regard
+public var deadzone = 20       # zone morte des sticks (0..127)
 
 var yaw = 0
 var pitch = 0
 var step = 0
-var dx = 0
-var dz = 0
+
+# Zone morte : rend 0 au repos, et repart de 0 au sortir de la zone
+# (pas de saut quand le stick décolle).
+function dead(v)
+    if v > deadzone then
+        return v - deadzone
+    end
+    if v < 0 - deadzone then
+        return v + deadzone
+    end
+    return 0
+end
 
 # Avance de `amount` dans la direction du regard, `side` sur le côté
 # (droite de l'écran positive) — avec collisions.
 function walk(amount, side)
-    dx = (0 - sin(yaw) * amount - cos(yaw) * side) / 4096
-    dz = (sin(yaw) * side - cos(yaw) * amount) / 4096
+    var dx = (0 - sin(yaw) * amount - cos(yaw) * side) / 4096
+    var dz = (sin(yaw) * side - cos(yaw) * amount) / 4096
     if dx != 0 or dz != 0 then
         move(self, dx, dz)
     end
+end
+
+# Regard : stick droit, plus D-pad gauche/droite et L2/R2 en secours.
+function look()
+    var rx = dead(rstick_x())
+    var ry = dead(rstick_y())
+    yaw = yaw + rx * turn_speed / 128
+    pitch = pitch - ry * look_speed / 128
+    if held(LEFT) then
+        yaw = yaw - turn_speed
+    end
+    if held(RIGHT) then
+        yaw = yaw + turn_speed
+    end
+    if held(L2) then
+        pitch = pitch + 24
+    end
+    if held(R2) then
+        pitch = pitch - 24
+    end
+    if yaw < 0 then
+        yaw = yaw + 4096
+    end
+    if yaw >= 4096 then
+        yaw = yaw - 4096
+    end
+    if pitch > look_limit then
+        pitch = look_limit
+    end
+    if pitch < 0 - look_limit then
+        pitch = 0 - look_limit
+    end
+end
+
+# Déplacement : stick gauche, plus D-pad haut/bas et L1/R1 en secours.
+# `f` et `s` sont en centièmes-de-stick (128 = à fond).
+function drive()
+    var f = 0 - dead(lstick_y())
+    var s = dead(lstick_x())
+    if held(UP) then
+        f = 128
+    end
+    if held(DOWN) then
+        f = 0 - 128
+    end
+    if held(R1) then
+        s = 128
+    end
+    if held(L1) then
+        s = 0 - 128
+    end
+    walk(f * step / 128, s * step / 128)
 end
 
 on start
@@ -42,43 +109,13 @@ on start
 end
 
 every frame
-    # --- regard ---
-    if held(LEFT) then
-        yaw = yaw - turn_speed
-    end
-    if held(RIGHT) then
-        yaw = yaw + turn_speed
-    end
-    if yaw < 0 then
-        yaw = yaw + 4096
-    end
-    if yaw >= 4096 then
-        yaw = yaw - 4096
-    end
-    if held(L2) and pitch < look_limit then
-        pitch = pitch + 24
-    end
-    if held(R2) and pitch > 0 - look_limit then
-        pitch = pitch - 24
-    end
+    look()
 
-    # --- déplacement (relatif au regard, avec collisions) ---
     step = speed
     if held(CROSS) then
         step = speed * run_factor
     end
-    if held(UP) then
-        walk(step, 0)
-    end
-    if held(DOWN) then
-        walk(0 - step, 0)
-    end
-    if held(L1) then
-        walk(0, 0 - step)
-    end
-    if held(R1) then
-        walk(0, step)
-    end
+    drive()
 
     # Le corps suit le regard (utile si d'autres le voient en réseau/miroir).
     set_rot_y(self, yaw)

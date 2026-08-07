@@ -22,6 +22,10 @@
 static uint8_t	pad_buff[2][34];
 static uint16_t	input_held;
 static uint16_t	input_pressed;
+/* Sticks analogiques : X/Y gauche puis X/Y droit, -128..127, 0 au repos
+ * (la manette rend 0..255 avec 128 au centre). */
+static int8_t	input_axis[4];
+static uint8_t	input_analog;
 
 void Input_Init(void)
 {
@@ -35,13 +39,39 @@ void Input_Update(void)
 	const PADTYPE* pad = (const PADTYPE*)pad_buff[0];
 	uint16_t held = 0;
 
+	input_analog = 0;
+	input_axis[0] = input_axis[1] = input_axis[2] = input_axis[3] = 0;
+
 	if (pad->stat == 0 &&
 		(pad->type == 0x4 || pad->type == 0x5 || pad->type == 0x7))
 	{
 		held = (uint16_t)~pad->btn;
+		/* Manette analogique (DualShock LED rouge, 0x7 — ou stick de
+		 * vol, 0x5) : les 4 octets suivant les boutons sont les sticks.
+		 * En mode numerique (0x4) ils n'existent pas et valent 0. */
+		if (pad->type != 0x4)
+		{
+			input_analog = 1;
+			input_axis[0] = (int8_t)((int)pad->ls_x - 128);
+			input_axis[1] = (int8_t)((int)pad->ls_y - 128);
+			input_axis[2] = (int8_t)((int)pad->rs_x - 128);
+			input_axis[3] = (int8_t)((int)pad->rs_y - 128);
+		}
 	}
 	input_pressed = held & ~input_held;
 	input_held = held;
+}
+
+int Input_Axis(int axis)
+{
+	if (axis < 0 || axis > 3)
+		return 0;
+	return input_axis[axis];
+}
+
+int Input_HasAnalog(void)
+{
+	return input_analog;
 }
 
 uint16_t Input_Held(void)

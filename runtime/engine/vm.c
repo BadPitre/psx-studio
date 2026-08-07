@@ -54,7 +54,9 @@ enum
 	/* Camera (5 registres consecutifs) et trigonometrie 4.12. */
 	OP_CAMERA, OP_SIN, OP_COS,
 	/* Camera = une entite de la scene, et tangage (rot X). */
-	OP_CAMENT, OP_GETROTX, OP_SETROTX
+	OP_CAMENT, OP_GETROTX, OP_SETROTX,
+	/* Sticks analogiques. */
+	OP_AXIS, OP_ANALOG
 };
 
 /* Angles : le projet compte 4096 = un tour, comme isin/icos du SDK
@@ -268,6 +270,8 @@ static void Run(Scene* scene, VmInstance* in, uint16_t pc)
 			 * distance de rendu. */
 			Camera_Request(R[a]);
 			break;
+		case OP_AXIS: R[a] = Input_Axis(b); break;
+		case OP_ANALOG: R[a] = Input_HasAnalog(); break;
 		case OP_GETROTX:
 			e = EntityAt(scene, R[b]);
 			R[a] = e ? e->rot.vx : 0;
