@@ -86,6 +86,11 @@ Conventions :
   la matrice lumière GTE).
 - Chemins `pmd`/`tim` relatifs au fichier JSON. Les assets sont **embarqués**
   dans le `.psc`.
+- **PSX Script (v1.5)** : si `scripts/<nom>.psxs` existe dans le projet,
+  psxpipe le compile en blob bytecode **PSB1** embarqué dans le `.psc`
+  et pose le bit 0 des flags d'en-tête ; une **table d'offsets** (un u32
+  par script, 0 = script C) suit alors la table de hashes. Le blob prime
+  sur le registre C au chargement. Voir `PSX-SCRIPT.md`.
 - `script` (v1.1, optionnel) : nom d'un script runtime. Le binaire ne stocke
   que son **hash FNV-1a 32 bits** (nom passé en minuscules) ; le runtime le
   résout au chargement contre sa table `g_scripts` compilée dans le jeu.

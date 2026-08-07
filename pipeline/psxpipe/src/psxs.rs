@@ -1,0 +1,1023 @@
+//! PSX Script : le langage de gameplay sans C (docs/PSX-SCRIPT.md).
+//!
+//! Un `.psxs` est compilé ici en bytecode « PSB1 » embarqué dans le
+//! `.psc` (comme les assets) et interprété par la petite VM du runtime
+//! (`engine/vm.c`). Choix orientés console : **entiers uniquement**
+//! (unités monde, angles 4096 = un tour), **registres à emplacements
+//! fixes** décidés à la compilation (zéro allocation, zéro GC), les
+//! opérations lourdes restent des appels natifs du moteur.
+//!
+//! Le langage (mots-clés français, volontairement minimal) :
+//!
+//! ```text
+//! # girouette : tourne, et salue le joueur proche
+//! var vitesse = 12
+//!
+//! quand demarre
+//!     vitesse = 20
+//! fin
+//!
+//! chaque frame
+//!     tourner_y(moi, vitesse)
+//!     si distance(moi, trouve("player")) < 120 et touche_pressee(CROIX) alors
+//!         dialogue("BONJOUR !")
+//!     fin
+//! fin
+//! ```
+
+use std::collections::HashMap;
+
+/* ------------------------------------------------------------ opcodes -- */
+/* Instruction 32 bits : op(8) | a(8) | b(8) | c(8). Les sauts et
+ * immédiats 16 bits utilisent b<<8|c. Miroir C : engine/vm.c. */
+
+pub const OP_NOP: u8 = 0;
+pub const OP_RET: u8 = 1;
+pub const OP_LOADI: u8 = 2; // r, imm16 signé
+pub const OP_LOADK: u8 = 3; // r, index constante 32 bits
+pub const OP_MOV: u8 = 4;
+pub const OP_ADD: u8 = 5;
+pub const OP_SUB: u8 = 6;
+pub const OP_MUL: u8 = 7;
+pub const OP_DIV: u8 = 8;
+pub const OP_MOD: u8 = 9;
+pub const OP_NEG: u8 = 10;
+pub const OP_LT: u8 = 11;
+pub const OP_LE: u8 = 12;
+pub const OP_EQ: u8 = 13;
+pub const OP_NE: u8 = 14;
+pub const OP_AND: u8 = 15;
+pub const OP_OR: u8 = 16;
+pub const OP_NOT: u8 = 17;
+pub const OP_JMP: u8 = 18; // addr16 absolue (index d'instruction)
+pub const OP_JZ: u8 = 19; // r, addr16
+pub const OP_SELF: u8 = 21;
+pub const OP_GETPOS: u8 = 22; // r, e, axe
+pub const OP_SETPOS: u8 = 23; // e, axe, s
+pub const OP_GETROTY: u8 = 24;
+pub const OP_SETROTY: u8 = 25;
+pub const OP_ADDROTY: u8 = 26;
+pub const OP_MOVE: u8 = 27; // e, sx, sz (collisions)
+pub const OP_HELD: u8 = 28; // r, masque16
+pub const OP_PRESSED: u8 = 29; // r, masque16
+pub const OP_DIST: u8 = 30;
+pub const OP_FIND: u8 = 31; // r, index constante (hash de script)
+pub const OP_DIALOG: u8 = 32; // index constante (offset de chaîne)
+pub const OP_DLGOPEN: u8 = 33;
+pub const OP_DLGCLOSE: u8 = 34;
+pub const OP_SHOW: u8 = 35; // e, s
+pub const OP_SWITCH: u8 = 36;
+pub const OP_RAND: u8 = 37; // r, s -> 0..s-1
+
+pub const REG_COUNT: usize = 16;
+const NO_PC: u16 = 0xFFFF;
+
+/* Boutons : masques matériels PS1 (psxpad.h), stables à jamais. */
+const BUTTONS: [(&str, u16); 10] = [
+    ("SELECT", 0x0001),
+    ("START", 0x0008),
+    ("HAUT", 0x0010),
+    ("DROITE", 0x0020),
+    ("BAS", 0x0040),
+    ("GAUCHE", 0x0080),
+    ("TRIANGLE", 0x1000),
+    ("ROND", 0x2000),
+    ("CROIX", 0x4000),
+    ("CARRE", 0x8000),
+];
+
+/* -------------------------------------------------------------- lexer -- */
+
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Int(i32),
+    Ident(String),
+    Str(String),
+    Sym(&'static str),
+    NewLine,
+}
+
+struct Lexer {
+    toks: Vec<(Tok, u32)>,
+}
+
+fn lex(src: &str) -> Result<Lexer, String> {
+    let mut toks = Vec::new();
+    for (li, raw) in src.lines().enumerate() {
+        let line = li as u32 + 1;
+        let mut it = raw.char_indices().peekable();
+        let mut pushed = false;
+        while let Some(&(i, c)) = it.peek() {
+            match c {
+                '#' => break, // commentaire jusqu'à la fin de ligne
+                ' ' | '\t' | '\r' => {
+                    it.next();
+                }
+                '"' => {
+                    it.next();
+                    let mut s = String::new();
+                    loop {
+                        match it.next() {
+                            Some((_, '"')) => break,
+                            Some((_, '\n')) | None => {
+                                return Err(format!("ligne {line}: chaîne non fermée"))
+                            }
+                            Some((_, ch)) => s.push(ch),
+                        }
+                    }
+                    toks.push((Tok::Str(s), line));
+                    pushed = true;
+                }
+                '0'..='9' => {
+                    let mut end = i;
+                    while let Some(&(j, d)) = it.peek() {
+                        if d.is_ascii_digit() {
+                            end = j;
+                            it.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    let text = &raw[i..=end];
+                    let v: i32 = text
+                        .parse()
+                        .map_err(|_| format!("ligne {line}: nombre invalide '{text}'"))?;
+                    toks.push((Tok::Int(v), line));
+                    pushed = true;
+                }
+                c if c.is_alphabetic() || c == '_' => {
+                    let mut end = i;
+                    while let Some(&(j, d)) = it.peek() {
+                        if d.is_alphanumeric() || d == '_' {
+                            end = j;
+                            it.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    toks.push((Tok::Ident(raw[i..=end].to_string()), line));
+                    pushed = true;
+                }
+                _ => {
+                    it.next();
+                    let two = if let Some(&(_, n)) = it.peek() {
+                        match (c, n) {
+                            ('<', '=') => Some("<="),
+                            ('>', '=') => Some(">="),
+                            ('=', '=') => Some("=="),
+                            ('!', '=') => Some("!="),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(sym) = two {
+                        it.next();
+                        toks.push((Tok::Sym(sym), line));
+                    } else {
+                        let sym = match c {
+                            '+' => "+",
+                            '-' => "-",
+                            '*' => "*",
+                            '/' => "/",
+                            '%' => "%",
+                            '(' => "(",
+                            ')' => ")",
+                            ',' => ",",
+                            '<' => "<",
+                            '>' => ">",
+                            '=' => "=",
+                            other => {
+                                return Err(format!(
+                                    "ligne {line}: caractère inattendu '{other}'"
+                                ))
+                            }
+                        };
+                        toks.push((Tok::Sym(sym), line));
+                    }
+                    pushed = true;
+                }
+            }
+        }
+        if pushed {
+            toks.push((Tok::NewLine, line));
+        }
+    }
+    Ok(Lexer { toks })
+}
+
+/* ------------------------------------------------------------- parser -- */
+
+#[derive(Debug)]
+enum Expr {
+    Int(i32),
+    Var(String, u32),
+    Bin(&'static str, Box<Expr>, Box<Expr>),
+    Not(Box<Expr>),
+    Neg(Box<Expr>),
+    Call(String, Vec<Arg>, u32),
+    Me,
+    Button(u16),
+    Nil,
+}
+
+#[derive(Debug)]
+enum Arg {
+    Expr(Expr),
+    Str(String),
+}
+
+#[derive(Debug)]
+enum Stmt {
+    Assign(String, Expr, u32),
+    If(Expr, Vec<Stmt>, Vec<Stmt>),
+    While(Expr, Vec<Stmt>),
+    Call(String, Vec<Arg>, u32),
+}
+
+struct Parser {
+    toks: Vec<(Tok, u32)>,
+    pos: usize,
+}
+
+impl Parser {
+    fn peek(&self) -> Option<&Tok> {
+        self.toks.get(self.pos).map(|(t, _)| t)
+    }
+    fn line(&self) -> u32 {
+        self.toks
+            .get(self.pos.min(self.toks.len().saturating_sub(1)))
+            .map(|(_, l)| *l)
+            .unwrap_or(0)
+    }
+    fn next(&mut self) -> Option<Tok> {
+        let t = self.toks.get(self.pos).map(|(t, _)| t.clone());
+        self.pos += 1;
+        t
+    }
+    fn eat_newlines(&mut self) {
+        while matches!(self.peek(), Some(Tok::NewLine)) {
+            self.pos += 1;
+        }
+    }
+    fn expect_sym(&mut self, s: &str) -> Result<(), String> {
+        match self.next() {
+            Some(Tok::Sym(t)) if t == s => Ok(()),
+            _ => Err(format!("ligne {}: « {s} » attendu", self.line())),
+        }
+    }
+    fn expect_kw(&mut self, kw: &str) -> Result<(), String> {
+        match self.next() {
+            Some(Tok::Ident(t)) if t == kw => Ok(()),
+            _ => Err(format!("ligne {}: « {kw} » attendu", self.line())),
+        }
+    }
+    fn end_of_stmt(&mut self) -> Result<(), String> {
+        match self.next() {
+            Some(Tok::NewLine) | None => Ok(()),
+            _ => Err(format!(
+                "ligne {}: fin de ligne attendue (une instruction par ligne)",
+                self.line()
+            )),
+        }
+    }
+
+    /// `fin` termine le bloc ; `sinon` le termine aussi quand `allow_else`.
+    fn parse_block(&mut self, allow_else: bool) -> Result<(Vec<Stmt>, bool), String> {
+        let mut out = Vec::new();
+        loop {
+            self.eat_newlines();
+            match self.peek() {
+                None => {
+                    return Err(format!(
+                        "ligne {}: « fin » manquant avant la fin du fichier",
+                        self.line()
+                    ))
+                }
+                Some(Tok::Ident(k)) if k == "fin" => {
+                    self.pos += 1;
+                    return Ok((out, false));
+                }
+                Some(Tok::Ident(k)) if allow_else && k == "sinon" => {
+                    self.pos += 1;
+                    return Ok((out, true));
+                }
+                _ => out.push(self.parse_stmt()?),
+            }
+        }
+    }
+
+    fn parse_stmt(&mut self) -> Result<Stmt, String> {
+        let line = self.line();
+        match self.next() {
+            Some(Tok::Ident(name)) => match name.as_str() {
+                "si" => {
+                    let cond = self.parse_expr()?;
+                    self.expect_kw("alors")?;
+                    self.end_of_stmt()?;
+                    let (then, has_else) = self.parse_block(true)?;
+                    let els = if has_else {
+                        self.end_of_stmt()?;
+                        self.parse_block(false)?.0
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(Stmt::If(cond, then, els))
+                }
+                "tantque" => {
+                    let cond = self.parse_expr()?;
+                    self.expect_kw("faire")?;
+                    self.end_of_stmt()?;
+                    let (body, _) = self.parse_block(false)?;
+                    Ok(Stmt::While(cond, body))
+                }
+                _ => match self.peek() {
+                    Some(Tok::Sym("=")) => {
+                        self.pos += 1;
+                        let e = self.parse_expr()?;
+                        self.end_of_stmt()?;
+                        Ok(Stmt::Assign(name, e, line))
+                    }
+                    Some(Tok::Sym("(")) => {
+                        self.pos += 1;
+                        let args = self.parse_args()?;
+                        self.end_of_stmt()?;
+                        Ok(Stmt::Call(name, args, line))
+                    }
+                    _ => Err(format!(
+                        "ligne {line}: « = » ou « ( » attendu après « {name} »"
+                    )),
+                },
+            },
+            _ => Err(format!("ligne {line}: instruction attendue")),
+        }
+    }
+
+    fn parse_args(&mut self) -> Result<Vec<Arg>, String> {
+        let mut args = Vec::new();
+        if matches!(self.peek(), Some(Tok::Sym(")"))) {
+            self.pos += 1;
+            return Ok(args);
+        }
+        loop {
+            if let Some(Tok::Str(s)) = self.peek() {
+                args.push(Arg::Str(s.clone()));
+                self.pos += 1;
+            } else {
+                args.push(Arg::Expr(self.parse_expr()?));
+            }
+            match self.next() {
+                Some(Tok::Sym(",")) => {}
+                Some(Tok::Sym(")")) => return Ok(args),
+                _ => return Err(format!("ligne {}: « , » ou « ) » attendu", self.line())),
+            }
+        }
+    }
+
+    fn parse_expr(&mut self) -> Result<Expr, String> {
+        self.parse_or()
+    }
+    fn parse_or(&mut self) -> Result<Expr, String> {
+        let mut e = self.parse_and()?;
+        while matches!(self.peek(), Some(Tok::Ident(k)) if k == "ou") {
+            self.pos += 1;
+            e = Expr::Bin("ou", Box::new(e), Box::new(self.parse_and()?));
+        }
+        Ok(e)
+    }
+    fn parse_and(&mut self) -> Result<Expr, String> {
+        let mut e = self.parse_cmp()?;
+        while matches!(self.peek(), Some(Tok::Ident(k)) if k == "et") {
+            self.pos += 1;
+            e = Expr::Bin("et", Box::new(e), Box::new(self.parse_cmp()?));
+        }
+        Ok(e)
+    }
+    fn parse_cmp(&mut self) -> Result<Expr, String> {
+        let e = self.parse_add()?;
+        for op in ["<=", ">=", "==", "!=", "<", ">"] {
+            if matches!(self.peek(), Some(Tok::Sym(s)) if *s == op) {
+                self.pos += 1;
+                let rhs = self.parse_add()?;
+                return Ok(Expr::Bin(op, Box::new(e), Box::new(rhs)));
+            }
+        }
+        Ok(e)
+    }
+    fn parse_add(&mut self) -> Result<Expr, String> {
+        let mut e = self.parse_mul()?;
+        loop {
+            match self.peek() {
+                Some(Tok::Sym("+")) => {
+                    self.pos += 1;
+                    e = Expr::Bin("+", Box::new(e), Box::new(self.parse_mul()?));
+                }
+                Some(Tok::Sym("-")) => {
+                    self.pos += 1;
+                    e = Expr::Bin("-", Box::new(e), Box::new(self.parse_mul()?));
+                }
+                _ => return Ok(e),
+            }
+        }
+    }
+    fn parse_mul(&mut self) -> Result<Expr, String> {
+        let mut e = self.parse_unary()?;
+        loop {
+            match self.peek() {
+                Some(Tok::Sym("*")) => {
+                    self.pos += 1;
+                    e = Expr::Bin("*", Box::new(e), Box::new(self.parse_unary()?));
+                }
+                Some(Tok::Sym("/")) => {
+                    self.pos += 1;
+                    e = Expr::Bin("/", Box::new(e), Box::new(self.parse_unary()?));
+                }
+                Some(Tok::Sym("%")) => {
+                    self.pos += 1;
+                    e = Expr::Bin("%", Box::new(e), Box::new(self.parse_unary()?));
+                }
+                _ => return Ok(e),
+            }
+        }
+    }
+    fn parse_unary(&mut self) -> Result<Expr, String> {
+        match self.peek() {
+            Some(Tok::Sym("-")) => {
+                self.pos += 1;
+                Ok(Expr::Neg(Box::new(self.parse_unary()?)))
+            }
+            Some(Tok::Ident(k)) if k == "non" => {
+                self.pos += 1;
+                Ok(Expr::Not(Box::new(self.parse_unary()?)))
+            }
+            _ => self.parse_primary(),
+        }
+    }
+    fn parse_primary(&mut self) -> Result<Expr, String> {
+        let line = self.line();
+        match self.next() {
+            Some(Tok::Int(v)) => Ok(Expr::Int(v)),
+            Some(Tok::Sym("(")) => {
+                let e = self.parse_expr()?;
+                self.expect_sym(")")?;
+                Ok(e)
+            }
+            Some(Tok::Ident(name)) => {
+                if name == "moi" {
+                    return Ok(Expr::Me);
+                }
+                if name == "rien" {
+                    return Ok(Expr::Nil);
+                }
+                if let Some((_, mask)) = BUTTONS.iter().find(|(n, _)| *n == name) {
+                    return Ok(Expr::Button(*mask));
+                }
+                if matches!(self.peek(), Some(Tok::Sym("("))) {
+                    self.pos += 1;
+                    let args = self.parse_args()?;
+                    Ok(Expr::Call(name, args, line))
+                } else {
+                    Ok(Expr::Var(name, line))
+                }
+            }
+            _ => Err(format!("ligne {line}: expression attendue")),
+        }
+    }
+}
+
+/* ------------------------------------------------------------ codegen -- */
+
+#[derive(Debug)]
+pub struct Compiled {
+    pub bytecode: Vec<u8>,
+    pub reg_used: usize,
+}
+
+struct Gen {
+    vars: HashMap<String, u8>,
+    consts: Vec<i32>,
+    strings: Vec<u8>,
+    code: Vec<u32>,
+    temp_base: u8,
+    temp: u8,
+}
+
+fn insn(op: u8, a: u8, b: u8, c: u8) -> u32 {
+    (op as u32) << 24 | (a as u32) << 16 | (b as u32) << 8 | c as u32
+}
+fn insn16(op: u8, a: u8, imm: u16) -> u32 {
+    (op as u32) << 24 | (a as u32) << 16 | imm as u32
+}
+
+impl Gen {
+    fn konst(&mut self, v: i32) -> Result<u8, String> {
+        if let Some(i) = self.consts.iter().position(|&k| k == v) {
+            return Ok(i as u8);
+        }
+        if self.consts.len() >= 256 {
+            return Err("trop de constantes (max 256)".into());
+        }
+        self.consts.push(v);
+        Ok((self.consts.len() - 1) as u8)
+    }
+
+    fn string(&mut self, s: &str) -> Result<u8, String> {
+        let off = self.strings.len() as i32;
+        // Le charset des polices .fnt est en majuscules ASCII.
+        for ch in s.chars() {
+            let b = match ch {
+                'à' | 'â' | 'ä' => b'A',
+                'é' | 'è' | 'ê' | 'ë' => b'E',
+                'î' | 'ï' => b'I',
+                'ô' | 'ö' => b'O',
+                'ù' | 'û' | 'ü' => b'U',
+                'ç' => b'C',
+                c if (c as u32) < 128 => (c as u8).to_ascii_uppercase(),
+                _ => b'?',
+            };
+            self.strings.push(b);
+        }
+        self.strings.push(0);
+        if self.strings.len() > u16::MAX as usize {
+            return Err("table de chaînes pleine (64 Ko)".into());
+        }
+        self.konst(off)
+    }
+
+    fn alloc_temp(&mut self, line: u32) -> Result<u8, String> {
+        let r = self.temp_base + self.temp;
+        if (r as usize) >= REG_COUNT {
+            return Err(format!(
+                "ligne {line}: expression trop complexe ou trop de variables \
+                 (16 registres, {} pris par les var)",
+                self.temp_base
+            ));
+        }
+        self.temp += 1;
+        Ok(r)
+    }
+
+    fn emit_expr(&mut self, e: &Expr, dst: u8) -> Result<(), String> {
+        match e {
+            Expr::Int(v) => {
+                if *v >= i16::MIN as i32 && *v <= i16::MAX as i32 {
+                    self.code.push(insn16(OP_LOADI, dst, *v as u16));
+                } else {
+                    let k = self.konst(*v)?;
+                    self.code.push(insn(OP_LOADK, dst, k, 0));
+                }
+            }
+            Expr::Nil => self.code.push(insn16(OP_LOADI, dst, (-1i16) as u16)),
+            Expr::Me => self.code.push(insn(OP_SELF, dst, 0, 0)),
+            Expr::Button(_) => {
+                return Err(
+                    "un bouton (CROIX...) ne s'utilise que dans touche()/touche_pressee()"
+                        .into(),
+                )
+            }
+            Expr::Var(name, line) => {
+                let r = *self.vars.get(name).ok_or(format!(
+                    "ligne {line}: variable inconnue '{name}' (déclare-la avec « var »)"
+                ))?;
+                if r != dst {
+                    self.code.push(insn(OP_MOV, dst, r, 0));
+                }
+            }
+            Expr::Neg(inner) => {
+                self.emit_expr(inner, dst)?;
+                self.code.push(insn(OP_NEG, dst, dst, 0));
+            }
+            Expr::Not(inner) => {
+                self.emit_expr(inner, dst)?;
+                self.code.push(insn(OP_NOT, dst, dst, 0));
+            }
+            Expr::Bin(op, lhs, rhs) => {
+                let saved = self.temp;
+                self.emit_expr(lhs, dst)?;
+                let rt = self.alloc_temp(0)?;
+                self.emit_expr(rhs, rt)?;
+                let (opc, a, b) = match *op {
+                    "+" => (OP_ADD, dst, rt),
+                    "-" => (OP_SUB, dst, rt),
+                    "*" => (OP_MUL, dst, rt),
+                    "/" => (OP_DIV, dst, rt),
+                    "%" => (OP_MOD, dst, rt),
+                    "<" => (OP_LT, dst, rt),
+                    "<=" => (OP_LE, dst, rt),
+                    ">" => (OP_LT, rt, dst),
+                    ">=" => (OP_LE, rt, dst),
+                    "==" => (OP_EQ, dst, rt),
+                    "!=" => (OP_NE, dst, rt),
+                    "et" => (OP_AND, dst, rt),
+                    "ou" => (OP_OR, dst, rt),
+                    other => return Err(format!("opérateur interne inconnu {other}")),
+                };
+                self.code.push(insn(opc, dst, a, b));
+                self.temp = saved;
+            }
+            Expr::Call(name, args, line) => self.emit_call(name, args, Some(dst), *line)?,
+        }
+        Ok(())
+    }
+
+    /// Évalue une expression-argument dans un temporaire.
+    fn arg_reg(&mut self, args: &[Arg], i: usize, name: &str, line: u32) -> Result<u8, String> {
+        match args.get(i) {
+            Some(Arg::Expr(e)) => {
+                let r = self.alloc_temp(line)?;
+                self.emit_expr(e, r)?;
+                Ok(r)
+            }
+            _ => Err(format!(
+                "ligne {line}: {name}() attend un nombre/une entité en argument {}",
+                i + 1
+            )),
+        }
+    }
+
+    fn arity(name: &str, args: &[Arg], n: usize, line: u32) -> Result<(), String> {
+        if args.len() != n {
+            return Err(format!(
+                "ligne {line}: {name}() attend {n} argument{}",
+                if n > 1 { "s" } else { "" }
+            ));
+        }
+        Ok(())
+    }
+
+    fn emit_call(
+        &mut self,
+        name: &str,
+        args: &[Arg],
+        dst: Option<u8>,
+        line: u32,
+    ) -> Result<(), String> {
+        let saved = self.temp;
+        let need_dst = |dst: Option<u8>| -> Result<u8, String> {
+            dst.ok_or(format!(
+                "ligne {line}: {name}() renvoie une valeur — utilise-la (x = ..., si ...)"
+            ))
+        };
+        match name {
+            "pos_x" | "pos_y" | "pos_z" => {
+                Self::arity(name, args, 1, line)?;
+                let d = need_dst(dst)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                let axis = match name {
+                    "pos_x" => 0,
+                    "pos_y" => 1,
+                    _ => 2,
+                };
+                self.code.push(insn(OP_GETPOS, d, e, axis));
+            }
+            "poser_x" | "poser_y" | "poser_z" => {
+                Self::arity(name, args, 2, line)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                let v = self.arg_reg(args, 1, name, line)?;
+                let axis = match name {
+                    "poser_x" => 0,
+                    "poser_y" => 1,
+                    _ => 2,
+                };
+                self.code.push(insn(OP_SETPOS, e, axis, v));
+            }
+            "rot_y" => {
+                Self::arity(name, args, 1, line)?;
+                let d = need_dst(dst)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                self.code.push(insn(OP_GETROTY, d, e, 0));
+            }
+            "poser_rot_y" | "tourner_y" => {
+                Self::arity(name, args, 2, line)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                let v = self.arg_reg(args, 1, name, line)?;
+                let opc = if name == "tourner_y" { OP_ADDROTY } else { OP_SETROTY };
+                self.code.push(insn(opc, e, v, 0));
+            }
+            "bouger" => {
+                Self::arity(name, args, 3, line)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                let dx = self.arg_reg(args, 1, name, line)?;
+                let dz = self.arg_reg(args, 2, name, line)?;
+                self.code.push(insn(OP_MOVE, e, dx, dz));
+            }
+            "touche" | "touche_pressee" => {
+                Self::arity(name, args, 1, line)?;
+                let d = need_dst(dst)?;
+                let mask = match args.first() {
+                    Some(Arg::Expr(Expr::Button(m))) => *m,
+                    _ => {
+                        return Err(format!(
+                            "ligne {line}: {name}() attend un bouton \
+                             (CROIX, ROND, CARRE, TRIANGLE, HAUT, BAS, GAUCHE, DROITE, START, SELECT)"
+                        ))
+                    }
+                };
+                let opc = if name == "touche" { OP_HELD } else { OP_PRESSED };
+                self.code.push(insn16(opc, d, mask));
+            }
+            "distance" => {
+                Self::arity(name, args, 2, line)?;
+                let d = need_dst(dst)?;
+                let a = self.arg_reg(args, 0, name, line)?;
+                let b = self.arg_reg(args, 1, name, line)?;
+                self.code.push(insn(OP_DIST, d, a, b));
+            }
+            "trouve" => {
+                Self::arity(name, args, 1, line)?;
+                let d = need_dst(dst)?;
+                let s = match args.first() {
+                    Some(Arg::Str(s)) => s.clone(),
+                    _ => {
+                        return Err(format!(
+                            "ligne {line}: trouve() attend un nom de script entre guillemets"
+                        ))
+                    }
+                };
+                let k = self.konst(crate::scene::script_hash(&s) as i32)?;
+                self.code.push(insn(OP_FIND, d, k, 0));
+            }
+            "dialogue" => {
+                Self::arity(name, args, 1, line)?;
+                let s = match args.first() {
+                    Some(Arg::Str(s)) => s.clone(),
+                    _ => {
+                        return Err(format!(
+                            "ligne {line}: dialogue() attend un texte entre guillemets \
+                             (3 lignes max, séparées par /)"
+                        ))
+                    }
+                };
+                let k = self.string(&s.replace(" / ", "\n").replace('/', "\n"))?;
+                self.code.push(insn(OP_DIALOG, k, 0, 0));
+            }
+            "dialogue_ouvert" => {
+                Self::arity(name, args, 0, line)?;
+                let d = need_dst(dst)?;
+                self.code.push(insn(OP_DLGOPEN, d, 0, 0));
+            }
+            "fermer_dialogue" => {
+                Self::arity(name, args, 0, line)?;
+                self.code.push(insn(OP_DLGCLOSE, 0, 0, 0));
+            }
+            "montrer" => {
+                Self::arity(name, args, 2, line)?;
+                let e = self.arg_reg(args, 0, name, line)?;
+                let v = self.arg_reg(args, 1, name, line)?;
+                self.code.push(insn(OP_SHOW, e, v, 0));
+            }
+            "changer_scene" => {
+                Self::arity(name, args, 0, line)?;
+                self.code.push(insn(OP_SWITCH, 0, 0, 0));
+            }
+            "hasard" => {
+                Self::arity(name, args, 1, line)?;
+                let d = need_dst(dst)?;
+                let n = self.arg_reg(args, 0, name, line)?;
+                self.code.push(insn(OP_RAND, d, n, 0));
+            }
+            other => {
+                return Err(format!(
+                    "ligne {line}: fonction inconnue '{other}' (voir docs/PSX-SCRIPT.md)"
+                ))
+            }
+        }
+        self.temp = saved;
+        Ok(())
+    }
+
+    fn emit_stmts(&mut self, stmts: &[Stmt]) -> Result<(), String> {
+        for s in stmts {
+            match s {
+                Stmt::Assign(name, e, line) => {
+                    let r = *self.vars.get(name).ok_or(format!(
+                        "ligne {line}: variable inconnue '{name}' (déclare-la avec « var » \
+                         en tête de fichier)"
+                    ))?;
+                    self.emit_expr(e, r)?;
+                }
+                Stmt::Call(name, args, line) => self.emit_call(name, args, None, *line)?,
+                Stmt::If(cond, then, els) => {
+                    let saved = self.temp;
+                    let c = self.alloc_temp(0)?;
+                    self.emit_expr(cond, c)?;
+                    self.temp = saved;
+                    let jz_at = self.code.len();
+                    self.code.push(0); // patché
+                    self.emit_stmts(then)?;
+                    if els.is_empty() {
+                        let end = self.code.len() as u16;
+                        self.code[jz_at] = insn16(OP_JZ, c, end);
+                    } else {
+                        let jmp_at = self.code.len();
+                        self.code.push(0);
+                        let else_pc = self.code.len() as u16;
+                        self.code[jz_at] = insn16(OP_JZ, c, else_pc);
+                        self.emit_stmts(els)?;
+                        let end = self.code.len() as u16;
+                        self.code[jmp_at] = insn16(OP_JMP, 0, end);
+                    }
+                }
+                Stmt::While(cond, body) => {
+                    let top = self.code.len() as u16;
+                    let saved = self.temp;
+                    let c = self.alloc_temp(0)?;
+                    self.emit_expr(cond, c)?;
+                    self.temp = saved;
+                    let jz_at = self.code.len();
+                    self.code.push(0);
+                    self.emit_stmts(body)?;
+                    self.code.push(insn16(OP_JMP, 0, top));
+                    let end = self.code.len() as u16;
+                    self.code[jz_at] = insn16(OP_JZ, c, end);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Compile un source PSX Script en blob bytecode « PSB1 ».
+pub fn compile(src: &str) -> Result<Compiled, String> {
+    let lexer = lex(src)?;
+    let mut p = Parser {
+        toks: lexer.toks,
+        pos: 0,
+    };
+
+    // Déclarations `var` + blocs.
+    let mut vars: Vec<(String, Option<Expr>, u32)> = Vec::new();
+    let mut start_block: Option<Vec<Stmt>> = None;
+    let mut update_block: Option<Vec<Stmt>> = None;
+    loop {
+        p.eat_newlines();
+        let line = p.line();
+        match p.next() {
+            None => break,
+            Some(Tok::Ident(k)) if k == "var" => {
+                let name = match p.next() {
+                    Some(Tok::Ident(n)) => n,
+                    _ => return Err(format!("ligne {line}: nom de variable attendu")),
+                };
+                let init = if matches!(p.peek(), Some(Tok::Sym("="))) {
+                    p.pos += 1;
+                    Some(p.parse_expr()?)
+                } else {
+                    None
+                };
+                p.end_of_stmt()?;
+                if vars.iter().any(|(n, _, _)| *n == name) {
+                    return Err(format!("ligne {line}: variable '{name}' déjà déclarée"));
+                }
+                vars.push((name, init, line));
+            }
+            Some(Tok::Ident(k)) if k == "quand" => {
+                p.expect_kw("demarre")?;
+                p.end_of_stmt()?;
+                if start_block.is_some() {
+                    return Err(format!("ligne {line}: « quand demarre » en double"));
+                }
+                start_block = Some(p.parse_block(false)?.0);
+            }
+            Some(Tok::Ident(k)) if k == "chaque" => {
+                p.expect_kw("frame")?;
+                p.end_of_stmt()?;
+                if update_block.is_some() {
+                    return Err(format!("ligne {line}: « chaque frame » en double"));
+                }
+                update_block = Some(p.parse_block(false)?.0);
+            }
+            Some(_) => {
+                return Err(format!(
+                    "ligne {line}: attendu « var », « quand demarre » ou « chaque frame »"
+                ))
+            }
+        }
+    }
+    if start_block.is_none() && update_block.is_none() {
+        return Err("script vide : ajoute un bloc « chaque frame ... fin »".into());
+    }
+    if vars.len() > 12 {
+        return Err(format!(
+            "trop de variables ({}, max 12 — 4 registres restent pour les calculs)",
+            vars.len()
+        ));
+    }
+
+    let mut g = Gen {
+        vars: vars
+            .iter()
+            .enumerate()
+            .map(|(i, (n, _, _))| (n.clone(), i as u8))
+            .collect(),
+        consts: Vec::new(),
+        strings: Vec::new(),
+        code: Vec::new(),
+        temp_base: vars.len() as u8,
+        temp: 0,
+    };
+
+    // Bloc demarre : initialisations `var x = ...` puis le bloc utilisateur.
+    let start_pc = {
+        let pc = g.code.len() as u16;
+        for (name, init, _) in &vars {
+            let r = g.vars[name];
+            match init {
+                Some(e) => g.emit_expr(e, r)?,
+                None => g.code.push(insn16(OP_LOADI, r, 0)),
+            }
+        }
+        if let Some(stmts) = &start_block {
+            g.emit_stmts(stmts)?;
+        }
+        g.code.push(insn(OP_RET, 0, 0, 0));
+        pc
+    };
+    let update_pc = match &update_block {
+        Some(stmts) => {
+            let pc = g.code.len() as u16;
+            g.emit_stmts(stmts)?;
+            g.code.push(insn(OP_RET, 0, 0, 0));
+            pc
+        }
+        None => NO_PC,
+    };
+
+    if g.code.len() > u16::MAX as usize {
+        return Err("script trop long (65535 instructions max)".into());
+    }
+
+    /* Blob PSB1. */
+    let mut out = Vec::new();
+    out.extend_from_slice(b"PSB1");
+    out.extend_from_slice(&(g.temp_base as u16 + 4).to_le_bytes()); // registres info
+    out.extend_from_slice(&(g.consts.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(g.code.len() as u16).to_le_bytes());
+    out.extend_from_slice(&start_pc.to_le_bytes());
+    out.extend_from_slice(&update_pc.to_le_bytes());
+    out.extend_from_slice(&(g.strings.len() as u16).to_le_bytes());
+    for k in &g.consts {
+        out.extend_from_slice(&k.to_le_bytes());
+    }
+    for i in &g.code {
+        out.extend_from_slice(&i.to_le_bytes());
+    }
+    out.extend_from_slice(&g.strings);
+    while out.len() % 4 != 0 {
+        out.push(0);
+    }
+    Ok(Compiled {
+        bytecode: out,
+        reg_used: g.temp_base as usize,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ops(bc: &[u8]) -> Vec<u8> {
+        let consts = u16::from_le_bytes([bc[6], bc[7]]) as usize;
+        let code_len = u16::from_le_bytes([bc[8], bc[9]]) as usize;
+        let code_off = 16 + consts * 4;
+        (0..code_len)
+            .map(|i| bc[code_off + i * 4 + 3]) // little-endian : op = octet haut
+            .collect()
+    }
+
+    #[test]
+    fn tourne_compile() {
+        let c = compile("chaque frame\n    tourner_y(moi, 12)\nfin\n").unwrap();
+        assert_eq!(&c.bytecode[0..4], b"PSB1");
+        let o = ops(&c.bytecode);
+        // demarre implicite : RET ; frame : SELF, LOADI, ADDROTY, RET.
+        assert_eq!(o, vec![OP_RET, OP_SELF, OP_LOADI, OP_ADDROTY, OP_RET]);
+    }
+
+    #[test]
+    fn si_sinon_saute_correctement() {
+        let src = "var x\nchaque frame\n    si x < 3 alors\n        x = x + 1\n    sinon\n        x = 0\n    fin\nfin\n";
+        let c = compile(src).unwrap();
+        let o = ops(&c.bytecode);
+        assert!(o.contains(&OP_JZ) && o.contains(&OP_JMP) && o.contains(&OP_LT));
+    }
+
+    #[test]
+    fn erreurs_claires() {
+        let e = compile("chaque frame\n    tourne(moi, 2)\nfin\n").unwrap_err();
+        assert!(e.contains("ligne 2") && e.contains("fonction inconnue"), "{e}");
+        let e = compile("chaque frame\n    x = 1\nfin\n").unwrap_err();
+        assert!(e.contains("variable inconnue"), "{e}");
+        let e = compile("chaque frame\n    si 1 alors\nfin\n").unwrap_err();
+        assert!(e.contains("fin"), "{e}");
+        let e = compile("chaque frame\n    touche(1)\nfin\n").unwrap_err();
+        assert!(e.contains("bouton") || e.contains("renvoie"), "{e}");
+    }
+
+    #[test]
+    fn dialogue_et_chaines() {
+        let c = compile("chaque frame\n    dialogue(\"salut / ça va\")\nfin\n").unwrap();
+        let s = String::from_utf8_lossy(&c.bytecode);
+        assert!(s.contains("SALUT\nCA VA"), "chaîne translittérée attendue");
+    }
+}

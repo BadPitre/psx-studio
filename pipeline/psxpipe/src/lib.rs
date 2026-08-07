@@ -10,6 +10,7 @@ pub mod fnt;
 pub mod gltf_import;
 pub mod pmd;
 pub mod project;
+pub mod psxs;
 pub mod redux;
 pub mod quant;
 pub mod samples;

@@ -1,0 +1,7 @@
+# Girouette : tourne en continu (PSX Script, docs/PSX-SCRIPT.md).
+# 4096 = un tour complet ; 24 par frame = un tour en ~2,8 s.
+var vitesse = 24
+
+chaque frame
+    tourner_y(moi, vitesse)
+fin

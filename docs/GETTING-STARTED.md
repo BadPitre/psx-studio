@@ -165,9 +165,27 @@ de triangles — surveille l'avertissement de budget.)
 
 ## 6. Écrire du gameplay
 
-Le gameplay est du **C compilé dans ton exécutable** (pas d'interpréteur :
-c'est la philosophie du studio, les données restent des données). Dans ta
-copie de `runtime/game/` :
+Deux voies, mixables librement :
+
+**PSX Script (recommandé pour commencer)** — un fichier
+`scripts/<nom>.psxs` dans ton projet, attaché par la carte Script de
+l'inspecteur. Compilé en bytecode dans la scène : édite → Play, **sans
+recompiler le jeu**, et un script buggé ne peut pas planter la console.
+La girouette du village de démo en est un :
+
+```
+var vitesse = 24
+
+chaque frame
+    tourner_y(moi, vitesse)
+fin
+```
+
+Référence complète (variables, si/tantque, dialogue, collisions,
+boutons…) : [`PSX-SCRIPT.md`](PSX-SCRIPT.md).
+
+**Le C natif** pour les cas qui demandent toute la vitesse ou l'API
+complète (le `player` de la démo). Dans ta copie de `runtime/game/` :
 
 1. Écris un script dans `scripts/` :
 

@@ -166,6 +166,10 @@ typedef struct {
 	int					entity_count;
 	/* Scripts resolus par hash (index table -> registre du jeu). */
 	const ScriptDef*	scripts[SCENE_MAX_SCRIPTS];
+	/* PSX Script (v1.5) : blob bytecode PSB1 par script (NULL = script C)
+	 * + la table de hashes brute (trouve() de la VM). */
+	const uint8_t*		vm_code[SCENE_MAX_SCRIPTS];
+	const uint32_t*		script_hashes;
 	/* Lumieres : ligne 0 = soleil des settings (fixe), lignes 1-2 =
 	 * entites-lumieres directionnelles, re-derivees chaque frame de
 	 * leur rotation. */
@@ -241,6 +245,13 @@ uint8_t* Ui_Draw(const Scene* scene, uint32_t* ot, uint8_t* packet,
 const PscUiRec* Ui_Get(const Scene* scene, const Entity* e);
 /* Oublie l'etat mutable UI (textes remplaces, focus) — au parse de scene. */
 void Ui_Reset(void);
+
+/* PSX Script (v1.5) --------------------------------------------------------
+ * VM a registres du jeu (engine/vm.c, liee par le jeu seulement — le
+ * player n'execute pas de scripts). A appeler par la boucle de jeu :
+ * Vm_StartScripts apres Scene_StartScripts, Vm_Tick chaque frame. */
+void Vm_StartScripts(Scene* scene);
+void Vm_Tick(Scene* scene, int frozen);
 
 /* Read a whole CD file into the scene arena WITHOUT resetting it. */
 void* Scene_ReadFileToArena(const char* path, uint32_t* size_out);

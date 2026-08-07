@@ -155,6 +155,32 @@ canvas Sliced),
 reste : confort (Grid Layout, fill radial, live tweaking des
 RectTransforms, overrides d'instance avancés).
 
+## Lot F — PSX Script (le gameplay sans C)
+
+Un langage de script maison compilé en **bytecode** par psxpipe et
+interprété par une petite **VM à registres** du runtime — l'architecture
+des jeux de l'époque (FF7), pas un interpréteur générique : entiers
+seulement, zéro allocation/GC, opcodes qui appellent le C natif, bac à
+sable (bornes, division par zéro, garde-fou de boucle). Spec :
+[`PSX-SCRIPT.md`](PSX-SCRIPT.md).
+
+~~Jalon 1 (fondations)~~ — **livré** : compilateur complet
+(`psxpipe::psxs`, erreurs françaises avec lignes), format PSB1 embarqué
+dans le `.psc` (v1.5 : bit 0 des flags + table d'offsets après les
+hashes — un blob prime sur le registre C, rétrocompatible), VM
+`engine/vm.c` (16 registres/entité, 24 instances, liée par le jeu
+seulement), langage : var / quand demarre / chaque frame / si-sinon /
+tantque / et-ou-non + 17 fonctions moteur (transforms, bouger avec
+collisions, boutons, distance, trouve, dialogue, montrer,
+changer_scene, hasard), girouette de démo dans le village, banc d'essai
+natif hôte (le vrai blob exécuté par la vraie VM : 100 000 frames en
+7 ms).
+
+Suite : API UI/audio (jauge, texte, sons), rechargement à chaud pendant
+que l'émulateur tourne, éditeur de texte intégré avec coloration,
+« Créer ▸ Script » dans le panneau Project, visual scripting par-dessus
+le même bytecode.
+
 ## Divers (good first issues, voir CONTRIBUTING.md)
 
 Grille au sol du viewport, sélecteur de piste CD-DA par scène, LOD par

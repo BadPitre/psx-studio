@@ -539,6 +539,8 @@ pub fn scene_village_json() -> &'static str {
     { "name": "torche",  "position": [265, -36, 150], "scale": [0.05, 0.28, 0.05], "model": "cube",
       "light": { "type": "point", "color": [255, 150, 60], "intensity": 1.6, "radius": 520 }, "script": "torche" },
     { "name": "camera",  "position": [0, -200, -420], "rotation": [-21, 180, 0], "camera": true },
+    { "name": "girouette", "position": [-120, -230, 118], "scale": [0.34, 0.06, 0.06],
+      "model": "cube", "solid": false, "script": "tourniquet" },
     { "name": "hud", "canvas": true, "script": "hud" },
     { "name": "vie_fond", "parent": "hud",
       "rect": { "anchor_min": [0, 0], "anchor_max": [0, 0], "pivot": [0, 0],
@@ -759,6 +761,11 @@ pub fn build_demo_assets(dir: &Path) -> Result<(), String> {
 
     write_all(dir)?;
     std::fs::write(dir.join("main.fnt"), demo_font_fnt()?).map_err(|e| e.to_string())?;
+    // PSX Script de démo (girouette du village).
+    let scripts = dir.join("scripts");
+    std::fs::create_dir_all(&scripts).map_err(|e| e.to_string())?;
+    std::fs::write(scripts.join("tourniquet.psxs"), demo_tourniquet_psxs())
+        .map_err(|e| e.to_string())?;
 
     for (gltf_name, pmd_name) in [
         ("cube.gltf", "cube.pmd"),
@@ -887,6 +894,19 @@ pub fn demo_font_fnt() -> Result<Vec<u8>, String> {
 
 /// Build the two demo .psc scenes into `out_dir`, using (and generating)
 /// assets in `samples_dir`. Returns the scene reports.
+/// PSX Script de démo : la girouette du village tourne en continu —
+/// bytecode compilé par psxpipe, exécuté par la VM du runtime, aucun C.
+pub fn demo_tourniquet_psxs() -> &'static str {
+    r#"# Girouette : tourne en continu (PSX Script, docs/PSX-SCRIPT.md).
+# 4096 = un tour complet ; 24 par frame = un tour en ~2,8 s.
+var vitesse = 24
+
+chaque frame
+    tourner_y(moi, vitesse)
+fin
+"#
+}
+
 pub fn build_demo_scenes(
     samples_dir: &Path,
     out_dir: &Path,

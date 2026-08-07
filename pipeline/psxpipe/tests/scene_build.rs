@@ -16,7 +16,7 @@ fn village_builds_and_parses() {
     let h = scene::parse_header(&bytes).unwrap();
     assert_eq!(h.model_count, 4);
     assert_eq!(h.texture_count, 3);
-    assert_eq!(h.entity_count, 29);
+    assert_eq!(h.entity_count, 30);
     assert_eq!(h.total_size as usize, bytes.len());
     assert_eq!(h.background, [24, 32, 56]);
 
@@ -164,15 +164,15 @@ fn scripts_table_and_entity_refs() {
     assert_eq!(script_ref(2), 2); // npc
     assert_eq!(script_ref(3), 2); // npc (partage)
 
-    // Le village de démo embarque player/npc + les scripts UI (hud,
-    // dialogue, pause).
+    // Le village de démo embarque player/npc, les scripts UI (hud,
+    // dialogue, pause) et le PSX Script tourniquet.
     let (bytes2, _) = scene::build_file(&{
         let p = dir.path().join("s2.json");
         std::fs::write(&p, samples::scene_village_json()).unwrap();
         p
     })
     .unwrap();
-    assert_eq!(scene::parse_header(&bytes2).unwrap().script_count, 6);
+    assert_eq!(scene::parse_header(&bytes2).unwrap().script_count, 7);
 }
 
 #[test]
@@ -523,4 +523,56 @@ fn controller_flag_and_pads() {
     std::fs::write(&json_path, bad).unwrap();
     let err = scene::build_file(&json_path).unwrap_err();
     assert!(err.contains("Controller"), "unexpected error: {err}");
+}
+
+#[test]
+fn psx_script_embedded_in_psc() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+    std::fs::write(
+        dir.path().join("scripts/tourniquet.psxs"),
+        "var vitesse = 12\nchaque frame\n    tourner_y(moi, vitesse)\nfin\n",
+    )
+    .unwrap();
+    let json = r#"{
+      "name": "vm",
+      "assets": { "textures": [], "models": [{ "id": "cube", "pmd": "cube.pmd" }] },
+      "entities": [
+        { "name": "girouette", "model": "cube", "script": "tourniquet" },
+        { "name": "pnj", "model": "cube", "script": "npc" }
+      ]
+    }"#;
+    let json_path = dir.path().join("s.json");
+    std::fs::write(&json_path, json).unwrap();
+    let (bytes, _) = scene::build_file(&json_path).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    // Flag v1.5 pose, table d'offsets : tourniquet -> blob PSB1, npc -> 0
+    // (registre C). Le blob est un PSB1 valide au bon endroit.
+    assert_eq!(h.flags & 1, 1);
+    assert_eq!(h.script_count, 2);
+    let offs = scene::parse_vm_offsets(&bytes, &h);
+    assert_eq!(offs.len(), 2);
+    assert!(offs[0] > 0 && offs[1] == 0);
+    let blob = &bytes[offs[0] as usize..];
+    assert_eq!(&blob[0..4], b"PSB1");
+
+    // Sans .psxs : pas de flag, pas de table (retrocompatible).
+    std::fs::remove_file(dir.path().join("scripts/tourniquet.psxs")).unwrap();
+    let (bytes2, _) = scene::build_file(&json_path).unwrap();
+    let h2 = scene::parse_header(&bytes2).unwrap();
+    assert_eq!(h2.flags & 1, 0);
+
+    // Erreur de compilation : nom du script + ligne dans le message.
+    std::fs::write(
+        dir.path().join("scripts/tourniquet.psxs"),
+        "chaque frame\n    tourne(moi)\nfin\n",
+    )
+    .unwrap();
+    let err = scene::build_file(&json_path).unwrap_err();
+    assert!(
+        err.contains("tourniquet") && err.contains("ligne 2"),
+        "unexpected: {err}"
+    );
 }

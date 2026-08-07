@@ -832,6 +832,30 @@ pub fn build_with_options(
         return Err("too many scripts".into());
     }
 
+    /* PSX Script (v1.5) : un `scripts/<nom>.psxs` dans le projet prime
+     * sur le registre C — compilé en bytecode PSB1 embarqué dans le
+     * .psc, avec une table d'offsets (0 = script C) juste après la
+     * table de hashes, signalée par le bit 0 des flags d'en-tête. */
+    let script_dir = options
+        .prefab_dir
+        .as_deref()
+        .unwrap_or(base_dir)
+        .join("scripts");
+    let mut vm_blobs: Vec<Option<Vec<u8>>> = Vec::with_capacity(script_names.len());
+    for name in &script_names {
+        let path = script_dir.join(format!("{name}.psxs"));
+        if path.is_file() {
+            let src = std::fs::read_to_string(&path)
+                .map_err(|e| format!("{} : {e}", path.display()))?;
+            let compiled = crate::psxs::compile(&src)
+                .map_err(|e| format!("script '{name}' ({}) : {e}", path.display()))?;
+            vm_blobs.push(Some(compiled.bytecode));
+        } else {
+            vm_blobs.push(None);
+        }
+    }
+    let has_vm = vm_blobs.iter().any(Option::is_some);
+
     /* Serialize entities in sorted order. */
     let mut entities = Vec::with_capacity(n * ENTITY_SIZE);
     for &i in &order {
@@ -1279,7 +1303,9 @@ pub fn build_with_options(
     let textures_offset = models_offset + model_blobs.len() * MODEL_ENTRY_SIZE;
     let entities_offset = textures_offset + texture_blobs.len() * TEXTURE_ENTRY_SIZE;
     let scripts_offset = entities_offset + entities.len();
-    let lights_offset = scripts_offset + script_names.len() * 4;
+    // v1.5 : la table d'offsets bytecode double la table de hashes.
+    let scripts_table_len = script_names.len() * 4 * if has_vm { 2 } else { 1 };
+    let lights_offset = scripts_offset + scripts_table_len;
     let align4 = |v: usize| (v + 3) & !3;
     let ui_offset = align4(lights_offset + lights.len() * LIGHT_ENTRY_SIZE);
     let fonts_offset = ui_offset + ui_recs.len();
@@ -1314,6 +1340,18 @@ pub fn build_with_options(
         font_entries.extend_from_slice(&(blob.len() as u32).to_le_bytes());
         blob_cursor += blob.len();
     }
+    // Blobs bytecode PSX Script, places comme les autres blobs.
+    let mut vm_offsets: Vec<u32> = Vec::with_capacity(vm_blobs.len());
+    for blob in &vm_blobs {
+        match blob {
+            Some(b) => {
+                blob_cursor = align4(blob_cursor);
+                vm_offsets.push(blob_cursor as u32);
+                blob_cursor += b.len();
+            }
+            None => vm_offsets.push(0),
+        }
+    }
     let total_size = blob_cursor;
 
     /* Light vector: normalize, negate (file stores the vector TOWARD the
@@ -1333,7 +1371,8 @@ pub fn build_with_options(
     let mut out = Vec::with_capacity(total_size);
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&VERSION.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes()); // flags
+    // Flags d'en-tête : bit 0 = table d'offsets bytecode (v1.5).
+    out.extend_from_slice(&(if has_vm { 1u16 } else { 0 }).to_le_bytes());
     out.extend_from_slice(&(total_size as u32).to_le_bytes());
     // Le 4e compteur (réservé jusqu'à la v1.2) devient le nombre de
     // widgets UI — nul sur les anciens fichiers, donc rétrocompatible.
@@ -1372,6 +1411,11 @@ pub fn build_with_options(
     for name in &script_names {
         out.extend_from_slice(&script_hash(name).to_le_bytes());
     }
+    if has_vm {
+        for off in &vm_offsets {
+            out.extend_from_slice(&off.to_le_bytes());
+        }
+    }
     for (entity, color, intensity) in &lights {
         out.extend_from_slice(&entity.to_le_bytes());
         out.extend_from_slice(&[color[0], color[1], color[2], *intensity]);
@@ -1391,6 +1435,12 @@ pub fn build_with_options(
     for (offset, blob) in font_offsets.iter().zip(&font_blobs) {
         out.resize(*offset, 0);
         out.extend_from_slice(blob);
+    }
+    for (offset, blob) in vm_offsets.iter().zip(&vm_blobs) {
+        if let Some(b) = blob {
+            out.resize(*offset as usize, 0);
+            out.extend_from_slice(b);
+        }
     }
     debug_assert_eq!(out.len(), total_size);
 
@@ -1428,6 +1478,8 @@ pub fn build_file_with_options(
 #[derive(Debug)]
 pub struct PscHeader {
     pub version: u16,
+    /// Bit 0 (v1.5) : table d'offsets bytecode PSX Script présente.
+    pub flags: u16,
     pub total_size: u32,
     pub model_count: u16,
     pub texture_count: u16,
@@ -1446,6 +1498,18 @@ pub struct PscHeader {
     /// v1.3 : widgets UI (4e compteur) et polices (0x3E).
     pub ui_count: u16,
     pub font_count: u16,
+}
+
+/// Table d'offsets bytecode PSX Script (v1.5, flag bit 0) : un u32 par
+/// script, 0 = script C du registre, sinon offset du blob PSB1.
+pub fn parse_vm_offsets(data: &[u8], h: &PscHeader) -> Vec<u32> {
+    if h.flags & 1 == 0 {
+        return vec![0; h.script_count as usize];
+    }
+    let base = h.scripts_offset as usize + h.script_count as usize * 4;
+    (0..h.script_count as usize)
+        .map(|i| u32::from_le_bytes(data[base + i * 4..base + i * 4 + 4].try_into().unwrap()))
+        .collect()
 }
 
 impl PscHeader {
@@ -1554,6 +1618,7 @@ pub fn parse_header(data: &[u8]) -> Result<PscHeader, String> {
     let u32at = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
     let h = PscHeader {
         version: u16at(4),
+        flags: u16at(6),
         total_size: u32at(8),
         model_count: u16at(12),
         texture_count: u16at(14),

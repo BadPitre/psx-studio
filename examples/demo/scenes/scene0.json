@@ -34,6 +34,8 @@
     { "name": "torche",  "position": [265, -36, 150], "scale": [0.05, 0.28, 0.05], "model": "cube",
       "light": { "type": "point", "color": [255, 150, 60], "intensity": 1.6, "radius": 520 }, "script": "torche" },
     { "name": "camera",  "position": [0, -200, -420], "rotation": [-21, 180, 0], "camera": true },
+    { "name": "girouette", "position": [-120, -230, 118], "scale": [0.34, 0.06, 0.06],
+      "model": "cube", "solid": false, "script": "tourniquet" },
     { "name": "hud", "canvas": true, "script": "hud" },
     { "name": "vie_fond", "parent": "hud",
       "rect": { "anchor_min": [0, 0], "anchor_max": [0, 0], "pivot": [0, 0],

@@ -21,7 +21,7 @@ describe("parsePsc sur scene0.psc (village)", () => {
   it("lit l'en-tête et les réglages de scène", () => {
     expect(scene.models.length).toBe(4);
     expect(scene.textures.length).toBe(3);
-    expect(scene.entities.length).toBe(29);
+    expect(scene.entities.length).toBe(30);
     expect(scene.background).toEqual([24, 32, 56]);
     // Le vecteur lumière pointe vers la source (Y négatif = vers le haut).
     expect(scene.lightToward[1]).toBeLessThan(-0.4);
@@ -88,8 +88,9 @@ describe("parsePsc sur scene0.psc (village)", () => {
   });
 
   it("compte les triangles comme le runtime", () => {
-    // sol(288) + 3 maisons(16) + cheminée(12) + perso, pnj (48) + torche(12) = 456.
-    expect(sceneTriangleCount(scene)).toBe(456);
+    // sol(288) + 3 maisons(16) + cheminée(12) + perso, pnj (48) + torche(12)
+    // + girouette(12) = 468.
+    expect(sceneTriangleCount(scene)).toBe(468);
   });
 });
 

@@ -226,9 +226,26 @@ static int Scene_Parse(Scene* scene, uint8_t* data)
 		scene->model_max[i] = mx;
 	}
 
-	/* Resolution des scripts (hash -> registre compile avec le jeu). */
+	/* Resolution des scripts (hash -> registre compile avec le jeu).
+	 * PSX Script (v1.5, flag bit 0) : une table d'offsets bytecode suit
+	 * les hashes — un blob PSB1 prime sur le registre C (le champ
+	 * scripts[] reste NULL, la VM du jeu prend le relais). */
+	scene->script_hashes = script_table;
 	for (int i = 0; i < header->script_count; i++)
+	{
+		scene->vm_code[i] = 0;
+		if (header->flags & 1)
+		{
+			uint32_t off = script_table[header->script_count + i];
+			if (off != 0)
+			{
+				scene->vm_code[i] = data + off;
+				scene->scripts[i] = 0;
+				continue;
+			}
+		}
 		scene->scripts[i] = ResolveScript(script_table[i]);
+	}
 
 	/* Entites : transforms locales mutables. */
 	scene->entity_count = header->entity_count;

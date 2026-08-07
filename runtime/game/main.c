@@ -138,6 +138,7 @@ int main(int argc, const char** argv)
 	 * suivi du player) reprennent la main ensuite. */
 	Scene_ApplyCamera();
 	Scene_StartScripts(&scene);
+	Vm_StartScripts(&scene);
 
 	/* Streaming : la scene suivante se precharge pendant qu'on joue. */
 	Scene_Preload(SCENE_PATHS[scene_index ^ 1]);
@@ -149,6 +150,8 @@ int main(int argc, const char** argv)
 		/* Character Controllers (composant sans code) : apres les
 		 * scripts, geles quand le menu pause est ouvert. */
 		Controller_Tick(g_ui_pause_open);
+		/* Scripts PSX Script (bytecode de la scene, VM du moteur). */
+		Vm_Tick(&scene, g_ui_pause_open);
 
 		/* Bascule demandee par un script (portail) : si la scene
 		 * suivante est prete, changement INSTANTANE — le parse est
@@ -165,6 +168,7 @@ int main(int argc, const char** argv)
 				SetBackground(&ctx, &scene.background);
 				Scene_ApplyCamera();
 				Scene_StartScripts(&scene);
+				Vm_StartScripts(&scene);
 				scene_index ^= 1;
 				Scene_Preload(SCENE_PATHS[scene_index ^ 1]);
 			}

@@ -14,6 +14,13 @@ fn main() {
     );
     psxpipe::samples::write_all(&dir.join("assets")).expect("failed to write assets");
     psxpipe::samples::write_audio(&dir.join("audio")).expect("failed to write audio");
+    let scripts = dir.join("scripts");
+    std::fs::create_dir_all(&scripts).expect("failed to create scripts/");
+    std::fs::write(
+        scripts.join("tourniquet.psxs"),
+        psxpipe::samples::demo_tourniquet_psxs(),
+    )
+    .expect("failed to write tourniquet.psxs");
     let scenes = dir.join("scenes");
     std::fs::create_dir_all(&scenes).expect("failed to create scenes/");
     std::fs::write(scenes.join("scene0.json"), psxpipe::samples::scene_village_json())
