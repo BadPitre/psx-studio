@@ -2,7 +2,7 @@
 // porter un sous-menu (« Créer ▸ ») : il s'ouvre au survol, pensé pour
 // s'enrichir (scènes, puis prefabs, bases de données, etc.).
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface MenuAction {
   label: string;
@@ -39,10 +39,28 @@ export function ContextMenu({
   const submenuLeft =
     typeof window !== "undefined" && x > window.innerWidth - 420;
 
+  /* Un menu long (la liste des scripts) ne doit jamais sortir de la
+     fenêtre : on le remonte (ou on le colle en haut) après mesure. */
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x, y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const margin = 8;
+    const maxX = window.innerWidth - width - margin;
+    const maxY = window.innerHeight - height - margin;
+    setPos({
+      x: Math.max(margin, Math.min(x, maxX)),
+      y: Math.max(margin, Math.min(y, maxY)),
+    });
+  }, [x, y, actions]);
+
   return (
     <div
+      ref={ref}
       className={`context-menu ${submenuLeft ? "submenu-left" : ""}`}
-      style={{ left: x, top: y }}
+      style={{ left: pos.x, top: pos.y }}
     >
       {actions.map((a) => (
         <div

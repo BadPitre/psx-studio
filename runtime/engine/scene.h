@@ -88,6 +88,16 @@ typedef struct {
 	const uint8_t*	advances;
 } UiFont;
 
+/* Composant script (v1.6) : une entite porte autant de scripts qu'elle
+ * veut. La table (presente si flags & 2) suit la table des scripts et
+ * remplace alors le champ `script` de l'entite pour l'execution. */
+typedef struct {
+	uint16_t	entity;
+	uint16_t	script;		/* indice table + 1 */
+} PscScriptComp;
+
+#define SCENE_MAX_SCRIPT_COMPS	64
+
 /* Une entree de la table des lumieres (v1.2) : l'entite donne la
  * direction (elle eclaire le long de son axe -Z local), la couleur est
  * ici. */
@@ -170,6 +180,10 @@ typedef struct {
 	 * + la table de hashes brute (trouve() de la VM). */
 	const uint8_t*		vm_code[SCENE_MAX_SCRIPTS];
 	const uint32_t*		script_hashes;
+	/* Composants script (v1.6) : NULL/0 = une entite = un script (champ
+	 * `script`), sinon cette table fait foi. */
+	const PscScriptComp*	script_comps;
+	int					script_comp_count;
 	/* Lumieres : ligne 0 = soleil des settings (fixe), lignes 1-2 =
 	 * entites-lumieres directionnelles, re-derivees chaque frame de
 	 * leur rotation. */

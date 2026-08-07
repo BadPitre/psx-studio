@@ -12,7 +12,8 @@ fn main() {
             .nth(1)
             .unwrap_or_else(|| "../examples/demo".into()),
     );
-    psxpipe::samples::write_all(&dir.join("assets")).expect("failed to write assets");
+    psxpipe::samples::write_all_organized(&dir.join("assets"))
+        .expect("failed to write assets");
     psxpipe::samples::write_audio(&dir.join("audio")).expect("failed to write audio");
     let scripts = dir.join("scripts");
     std::fs::create_dir_all(&scripts).expect("failed to create scripts/");
@@ -27,5 +28,7 @@ fn main() {
         .expect("failed to write scene0.json");
     std::fs::write(scenes.join("scene1.json"), psxpipe::samples::scene_field_json())
         .expect("failed to write scene1.json");
+    std::fs::write(dir.join("project.json"), psxpipe::samples::demo_project_json())
+        .expect("failed to write project.json");
     println!("demo project sources written to {}", dir.display());
 }

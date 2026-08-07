@@ -244,24 +244,39 @@ static void Run(Scene* scene, VmInstance* in, uint16_t pc)
 	}
 }
 
+/* Une instance de VM par (entite, script bytecode) : une entite peut
+ * porter plusieurs scripts (table de composants v1.6), chacun avec ses
+ * propres registres. */
+static void AddInstance(Scene* scene, int entity, int script_index)
+{
+	if (instance_count >= VM_MAX_INSTANCES || script_index <= 0)
+		return;
+	const uint8_t* blob = scene->vm_code[script_index - 1];
+	if (!blob || memcmp(blob, "PSB1", 4) != 0)
+		return;
+	VmInstance* in = &instances[instance_count++];
+	in->entity = (int16_t)entity;
+	in->blob = blob;
+	memset(in->regs, 0, sizeof(in->regs));
+	if (PSB_START(blob) != PSB_NO_PC)
+		Run(scene, in, PSB_START(blob));
+}
+
 void Vm_StartScripts(Scene* scene)
 {
 	instance_count = 0;
-	for (int i = 0; i < scene->entity_count && instance_count < VM_MAX_INSTANCES; i++)
+	if (scene->script_comp_count > 0)
 	{
-		const Entity* ent = &scene->entities[i];
-		if (ent->script == 0 || !scene->vm_code[ent->script - 1])
-			continue;
-		const uint8_t* blob = scene->vm_code[ent->script - 1];
-		if (memcmp(blob, "PSB1", 4) != 0)
-			continue;
-		VmInstance* in = &instances[instance_count++];
-		in->entity = (int16_t)i;
-		in->blob = blob;
-		memset(in->regs, 0, sizeof(in->regs));
-		if (PSB_START(blob) != PSB_NO_PC)
-			Run(scene, in, PSB_START(blob));
+		for (int i = 0; i < scene->script_comp_count; i++)
+		{
+			const PscScriptComp* c = &scene->script_comps[i];
+			if (c->entity < scene->entity_count)
+				AddInstance(scene, c->entity, c->script);
+		}
+		return;
 	}
+	for (int i = 0; i < scene->entity_count; i++)
+		AddInstance(scene, i, scene->entities[i].script);
 }
 
 void Vm_Tick(Scene* scene, int frozen)

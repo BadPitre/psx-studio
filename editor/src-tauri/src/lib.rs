@@ -232,6 +232,80 @@ fn import_asset_bytes(
     psxpipe::project::import_asset(&dir, &dst)
 }
 
+/// Crée un PSX Script (menu « Créer ▸ Script ») ; retourne son chemin.
+#[tauri::command(async)]
+fn create_script(project_dir: String, name: String) -> Result<String, String> {
+    psxpipe::project::create_script(&PathBuf::from(project_dir), &name)
+}
+
+/// Noms des PSX Scripts du projet (menu « Ajouter un composant »).
+#[tauri::command(async)]
+fn list_scripts(project_dir: String) -> Vec<String> {
+    psxpipe::project::list_scripts(&PathBuf::from(project_dir))
+}
+
+/// Lit un fichier texte du projet (éditeur de script intégré).
+#[tauri::command(async)]
+fn read_text_file(project_dir: String, rel_path: String) -> Result<String, String> {
+    let path = PathBuf::from(project_dir).join(rel_path);
+    std::fs::read_to_string(&path).map_err(|e| format!("{} : {e}", path.display()))
+}
+
+/// Écrit un fichier texte du projet (éditeur de script intégré).
+#[tauri::command(async)]
+fn write_text_file(
+    project_dir: String,
+    rel_path: String,
+    contents: String,
+) -> Result<(), String> {
+    let path = PathBuf::from(project_dir).join(rel_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, contents).map_err(|e| format!("{} : {e}", path.display()))
+}
+
+/// Ouvre un fichier dans l'éditeur externe du système (VS Code s'il est
+/// installé, sinon l'association par défaut).
+#[tauri::command(async)]
+fn open_external(project_dir: String, rel_path: String) -> Result<String, String> {
+    let path = PathBuf::from(project_dir).join(&rel_path);
+    if !path.exists() {
+        return Err(format!("{} introuvable", path.display()));
+    }
+    let arg = path.to_string_lossy().to_string();
+    // VS Code d'abord (le plus attendu pour du code), sinon l'ouverture
+    // par défaut du système.
+    let code = if cfg!(windows) { "code.cmd" } else { "code" };
+    if std::process::Command::new(code).arg(&arg).spawn().is_ok() {
+        return Ok("Visual Studio Code".into());
+    }
+    let fallback: (&str, Vec<&str>) = if cfg!(windows) {
+        ("cmd", vec!["/C", "start", ""])
+    } else if cfg!(target_os = "macos") {
+        ("open", vec![])
+    } else {
+        ("xdg-open", vec![])
+    };
+    let mut cmd = std::process::Command::new(fallback.0);
+    cmd.args(fallback.1).arg(&arg);
+    cmd.spawn()
+        .map(|_| "éditeur par défaut".to_string())
+        .map_err(|e| format!("impossible d'ouvrir {} : {e}", path.display()))
+}
+
+/// Scène de démarrage du projet (première de project.json.scenes).
+#[tauri::command(async)]
+fn set_startup_scene(project_dir: String, scene_path: String) -> Result<(), String> {
+    psxpipe::project::set_startup_scene(&PathBuf::from(project_dir), &scene_path)
+}
+
+/// Crée un projet vide dans un dossier (menu « Fichier ▸ Nouveau projet »).
+#[tauri::command(async)]
+fn create_project(dir: String, name: String) -> Result<(), String> {
+    psxpipe::project::create_project(&PathBuf::from(dir), &name)
+}
+
 /// Contenu du projet pour le panneau Project (fichiers + project.json).
 #[tauri::command(async)]
 fn list_project_files(
@@ -403,6 +477,13 @@ pub fn run() {
             import_asset_bytes,
             list_project_files,
             create_scene,
+            create_script,
+            list_scripts,
+            read_text_file,
+            write_text_file,
+            open_external,
+            set_startup_scene,
+            create_project,
             create_folder,
             save_prefab,
             move_entry,

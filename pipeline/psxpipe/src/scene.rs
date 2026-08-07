@@ -123,6 +123,11 @@ pub struct EntityJson {
     /// runtime dans le registre compilé avec le jeu.
     #[serde(default)]
     pub script: Option<String>,
+    /// Scripts additionnels (v1.6) : une entité porte autant de
+    /// composants script qu'elle veut. `script` (v1.1) reste accepté et
+    /// vaut le premier de la liste.
+    #[serde(default)]
+    pub scripts: Vec<String>,
     /// Composant lumière directionnelle (v1.2) : la rotation de l'entité
     /// donne la direction (la lumière éclaire le long de son axe -Z
     /// local, comme les modèles font face à -Z). 2 max par scène : la
@@ -170,6 +175,20 @@ pub struct EntityJson {
     pub button: Option<bool>,
     #[serde(default)]
     pub layout: Option<UiLayoutJson>,
+}
+
+impl EntityJson {
+    /// Scripts attachés, dans l'ordre d'exécution : `script` (v1.1) puis
+    /// `scripts` (v1.6), sans doublon.
+    pub fn script_list(&self) -> Vec<&String> {
+        let mut out: Vec<&String> = Vec::new();
+        for s in self.script.iter().chain(self.scripts.iter()) {
+            if !out.iter().any(|n| *n == s) {
+                out.push(s);
+            }
+        }
+        out
+    }
 }
 
 /// RectTransform (sémantique Unity) : ancres/pivot en fractions 0..1 du
@@ -822,7 +841,7 @@ pub fn build_with_options(
      * fonctions par nom, indépendamment de l'ordre du registre compilé. */
     let mut script_names: Vec<String> = Vec::new();
     for &i in &order {
-        if let Some(s) = &scene.entities[i].script {
+        for s in scene.entities[i].script_list() {
             if !script_names.iter().any(|n| n == s) {
                 script_names.push(s.clone());
             }
@@ -830,6 +849,25 @@ pub fn build_with_options(
     }
     if script_names.len() >= u16::MAX as usize {
         return Err("too many scripts".into());
+    }
+    /* Composants script (v1.6) : la table (entité, script) porte TOUS
+     * les scripts attachés — écrite seulement si une entité en a
+     * plusieurs, sinon le champ `script` de l'entité suffit (layout
+     * inchangé pour les scènes mono-script). */
+    let mut script_comps: Vec<(u16, u16)> = Vec::new();
+    let mut has_multi = false;
+    for &i in &order {
+        let list = scene.entities[i].script_list();
+        if list.len() > 1 {
+            has_multi = true;
+        }
+        for s in list {
+            let idx = script_names.iter().position(|n| n == s).unwrap() + 1;
+            script_comps.push((pos_to_sorted[i], idx as u16));
+        }
+    }
+    if !has_multi {
+        script_comps.clear();
     }
 
     /* PSX Script (v1.5) : un `scripts/<nom>.psxs` dans le projet prime
@@ -1040,8 +1078,8 @@ pub fn build_with_options(
         entities.extend_from_slice(&flags.to_le_bytes());
         // Script : indice+1 dans la table (0 = aucun) — les fichiers
         // antérieurs ont 0 ici, donc restent valides.
-        let script_ref = match &e.script {
-            Some(s) => (script_names.iter().position(|n| n == s).unwrap() + 1) as u16,
+        let script_ref = match e.script_list().first() {
+            Some(s) => (script_names.iter().position(|n| n == *s).unwrap() + 1) as u16,
             None => 0,
         };
         entities.extend_from_slice(&script_ref.to_le_bytes());
@@ -1305,7 +1343,15 @@ pub fn build_with_options(
     let scripts_offset = entities_offset + entities.len();
     // v1.5 : la table d'offsets bytecode double la table de hashes.
     let scripts_table_len = script_names.len() * 4 * if has_vm { 2 } else { 1 };
-    let lights_offset = scripts_offset + scripts_table_len;
+    // v1.6 : table des composants script (u16 count + pad, puis paires)
+    // intercalée avant les lumières — lights_offset est dans l'en-tête,
+    // donc un lecteur ancien ne voit rien passer.
+    let comps_len = if script_comps.is_empty() {
+        0
+    } else {
+        4 + script_comps.len() * 4
+    };
+    let lights_offset = scripts_offset + scripts_table_len + comps_len;
     let align4 = |v: usize| (v + 3) & !3;
     let ui_offset = align4(lights_offset + lights.len() * LIGHT_ENTRY_SIZE);
     let fonts_offset = ui_offset + ui_recs.len();
@@ -1371,8 +1417,11 @@ pub fn build_with_options(
     let mut out = Vec::with_capacity(total_size);
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&VERSION.to_le_bytes());
-    // Flags d'en-tête : bit 0 = table d'offsets bytecode (v1.5).
-    out.extend_from_slice(&(if has_vm { 1u16 } else { 0 }).to_le_bytes());
+    // Flags d'en-tête : bit 0 = table d'offsets bytecode (v1.5),
+    // bit 1 = table des composants script (v1.6).
+    let header_flags =
+        if has_vm { 1u16 } else { 0 } | if script_comps.is_empty() { 0 } else { 2 };
+    out.extend_from_slice(&header_flags.to_le_bytes());
     out.extend_from_slice(&(total_size as u32).to_le_bytes());
     // Le 4e compteur (réservé jusqu'à la v1.2) devient le nombre de
     // widgets UI — nul sur les anciens fichiers, donc rétrocompatible.
@@ -1414,6 +1463,14 @@ pub fn build_with_options(
     if has_vm {
         for off in &vm_offsets {
             out.extend_from_slice(&off.to_le_bytes());
+        }
+    }
+    if !script_comps.is_empty() {
+        out.extend_from_slice(&(script_comps.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // pad (alignement 4)
+        for (entity, script) in &script_comps {
+            out.extend_from_slice(&entity.to_le_bytes());
+            out.extend_from_slice(&script.to_le_bytes());
         }
     }
     for (entity, color, intensity) in &lights {
@@ -1498,6 +1555,27 @@ pub struct PscHeader {
     /// v1.3 : widgets UI (4e compteur) et polices (0x3E).
     pub ui_count: u16,
     pub font_count: u16,
+}
+
+/// Composants script (v1.6, flag bit 1) : paires (entité, indice de
+/// script + 1) — vide si la scène est mono-script par entité (le champ
+/// `script` de l'entité suffit alors).
+pub fn parse_script_comps(data: &[u8], h: &PscHeader) -> Vec<(u16, u16)> {
+    if h.flags & 2 == 0 {
+        return Vec::new();
+    }
+    let base = h.scripts_offset as usize
+        + h.script_count as usize * 4 * if h.flags & 1 != 0 { 2 } else { 1 };
+    let count = u16::from_le_bytes([data[base], data[base + 1]]) as usize;
+    (0..count)
+        .map(|i| {
+            let o = base + 4 + i * 4;
+            (
+                u16::from_le_bytes([data[o], data[o + 1]]),
+                u16::from_le_bytes([data[o + 2], data[o + 3]]),
+            )
+        })
+        .collect()
 }
 
 /// Table d'offsets bytecode PSX Script (v1.5, flag bit 0) : un u32 par

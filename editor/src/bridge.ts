@@ -34,8 +34,8 @@ export interface BuildSummary {
   warnings: string[];
 }
 
-export async function pickProjectDir(): Promise<string | null> {
-  const dir = await openDialog({ directory: true, title: "Ouvrir un projet PSX Studio" });
+export async function pickProjectDir(title = "Ouvrir un projet PSX Studio"): Promise<string | null> {
+  const dir = await openDialog({ directory: true, title });
   return typeof dir === "string" ? dir : null;
 }
 
@@ -60,7 +60,7 @@ export interface ProjectFile {
   path: string;
   name: string;
   section: string;
-  kind: "dir" | "scene" | "prefab" | "model" | "texture" | "audio" | "buffer" | "other";
+  kind: "dir" | "scene" | "prefab" | "script" | "model" | "texture" | "audio" | "buffer" | "other";
   size: number;
   registered: boolean;
   exists: boolean;
@@ -79,6 +79,25 @@ export const api = {
   /** Crée une scène vide enregistrée ; retourne son chemin relatif. */
   createScene: (projectDir: string, name: string) =>
     tauriInvoke<string>("create_scene", { projectDir, name }),
+  /** Crée un PSX Script (squelette) ; retourne son chemin relatif. */
+  createScript: (projectDir: string, name: string) =>
+    tauriInvoke<string>("create_script", { projectDir, name }),
+  /** Noms des PSX Scripts du projet (composants attachables). */
+  listScripts: (projectDir: string) =>
+    tauriInvoke<string[]>("list_scripts", { projectDir }),
+  readTextFile: (projectDir: string, relPath: string) =>
+    tauriInvoke<string>("read_text_file", { projectDir, relPath }),
+  writeTextFile: (projectDir: string, relPath: string, contents: string) =>
+    tauriInvoke<void>("write_text_file", { projectDir, relPath, contents }),
+  /** Ouvre un fichier dans VS Code (ou l'éditeur par défaut). */
+  openExternal: (projectDir: string, relPath: string) =>
+    tauriInvoke<string>("open_external", { projectDir, relPath }),
+  /** Scène de démarrage (première de project.json.scenes). */
+  setStartupScene: (projectDir: string, scenePath: string) =>
+    tauriInvoke<void>("set_startup_scene", { projectDir, scenePath }),
+  /** Crée un projet vide (dossiers + project.json + scene0). */
+  createProject: (dir: string, name: string) =>
+    tauriInvoke<void>("create_project", { dir, name }),
   /** Sauvegarde un prefab (JSON d'entités + assets) ; retourne son chemin. */
   savePrefab: (projectDir: string, name: string, contents: string) =>
     tauriInvoke<string>("save_prefab", { projectDir, name, contents }),

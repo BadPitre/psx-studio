@@ -823,6 +823,9 @@ fn kind_for(section: &str, ext: &str) -> &'static str {
         "bin" => "buffer",
         "json" if section == "scenes" => "scene",
         "json" if section == "prefabs" => "prefab",
+        // PSX Script : compilé dans la scène qui l'utilise (pas
+        // d'enregistrement dans project.json).
+        "psxs" => "script",
         _ => "other",
     }
 }
@@ -915,6 +918,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
                 registered: registered.contains_key(&rel)
                     || kind == "buffer"
                     || kind == "prefab"
+                    || kind == "script"
                     || kind == "other",
                 exists: true,
                 out: registered.get(&rel).cloned().flatten(),
@@ -925,7 +929,7 @@ pub fn list_files(project_dir: &Path) -> Result<Vec<ProjectFile>, String> {
 
     let mut files = Vec::new();
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for section in ["scenes", "assets", "audio", "prefabs"] {
+    for section in ["scenes", "assets", "audio", "prefabs", "scripts"] {
         walk(
             &project_dir.join(section),
             section,
@@ -1150,6 +1154,124 @@ pub fn create_scene(project_dir: &Path, name: &str) -> Result<String, String> {
     .map_err(|e| e.to_string())?;
 
     Ok(rel)
+}
+
+/// Crée un PSX Script `scripts/<slug>.psxs` avec un squelette prêt à
+/// l'emploi (menu « Créer ▸ Script » du panneau Project). Les scripts
+/// ne s'enregistrent pas dans project.json : ils sont compilés dans la
+/// scène qui les référence.
+pub fn create_script(project_dir: &Path, name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("nom de script vide".into());
+    }
+    let slug = sanitize_id(trimmed);
+    let rel = format!("scripts/{slug}.psxs");
+    let path = project_dir.join(&rel);
+    if path.exists() {
+        return Err(format!("{rel} existe déjà"));
+    }
+    let body = format!(
+        "# {slug} — PSX Script (docs/PSX-SCRIPT.md)\n\
+         # Attache-le à un objet : inspecteur → ＋ Ajouter un composant.\n\
+         \n\
+         var speed = 8\n\
+         \n\
+         on start\n\
+         \tspeed = 8\n\
+         end\n\
+         \n\
+         every frame\n\
+         \trotate_y(self, speed)\n\
+         end\n"
+    )
+    .replace('\t', "    ");
+    // Garantie : le squelette proposé compile.
+    crate::psxs::compile(&body).map_err(|e| format!("squelette invalide : {e}"))?;
+    std::fs::create_dir_all(project_dir.join("scripts")).map_err(|e| e.to_string())?;
+    std::fs::write(&path, body).map_err(|e| format!("{} : {e}", path.display()))?;
+    Ok(rel)
+}
+
+/// Liste les PSX Scripts du projet (noms sans extension), pour le menu
+/// « Ajouter un composant » de l'éditeur.
+pub fn list_scripts(project_dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let dir = project_dir.join("scripts");
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) == Some("psxs") {
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    out.push(stem.to_string());
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Scène de démarrage = première entrée de `project.json.scenes` (elle
+/// devient SCENE0.PSC sur le CD). Déplace `scene_path` en tête.
+pub fn set_startup_scene(project_dir: &Path, scene_path: &str) -> Result<(), String> {
+    let json_path = project_dir.join("project.json");
+    let text = std::fs::read_to_string(&json_path)
+        .map_err(|e| format!("{} : {e}", json_path.display()))?;
+    let mut project: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("project.json : {e}"))?;
+    let scenes = project["scenes"]
+        .as_array()
+        .ok_or("project.json : aucune scène enregistrée")?;
+    let wanted = scene_path.replace('\\', "/");
+    let mut ordered: Vec<serde_json::Value> = Vec::with_capacity(scenes.len());
+    ordered.push(serde_json::Value::String(wanted.clone()));
+    let mut found = false;
+    for s in scenes {
+        match s.as_str() {
+            Some(p) if p.replace('\\', "/") == wanted => found = true,
+            _ => ordered.push(s.clone()),
+        }
+    }
+    if !found {
+        return Err(format!("{wanted} n'est pas une scène du projet"));
+    }
+    project["scenes"] = serde_json::Value::Array(ordered);
+    std::fs::write(
+        &json_path,
+        serde_json::to_string_pretty(&project).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Crée un projet vide prêt à ouvrir : project.json + dossiers + une
+/// première scène (menu « Fichier ▸ Nouveau projet »).
+pub fn create_project(dir: &Path, name: &str) -> Result<(), String> {
+    let trimmed = if name.trim().is_empty() { "monjeu" } else { name.trim() };
+    if dir.join("project.json").exists() {
+        return Err(format!("{} contient déjà un project.json", dir.display()));
+    }
+    for sub in ["assets", "audio", "scenes", "scripts", "prefabs"] {
+        std::fs::create_dir_all(dir.join(sub)).map_err(|e| e.to_string())?;
+    }
+    let project = serde_json::json!({
+        "name": trimmed,
+        // Par défaut l'exécutable de démo du dépôt : à remplacer par le
+        // tien (copie de runtime/game) quand tu écris du C.
+        "exe": "../../runtime/game/build/game.exe",
+        "models": [],
+        "textures": [],
+        "scenes": [],
+        "sfx": [],
+        "music": []
+    });
+    std::fs::write(
+        dir.join("project.json"),
+        serde_json::to_string_pretty(&project).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())?;
+    create_scene(dir, "scene0")?;
+    Ok(())
 }
 
 /// Best-effort relative path from `from` dir to `to` (falls back to

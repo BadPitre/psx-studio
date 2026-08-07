@@ -91,6 +91,12 @@ Conventions :
   et pose le bit 0 des flags d'en-tête ; une **table d'offsets** (un u32
   par script, 0 = script C) suit alors la table de hashes. Le blob prime
   sur le registre C au chargement. Voir `PSX-SCRIPT.md`.
+- `scripts` (v1.6, optionnel) : **plusieurs composants script** sur une
+  entité (`["patrouille", "dialogue"]`). Encodage : table de paires
+  (entité u16, indice+1 u16) précédée d'un compteur u16, placée juste
+  après la table des scripts et signalée par le bit 1 des flags ; le
+  champ `script` de l'entité garde le premier (compat). Une scène
+  mono-script par entité ne porte pas cette table.
 - `script` (v1.1, optionnel) : nom d'un script runtime. Le binaire ne stocke
   que son **hash FNV-1a 32 bits** (nom passé en minuscules) ; le runtime le
   résout au chargement contre sa table `g_scripts` compilée dans le jeu.

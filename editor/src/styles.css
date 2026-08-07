@@ -609,3 +609,56 @@ body {
 /* Carte Prefab de l'inspecteur (racine d'instance). */
 .component-card.prefab-card { border-left: 2px solid #7fb2ff; }
 .prefab-card .button { margin-top: 6px; }
+
+/* Barre de menus déroulants (Fichier / Scène / Aide). */
+.menu-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  background: #15171d;
+  border-bottom: 1px solid #2a2d38;
+  position: relative;
+  z-index: 40;
+}
+.menu-bar-item {
+  background: none;
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.menu-bar-item:hover, .menu-bar-item.active { background: #2a2d38; }
+
+/* Menus longs (liste des scripts) : scroll au lieu d'être coupés. */
+.context-menu, .context-submenu {
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Boîte de nom des menus (nouvelle scène / nouveau script). */
+.naming-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.naming-box {
+  background: #23252e;
+  border: 1px solid #3a3d4a;
+  border-radius: 8px;
+  padding: 14px 16px;
+  min-width: 320px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+.naming-title { font-weight: 600; margin-bottom: 8px; }
+
+/* Carte de composant script : libellé + bouton Éditer. */
+.script-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

@@ -47,6 +47,9 @@ every frame
 end
 ```
 
+- Un objet peut porter **plusieurs scripts** (autant de composants
+  dans l'inspecteur) : chacun a ses propres champs et son propre cycle
+  de vie, exécutés dans l'ordre d'ajout.
 - `#` commente jusqu'à la fin de la ligne ; une instruction par ligne.
 - `var nom` ou `var nom = expression` — en tête de fichier uniquement,
   12 variables max (les 4 registres restants servent aux calculs). Les
@@ -149,6 +152,10 @@ Les textes sont translittérés vers le charset des polices `.fnt`
   blob **PSB1** : en-tête 16 octets (magic, nb constantes, taille code,
   points d'entrée start/frame, taille chaînes), constantes i32, code
   (u32 par instruction : op/a/b/c), chaînes.
+- Plusieurs scripts sur une entité (v1.6, bit 1 des flags) : une table
+  de composants `(entité, script)` suit la table des scripts ; le JSON
+  s'écrit `"scripts": ["a", "b"]` (`"script": "a"` reste valide pour un
+  seul). Une entité mono-script ne change rien au binaire.
 - Le `.psc` gagne (v1.5, bit 0 des flags d'en-tête) une **table
   d'offsets** juste après la table de hashes de scripts : un u32 par
   script, 0 = script C du registre, sinon l'offset du blob. Un runtime

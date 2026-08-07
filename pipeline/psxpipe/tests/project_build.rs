@@ -278,3 +278,53 @@ fn import_gltf_with_texture_extracts_and_pairs() {
     assert!(text.contains("batiment.pmd"));
     project::build(dir.path(), false).unwrap();
 }
+
+#[test]
+fn create_script_startup_scene_and_new_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("monjeu");
+    std::fs::create_dir_all(&root).unwrap();
+
+    // Nouveau projet : dossiers + project.json + scene0 enregistree.
+    project::create_project(&root, "monjeu").unwrap();
+    for sub in ["assets", "audio", "scenes", "scripts", "prefabs"] {
+        assert!(root.join(sub).is_dir(), "{sub} manquant");
+    }
+    let scenes_of = |root: &std::path::Path| -> Vec<String> {
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("project.json")).unwrap())
+                .unwrap();
+        v["scenes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(scenes_of(&root), vec!["scenes/scene0.json".to_string()]);
+    // Un second appel refuse d'ecraser.
+    assert!(project::create_project(&root, "monjeu").is_err());
+
+    // Script : squelette compilable, liste, pas de doublon.
+    let rel = project::create_script(&root, "Mon Script").unwrap();
+    assert_eq!(rel, "scripts/mon_script.psxs");
+    let src = std::fs::read_to_string(root.join(&rel)).unwrap();
+    psxpipe::psxs::compile(&src).expect("le squelette doit compiler");
+    assert_eq!(project::list_scripts(&root), vec!["mon_script".to_string()]);
+    assert!(project::create_script(&root, "mon_script").is_err());
+
+    // Le panneau Project voit le script (section scripts, kind script).
+    let files = project::list_files(&root).unwrap();
+    assert!(files
+        .iter()
+        .any(|f| f.path == "scripts/mon_script.psxs" && f.kind == "script" && f.registered));
+
+    // Scene de demarrage : la scene visee passe en tete de project.json.
+    project::create_scene(&root, "niveau2").unwrap();
+    assert_eq!(scenes_of(&root)[0], "scenes/scene0.json");
+    project::set_startup_scene(&root, "scenes/niveau2.json").unwrap();
+    let after = scenes_of(&root);
+    assert_eq!(after[0], "scenes/niveau2.json");
+    assert_eq!(after.len(), 2);
+    assert!(project::set_startup_scene(&root, "scenes/absente.json").is_err());
+}

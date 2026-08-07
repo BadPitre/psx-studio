@@ -47,6 +47,7 @@ export interface LogEntry {
 
 const ROOTS: { id: string; label: string }[] = [
   { id: "scenes", label: "Scènes" },
+  { id: "scripts", label: "Scripts" },
   { id: "prefabs", label: "Prefabs" },
   { id: "assets", label: "Assets" },
   { id: "audio", label: "Audio" },
@@ -56,6 +57,7 @@ const ICONS: Record<ProjectFile["kind"], string> = {
   dir: "📁",
   scene: "🎬",
   prefab: "🧩",
+  script: "📜",
   model: "▣",
   texture: "🖼",
   audio: "♪",
@@ -79,6 +81,10 @@ export function ProjectPanel({
   currentScenePath,
   onOpenScene,
   onOpenPrefab,
+  onOpenScript,
+  onCreateScript,
+  onSetStartupScene,
+  startupScene,
   onImport,
   onCreateScene,
   onCreateFolder,
@@ -95,6 +101,13 @@ export function ProjectPanel({
   onOpenScene: (path: string) => void;
   /** Ouvre un prefab en Prefab Mode (édition isolée). */
   onOpenPrefab?: (path: string) => void;
+  /** Ouvre un script dans l'éditeur externe (VS Code…). */
+  onOpenScript?: (path: string) => void;
+  onCreateScript?: (name: string) => void;
+  /** Définit la scène de démarrage (première du project.json). */
+  onSetStartupScene?: (path: string) => void;
+  /** Chemin de la scène de démarrage (badge « démarrage »). */
+  startupScene?: string;
   /** (Ré)importe un asset gltf/glb/png (chemin relatif projet). */
   onImport: (path: string) => void;
   onCreateScene: (name: string) => void;
@@ -120,9 +133,10 @@ export function ProjectPanel({
   const [menu, setMenu] = useState<{ x: number; y: number; file: ProjectFile | null } | null>(
     null,
   );
-  const [naming, setNaming] = useState<{ kind: "scene" | "folder"; parent: string } | null>(
-    null,
-  );
+  const [naming, setNaming] = useState<{
+    kind: "scene" | "folder" | "script";
+    parent: string;
+  } | null>(null);
   const [dropTarget, setDropTarget] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
@@ -164,14 +178,33 @@ export function ProjectPanel({
       label: "Créer",
       children: [
         { label: "🎬 Scène…", onClick: () => setNaming({ kind: "scene", parent }) },
+        ...(onCreateScript
+          ? [
+              {
+                label: "📜 Script (PSX Script)…",
+                onClick: () => setNaming({ kind: "script", parent }),
+              },
+            ]
+          : []),
         { label: "📁 Dossier…", onClick: () => setNaming({ kind: "folder", parent }) },
-        // Demain : prefabs, bases de données, etc.
+        // Demain : bases de données, matériaux, etc.
       ],
     };
     if (!f) return [create, { label: "Rafraîchir", onClick: onRefresh }];
     const actions: MenuAction[] = [];
-    if (f.kind === "scene" && f.exists)
+    if (f.kind === "scene" && f.exists) {
       actions.push({ label: "Ouvrir", onClick: () => onOpenScene(f.path) });
+      if (onSetStartupScene && f.path !== startupScene)
+        actions.push({
+          label: "▶ Définir comme scène de démarrage",
+          onClick: () => onSetStartupScene(f.path),
+        });
+    }
+    if (f.kind === "script" && f.exists && onOpenScript)
+      actions.push({
+        label: "✎ Ouvrir dans l'éditeur (VS Code)",
+        onClick: () => onOpenScript(f.path),
+      });
     if (f.kind === "prefab" && f.exists && onOpenPrefab)
       actions.push({
         label: "🧩 Ouvrir (Prefab Mode)",
@@ -192,6 +225,7 @@ export function ProjectPanel({
     setNaming(null);
     if (!name || !req) return;
     if (req.kind === "scene") onCreateScene(name);
+    else if (req.kind === "script") onCreateScript?.(name);
     else onCreateFolder(req.parent, name);
   };
 
@@ -322,11 +356,21 @@ export function ProjectPanel({
         )}
         {!collapsed && naming && (
           <span className="project-naming">
-            {naming.kind === "scene" ? "Nom de la scène :" : `Dossier dans ${naming.parent} :`}
+            {naming.kind === "scene"
+              ? "Nom de la scène :"
+              : naming.kind === "script"
+                ? "Nom du script (PSX Script) :"
+                : `Dossier dans ${naming.parent} :`}
             <input
               ref={nameRef}
               autoFocus
-              defaultValue={naming.kind === "scene" ? "nouvelle-scene" : "nouveau-dossier"}
+              defaultValue={
+                naming.kind === "scene"
+                  ? "nouvelle-scene"
+                  : naming.kind === "script"
+                    ? "nouveau-script"
+                    : "nouveau-dossier"
+              }
               onKeyDown={(e) => {
                 if (e.key === "Enter") submitName();
                 if (e.key === "Escape") setNaming(null);

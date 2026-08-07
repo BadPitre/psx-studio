@@ -19,6 +19,7 @@ import { VramPanel } from "./VramPanel";
 import { UiCanvasPanel } from "./UiCanvasPanel";
 import { ProjectPanel, type LogEntry } from "./ProjectPanel";
 import { ContextMenu } from "./ContextMenu";
+import { MenuBar, type Menu } from "./MenuBar";
 import { thumbFor } from "./thumbs";
 
 type Transform = {
@@ -689,8 +690,10 @@ function Inspector({
   currentModelId,
   onRename,
   onModelChange,
-  script,
-  onScriptChange,
+  scripts,
+  onScriptsChange,
+  availableScripts,
+  onOpenScript,
   subdiv,
   onSubdivChange,
   light,
@@ -726,8 +729,13 @@ function Inspector({
   currentModelId?: string | null;
   onRename?: (name: string) => void;
   onModelChange?: (id: string | null) => void;
-  script?: string | null;
-  onScriptChange?: (script: string | null) => void;
+  /** Composants script attachés (dans l'ordre d'exécution). */
+  scripts?: string[];
+  onScriptsChange?: (scripts: string[]) => void;
+  /** PSX Scripts du projet + scripts C connus (menu d'ajout). */
+  availableScripts?: string[];
+  /** Ouvre le .psxs dans l'éditeur externe (si le fichier existe). */
+  onOpenScript?: (name: string) => void;
   subdiv?: number | null;
   onSubdivChange?: (subdiv: number | null) => void;
   light?: [number, number, number] | null;
@@ -776,16 +784,11 @@ function Inspector({
   const [draftName, setDraftName] = useState(name);
   const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => setDraftName(name), [name]);
-  const [draftScript, setDraftScript] = useState(script ?? "");
-  useEffect(() => setDraftScript(script ?? ""), [script, selected]);
   const [draftSubdiv, setDraftSubdiv] = useState(subdiv == null ? "" : String(subdiv));
   useEffect(() => setDraftSubdiv(subdiv == null ? "" : String(subdiv)), [subdiv, selected]);
-  /* Carte Script présente sans script enregistré (juste ajoutée). */
-  const [pendingScript, setPendingScript] = useState(false);
-  useEffect(() => setPendingScript(false), [selected]);
   /* Menu « Ajouter un composant ». */
   const [addComp, setAddComp] = useState<{ x: number; y: number } | null>(null);
-  const editable = Boolean(onModelChange && onLightChange && onCameraChange && onScriptChange);
+  const editable = Boolean(onModelChange && onLightChange && onCameraChange && onScriptsChange);
   const hasMesh = editable ? currentModelId != null : entity.model >= 0;
   /* F2 / menu « Renommer » : focus + sélection du champ nom. */
   useEffect(() => {
@@ -1130,37 +1133,31 @@ function Inspector({
         </ComponentCard>
       )}
 
-      {(script != null || pendingScript) && onScriptChange && (
+      {(scripts ?? []).map((name) => (
         <ComponentCard
+          key={name}
           icon="📜"
-          title="Script"
-          onRemove={() => {
-            setPendingScript(false);
-            setDraftScript("");
-            if (script != null) onScriptChange(null);
-          }}
+          title={name}
+          onRemove={
+            onScriptsChange
+              ? () => onScriptsChange((scripts ?? []).filter((s) => s !== name))
+              : undefined
+          }
         >
-          <input
-            className="name-input"
-            value={draftScript}
-            placeholder="nom du script (ex. player, npc)"
-            spellCheck={false}
-            autoFocus={pendingScript && !script}
-            onChange={(e) => setDraftScript(e.target.value)}
-            onBlur={() => {
-              const trimmed = draftScript.trim();
-              if (trimmed !== (script ?? "")) onScriptChange(trimmed || null);
-              if (!trimmed && script == null) setPendingScript(false);
-            }}
-            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-            title="Nom du script runtime (résolu par hash au chargement de la scène)"
-          />
-          <div className="hint">
-            Doit correspondre à un ScriptDef enregistré dans le jeu
-            (<code>g_scripts</code>).
+          <div className="component-row script-row">
+            <span className="muted">composant script</span>
+            {onOpenScript && (
+              <button
+                className="button"
+                onClick={() => onOpenScript(name)}
+                title="Ouvrir le .psxs dans VS Code (ou l'éditeur par défaut)"
+              >
+                ✎ Éditer
+              </button>
+            )}
           </div>
         </ComponentCard>
-      )}
+      ))}
 
       {editable && (
         <div className="add-component">
@@ -1224,22 +1221,14 @@ function Inspector({
             ...(!isCamera
               ? [{ label: "🎥 Caméra", onClick: () => onCameraChange?.(true) }]
               : []),
-            ...(script == null && !pendingScript
-              ? [
-                  {
-                    label: "📜 Script",
-                    children: [
-                      { label: "✎ personnalisé…", onClick: () => setPendingScript(true) },
-                      ...["player", "npc", "torche", "hud", "dialogue", "pause"].map(
-                        (s) => ({
-                          label: s === "player" ? "🕹 player (contrôleur démo)" : s,
-                          onClick: () => onScriptChange?.(s),
-                        }),
-                      ),
-                    ],
-                  },
-                ]
-              : []),
+            /* Les scripts sont des composants à part entière : chacun
+               s'ajoute directement (et plusieurs fois sur un objet). */
+            ...(availableScripts ?? [])
+              .filter((n) => !(scripts ?? []).includes(n))
+              .map((n) => ({
+                label: `📜 ${n}`,
+                onClick: () => onScriptsChange?.([...(scripts ?? []), n]),
+              })),
           ]}
         />
       )}
@@ -1277,6 +1266,13 @@ export default function App() {
   /* Mode projet (Tauri). */
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  /* Scripts attachables : les .psxs du projet + les scripts C du
+     runtime de démo (résolus par hash au chargement de la scène). */
+  const [projectScripts, setProjectScripts] = useState<string[]>([]);
+  const availableScripts = useMemo(() => {
+    const builtin = ["player", "npc", "torche", "hud", "dialogue", "pause"];
+    return [...projectScripts, ...builtin.filter((b) => !projectScripts.includes(b))];
+  }, [projectScripts]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [scenePath, setScenePath] = useState<string>("");
   const [sceneDoc, setSceneDoc] = useState<SceneDoc | null>(null);
@@ -1288,6 +1284,8 @@ export default function App() {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [renameFocus, setRenameFocus] = useState(0);
+  /* Boîte de nom des menus (Nouvelle scène / Nouveau script). */
+  const [naming, setNaming] = useState<{ kind: "scene" | "script" } | null>(null);
   const rebuildTimer = useRef<number>(0);
   const clipboardRef = useRef<Record<string, unknown> | null>(null);
 
@@ -1469,6 +1467,7 @@ export default function App() {
   const refreshFiles = useCallback(async (dir: string) => {
     try {
       setProjectFiles(await api.listProjectFiles(dir));
+      setProjectScripts(await api.listScripts(dir));
     } catch (e) {
       setNotice(`panneau Project : ${e}`);
     }
@@ -1481,8 +1480,8 @@ export default function App() {
     [project, projectFiles],
   );
 
-  const openProject = useCallback(async () => {
-    const dir = await pickProjectDir();
+  const openProject = useCallback(async (path?: string) => {
+    const dir = path ?? (await pickProjectDir());
     if (!dir) return;
     try {
       const proj = await api.openProject(dir);
@@ -1509,6 +1508,62 @@ export default function App() {
     },
     [project, refreshFiles],
   );
+
+  const createScriptFromPanel = useCallback(
+    async (name: string) => {
+      if (!project) return;
+      try {
+        const rel = await api.createScript(project.dir, name);
+        refreshFiles(project.dir);
+        const where = await api.openExternal(project.dir, rel);
+        setNotice(`script créé : ${rel} (ouvert dans ${where})`);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project, refreshFiles],
+  );
+
+  const openScriptExternal = useCallback(
+    async (rel: string) => {
+      if (!project) return;
+      try {
+        const where = await api.openExternal(project.dir, rel);
+        setNotice(`${rel} ouvert dans ${where}`);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project],
+  );
+
+  const setStartupScene = useCallback(
+    async (rel: string) => {
+      if (!project) return;
+      try {
+        await api.setStartupScene(project.dir, rel);
+        const proj = await api.openProject(project.dir);
+        setProject(proj);
+        setNotice(`scène de démarrage : ${rel} (SCENE0 sur le CD)`);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [project],
+  );
+
+  const newProject = useCallback(async () => {
+    const dir = await pickProjectDir("Dossier du nouveau projet (vide)");
+    if (!dir) return;
+    try {
+      const name = dir.split(/[\\/]/).filter(Boolean).pop() ?? "monjeu";
+      await api.createProject(dir, name);
+      await openProject(dir);
+      setNotice(`projet créé dans ${dir}`);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [openProject]);
 
   const createSceneFromPanel = useCallback(
     async (name: string) => {
@@ -1967,15 +2022,21 @@ export default function App() {
     [mutateDoc, selected, entityNames],
   );
 
-  const setEntityScript = useCallback(
-    (script: string | null) => {
+  /* Composants script : une entité en porte autant qu'elle veut. Le JSON
+     reste minimal — un seul script s'écrit `script`, plusieurs
+     s'écrivent `scripts` (le format accepte les deux). */
+  const setEntityScripts = useCallback(
+    (list: string[]) => {
       if (selected < 0) return;
       const name = entityNames[selected];
+      const clean = list.map((s) => s.trim()).filter(Boolean);
       mutateDoc((doc) => {
         const entity = doc.entities?.find((e) => e.name === name);
         if (!entity) return;
-        if (script) entity.script = script;
-        else delete entity.script;
+        delete entity.script;
+        delete entity.scripts;
+        if (clean.length === 1) entity.script = clean[0];
+        else if (clean.length > 1) entity.scripts = clean;
       }, name);
     },
     [mutateDoc, selected, entityNames],
@@ -2313,7 +2374,15 @@ export default function App() {
       : null;
   const selectedPrefabSource = selectedName ? prefabRoots.get(selectedName) ?? null : null;
   const currentModelId = (selectedJsonEntity?.model as string | undefined) ?? null;
-  const currentScript = (selectedJsonEntity?.script as string | undefined) ?? null;
+  const currentScripts = useMemo(() => {
+    const out: string[] = [];
+    const one = selectedJsonEntity?.script;
+    if (typeof one === "string" && one.trim()) out.push(one.trim());
+    for (const s of (selectedJsonEntity?.scripts as string[] | undefined) ?? []) {
+      if (typeof s === "string" && s.trim() && !out.includes(s.trim())) out.push(s.trim());
+    }
+    return out;
+  }, [selectedJsonEntity]);
   /* Composants : source JSON en mode projet, .psc en mode visionneuse
      (cartes en lecture seule). */
   const pscEntity = scene && selected >= 0 ? scene.entities[selected] : undefined;
@@ -2419,13 +2488,89 @@ export default function App() {
         }
       : null;
 
+  /* Menus déroulants (Fichier / Scène / Aide) : tout ce qui touche au
+     projet et aux scènes s'y trouve, la barre d'outils garde l'essentiel. */
+  const menus: Menu[] = isTauri
+    ? [
+        {
+          label: "Fichier",
+          actions: [
+            { label: "Nouveau projet…", onClick: newProject },
+            { label: "Ouvrir un projet…", onClick: () => openProject() },
+            ...(project
+              ? [
+                  {
+                    label: "Enregistrer la scène",
+                    shortcut: "Ctrl+S",
+                    onClick: saveScene,
+                  },
+                  {
+                    label: "Rafraîchir le projet",
+                    onClick: () => refreshFiles(project.dir),
+                  },
+                ]
+              : []),
+          ],
+        },
+        {
+          label: "Scène",
+          actions: project
+            ? [
+                {
+                  label: "Nouvelle scène…",
+                  onClick: () => setNaming({ kind: "scene" }),
+                },
+                {
+                  label: "Nouveau script…",
+                  onClick: () => setNaming({ kind: "script" }),
+                },
+                ...(project.scenes.length > 0
+                  ? [
+                      {
+                        label: "Ouvrir une scène",
+                        children: project.scenes.map((sc) => ({
+                          label: `${sc.path === project.scenes[0].path ? "▶ " : ""}${sc.name}`,
+                          onClick: () => {
+                            setPrefabReturn(null);
+                            selectScene(project, sc.path);
+                          },
+                        })),
+                      },
+                      {
+                        label: "Scène de démarrage",
+                        children: project.scenes.map((sc) => ({
+                          label: `${sc.path === project.scenes[0].path ? "▶ " : "　"}${sc.name}`,
+                          onClick: () => setStartupScene(sc.path),
+                        })),
+                      },
+                    ]
+                  : []),
+              ]
+            : [{ label: "Ouvre d'abord un projet", onClick: () => {} }],
+        },
+        {
+          label: "Aide",
+          actions: [
+            {
+              label: "Documentation (docs/)",
+              onClick: () =>
+                setNotice(
+                  "Guides : docs/GETTING-STARTED.md · langage : docs/PSX-SCRIPT.md",
+                ),
+            },
+          ],
+        },
+      ]
+    : [];
+
   return (
     <div className="app">
+      {isTauri && <MenuBar menus={menus} />}
       <header className="toolbar">
         <span className="logo">PSX STUDIO</span>
         {isTauri ? (
           <>
-            <button className="button" onClick={openProject}>
+            <button className="button" onClick={() => openProject()}>
               Ouvrir un projet…
             </button>
             {project && prefabReturn !== null ? (
@@ -2721,8 +2866,18 @@ export default function App() {
                 currentModelId={currentModelId}
                 onRename={isTauri && sceneDoc ? renameEntity : undefined}
                 onModelChange={isTauri && sceneDoc ? setEntityModel : undefined}
-                script={currentScript}
-                onScriptChange={isTauri && sceneDoc ? setEntityScript : undefined}
+                scripts={currentScripts}
+                onScriptsChange={isTauri && sceneDoc ? setEntityScripts : undefined}
+                availableScripts={availableScripts}
+                onOpenScript={
+                  isTauri && project
+                    ? (n) =>
+                        api
+                          .openExternal(project.dir, `scripts/${n}.psxs`)
+                          .then((w) => setNotice(`${n}.psxs ouvert dans ${w}`))
+                          .catch((e) => setError(String(e)))
+                    : undefined
+                }
                 subdiv={modelSubdiv}
                 onSubdivChange={
                   isTauri && sceneDoc && currentModelPmd ? applyModelSubdiv : undefined
@@ -2819,6 +2974,33 @@ export default function App() {
           </div>
         )}
       </main>
+      {naming && (
+        /* Nouvelle scène / nouveau script depuis les menus. */
+        <div className="naming-overlay" onClick={() => setNaming(null)}>
+          <div className="naming-box" onClick={(e) => e.stopPropagation()}>
+            <div className="naming-title">
+              {naming.kind === "scene" ? "Nom de la scène" : "Nom du script (PSX Script)"}
+            </div>
+            <input
+              className="name-input"
+              autoFocus
+              defaultValue={naming.kind === "scene" ? "nouvelle-scene" : "nouveau-script"}
+              spellCheck={false}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setNaming(null);
+                if (e.key !== "Enter") return;
+                const value = (e.target as HTMLInputElement).value.trim();
+                const kind = naming.kind;
+                setNaming(null);
+                if (!value) return;
+                if (kind === "scene") createSceneFromPanel(value);
+                else createScriptFromPanel(value);
+              }}
+            />
+            <div className="hint">Entrée pour valider · Échap pour annuler</div>
+          </div>
+        </div>
+      )}
       {isTauri && project && (
         <ProjectPanel
           files={projectFiles}
@@ -2829,6 +3011,10 @@ export default function App() {
             selectScene(project, path);
           }}
           onOpenPrefab={openPrefab}
+          onOpenScript={openScriptExternal}
+          onCreateScript={createScriptFromPanel}
+          onSetStartupScene={setStartupScene}
+          startupScene={project.scenes[0]?.path}
           onImport={importFromPanel}
           onCreateScene={createSceneFromPanel}
           onCreateFolder={createFolderFromPanel}

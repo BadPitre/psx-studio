@@ -398,6 +398,69 @@ pub fn write_all(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Sources du projet démo rangées comme un vrai projet : les modèles
+/// (glTF + .bin) dans `models/`, les images dans `textures/`, la police
+/// UI dans `fonts/`. (`write_all` garde le dossier plat : il sert au
+/// pipeline interne et aux tests.)
+pub fn write_all_organized(assets_dir: &Path) -> Result<(), String> {
+    let flat = assets_dir.join(".flat");
+    write_all(&flat)?;
+    let moves: [(&str, &str); 3] = [
+        ("models", "gltf,bin"),
+        ("textures", "png"),
+        ("fonts", ""),
+    ];
+    for (sub, _) in moves {
+        std::fs::create_dir_all(assets_dir.join(sub)).map_err(|e| e.to_string())?;
+    }
+    for entry in std::fs::read_dir(&flat).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let ext = std::path::Path::new(&name)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let sub = if name == "font.png" {
+            "fonts"
+        } else if ext == "png" {
+            "textures"
+        } else {
+            "models"
+        };
+        std::fs::rename(entry.path(), assets_dir.join(sub).join(&name))
+            .map_err(|e| format!("{name} : {e}"))?;
+    }
+    std::fs::remove_dir_all(&flat).ok();
+    Ok(())
+}
+
+/// `project.json` du projet démo, cohérent avec l'arborescence rangée.
+pub fn demo_project_json() -> &'static str {
+    r#"{
+  "name": "demo",
+  "exe": "../../runtime/game/build/game.exe",
+  "models": [
+    { "gltf": "assets/models/cube.gltf",   "out": "cube.pmd" },
+    { "gltf": "assets/models/ground.gltf", "out": "ground.pmd" },
+    { "gltf": "assets/models/house.gltf",  "out": "house.pmd" },
+    { "gltf": "assets/models/guy.gltf",    "out": "guy.pmd", "tex_w": 64, "tex_h": 64 }
+  ],
+  "textures": [
+    { "png": "assets/textures/checker.png", "out": "checker.tim" },
+    { "png": "assets/textures/house.png",   "out": "house.tim" },
+    { "png": "assets/textures/guy.png",     "out": "guy.tim" }
+  ],
+  "fonts": [
+    { "png": "assets/fonts/font.png", "out": "main.fnt" }
+  ],
+  "scenes": ["scenes/scene0.json", "scenes/scene1.json"],
+  "sfx": [
+    { "wav": "audio/sfx.wav", "out": "BLIP.VAG" }
+  ],
+  "music": ["audio/music.wav"]
+}
+"#
+}
+
 impl MeshData {
     /// Boîte axis-alignée : 6 quads CCW vers l'extérieur, tous mappés sur
     /// le même rectangle UV (zones de couleur d'un atlas).

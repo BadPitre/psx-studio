@@ -576,3 +576,49 @@ fn psx_script_embedded_in_psc() {
         "unexpected: {err}"
     );
 }
+
+#[test]
+fn multiple_scripts_per_entity() {
+    let dir = tempfile::tempdir().unwrap();
+    samples::build_demo_assets(dir.path()).unwrap();
+    let json = r#"{
+      "name": "multi",
+      "assets": { "textures": [], "models": [{ "id": "cube", "pmd": "cube.pmd" }] },
+      "entities": [
+        { "name": "hero", "model": "cube", "scripts": ["player", "hud", "npc"] },
+        { "name": "deco", "model": "cube", "script": "torche" }
+      ]
+    }"#;
+    let json_path = dir.path().join("s.json");
+    std::fs::write(&json_path, json).unwrap();
+    let (bytes, _) = scene::build_file(&json_path).unwrap();
+    let h = scene::parse_header(&bytes).unwrap();
+
+    // 4 scripts distincts, table de composants presente (flag bit 1).
+    assert_eq!(h.script_count, 4);
+    assert_eq!(h.flags & 2, 2);
+    let comps = scene::parse_script_comps(&bytes, &h);
+    assert_eq!(comps.len(), 4);
+    // hero (entite 0) porte 3 scripts, deco (1) en porte 1.
+    assert_eq!(comps.iter().filter(|(e, _)| *e == 0).count(), 3);
+    assert_eq!(comps.iter().filter(|(e, _)| *e == 1).count(), 1);
+    // Le champ script de l'entite garde le PREMIER (compat runtime ancien).
+    let script_ref = |i: usize| {
+        let rec = h.entities_offset as usize + i * scene::ENTITY_SIZE;
+        u16::from_le_bytes([bytes[rec + 0x1E], bytes[rec + 0x1F]])
+    };
+    assert_eq!(script_ref(0), 1); // player
+    assert_eq!(comps[0], (0, 1));
+
+    // Les tables suivantes restent lisibles (offsets de l'en-tete).
+    assert!(h.lights_offset as usize > h.scripts_offset as usize);
+    assert_eq!(h.total_size as usize, bytes.len());
+
+    // Mono-script : pas de table, layout historique.
+    let mono = json.replace(r#""scripts": ["player", "hud", "npc"]"#, r#""script": "player""#);
+    std::fs::write(&json_path, mono).unwrap();
+    let (b2, _) = scene::build_file(&json_path).unwrap();
+    let h2 = scene::parse_header(&b2).unwrap();
+    assert_eq!(h2.flags & 2, 0);
+    assert!(scene::parse_script_comps(&b2, &h2).is_empty());
+}

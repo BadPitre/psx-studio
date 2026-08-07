@@ -47,14 +47,30 @@ Croix directionnelle pour marcher, ✕ près du PNJ pour parler.
 
 ## 3. Créer ton propre projet
 
-Un projet est un dossier avec un `project.json` :
+Un projet se crée depuis l'éditeur : **Fichier ▸ Nouveau projet…**
+(dossiers + `project.json` + une première scène). Son arborescence :
+
+```
+monjeu/
+  project.json        déclaration des assets et des scènes
+  assets/models/      .gltf/.glb (+ .bin) importés
+  assets/textures/    .png
+  assets/fonts/       polices UI (grille de glyphes)
+  audio/              .wav (SFX et musique CD)
+  scenes/             .json éditables (la 1re de project.json = démarrage)
+  scripts/            .psxs (PSX Script)
+  prefabs/            .json réutilisables
+  Library/, Build/    générés (jamais versionnés)
+```
+
+Le `project.json` correspondant :
 
 ```json
 {
   "name": "monjeu",
   "exe": "../../runtime/game/build/game.exe",
-  "models":   [ { "gltf": "assets/heros.gltf", "out": "heros.pmd", "tex_w": 128, "tex_h": 128 } ],
-  "textures": [ { "png": "assets/heros.png", "out": "heros.tim" } ],
+  "models":   [ { "gltf": "assets/models/heros.gltf", "out": "heros.pmd", "tex_w": 128, "tex_h": 128 } ],
+  "textures": [ { "png": "assets/textures/heros.png", "out": "heros.tim" } ],
   "scenes":   [ "scenes/scene0.json" ],
   "sfx":      [ { "wav": "audio/blip.wav", "out": "BLIP.VAG" } ],
   "music":    [ "audio/theme.wav" ]
@@ -67,7 +83,9 @@ Un projet est un dossier avec un `project.json` :
   (16 couleurs, moitié de VRAM) si l'image y tient, **8bpp** (256
   couleurs) sinon. Force `"bpp": 4/8/16` seulement si tu veux imposer
   un mode.
-- `scenes` : la première scène listée est `SCENE0.PSC`, chargée au boot.
+- `scenes` : la première scène listée est `SCENE0.PSC`, chargée au boot
+  — clic droit sur une scène → « ▶ Définir comme scène de démarrage »
+  (ou menu **Scène ▸ Scène de démarrage**) la met en tête.
 - `sfx` : WAV → SPU-ADPCM (joués par le moteur) ; `music` : pistes CD-DA.
 - Le plus simple reste de **copier `examples/demo`** et de le modifier.
 
@@ -109,6 +127,10 @@ de triangles — surveille l'avertissement de budget.)
 
 ## 5. L'éditeur en bref
 
+- **Menus** (en haut, comme un éditeur desktop) : **Fichier** (nouveau
+  projet, ouvrir, enregistrer, rafraîchir), **Scène** (nouvelle scène,
+  nouveau script, ouvrir une scène, choisir la **scène de démarrage**),
+  **Aide**.
 - **Hiérarchie** : ＋ ajoute, clic droit = menu, Ctrl+C/V/D copie/colle/
   duplique, Suppr supprime, F2 renomme, Ctrl+Z/Ctrl+Y annule/rétablit.
 - **Viewport** : clic gauche sélectionne/orbite, clic droit tenu = caméra
@@ -125,9 +147,11 @@ de triangles — surveille l'avertissement de budget.)
   hauteur) réglables dans l'inspecteur, gelé pendant le menu pause et
   les dialogues ; exclusif avec Caméra/Lumière —, Lumière (couleur,
   intensité), Caméra (FOV, distance d'affichage), Script (nom résolu
-  par hash — voir §6 ; le sous-menu propose les scripts de la démo,
-  dont `player` le contrôleur complet avec dialogue et santé). Le
-  bouton « ＋ Ajouter un composant » liste ceux disponibles.
+  par hash — voir §6). **Les scripts sont des composants à part
+  entière** : le menu « ＋ Ajouter un composant » liste directement les
+  `.psxs` du projet (et les scripts C du runtime de démo), tu peux en
+  **empiler plusieurs sur un même objet**, chacun devient sa propre
+  carte (✕ pour retirer, ✎ Éditer pour l'ouvrir dans VS Code).
 - **VRAM** : bouton VRAM = carte des pages texture/CLUT réellement
   packées, avec % d'occupation et pages libres.
 - **Panneau Project** (bande du bas, comme Unity) : tout le contenu du
@@ -142,7 +166,10 @@ de triangles — surveille l'avertissement de budget.)
   donc fidèle à la console), et **glisser un modèle dans le viewport
   l'instancie** comme entité à l'endroit visé (dans la hiérarchie : à
   l'origine). L'onglet **Console** à côté garde le journal des imports,
-  builds et erreurs.
+  builds et erreurs. La section **Scripts** liste tes `.psxs` :
+  double-clic (ou clic droit → « Ouvrir dans l'éditeur ») les ouvre
+  dans **VS Code** (ou l'éditeur par défaut), et **Créer ▸ Script**
+  génère un squelette prêt à l'emploi.
 - **Prefabs** (comme Unity) : glisse une entité de la hiérarchie vers
   le panneau Project (ou clic droit → « Sauvegarder comme prefab ») →
   elle devient un `prefabs/<nom>.json` réutilisable. Glisse le prefab dans la hiérarchie d'une scène → une

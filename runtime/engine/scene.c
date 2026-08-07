@@ -247,6 +247,22 @@ static int Scene_Parse(Scene* scene, uint8_t* data)
 		scene->scripts[i] = ResolveScript(script_table[i]);
 	}
 
+	/* Composants script (v1.6) : la table suit celle des scripts (et
+	 * celle des offsets bytecode si presente). Absente : le champ
+	 * `script` de chaque entite fait foi, comme avant. */
+	scene->script_comps = 0;
+	scene->script_comp_count = 0;
+	if (header->flags & 2)
+	{
+		const uint8_t* base = (const uint8_t*)script_table
+			+ header->script_count * 4 * ((header->flags & 1) ? 2 : 1);
+		int count = *(const uint16_t*)base;
+		if (count > SCENE_MAX_SCRIPT_COMPS)
+			count = SCENE_MAX_SCRIPT_COMPS;
+		scene->script_comps = (const PscScriptComp*)(base + 4);
+		scene->script_comp_count = count;
+	}
+
 	/* Entites : transforms locales mutables. */
 	scene->entity_count = header->entity_count;
 	scene->entities = (Entity*)Arena_Alloc(sizeof(Entity) * header->entity_count);
@@ -554,30 +570,49 @@ void Scene_UpdateWorld(Scene* scene)
 }
 
 
-void Scene_StartScripts(Scene* scene)
+/* Parcours des scripts attaches : la table de composants (v1.6) si elle
+ * existe — une entite peut y apparaitre plusieurs fois —, sinon le champ
+ * `script` de chaque entite. */
+static void ForEachScript(Scene* scene, int start)
 {
+	if (scene->script_comp_count > 0)
+	{
+		for (int i = 0; i < scene->script_comp_count; i++)
+		{
+			const PscScriptComp* c = &scene->script_comps[i];
+			if (c->script == 0 || c->entity >= scene->entity_count)
+				continue;
+			const ScriptDef* def = scene->scripts[c->script - 1];
+			if (!def)
+				continue;
+			void (*fn)(Entity*) = start ? def->on_start : def->on_update;
+			if (fn)
+				fn(&scene->entities[c->entity]);
+		}
+		return;
+	}
 	for (int i = 0; i < scene->entity_count; i++)
 	{
 		Entity* ent = &scene->entities[i];
 		if (ent->script == 0)
 			continue;
 		const ScriptDef* def = scene->scripts[ent->script - 1];
-		if (def && def->on_start)
-			def->on_start(ent);
+		if (!def)
+			continue;
+		void (*fn)(Entity*) = start ? def->on_start : def->on_update;
+		if (fn)
+			fn(ent);
 	}
+}
+
+void Scene_StartScripts(Scene* scene)
+{
+	ForEachScript(scene, 1);
 }
 
 void Scene_UpdateScripts(Scene* scene)
 {
-	for (int i = 0; i < scene->entity_count; i++)
-	{
-		Entity* ent = &scene->entities[i];
-		if (ent->script == 0)
-			continue;
-		const ScriptDef* def = scene->scripts[ent->script - 1];
-		if (def && def->on_update)
-			def->on_update(ent);
-	}
+	ForEachScript(scene, 0);
 }
 
 /* API scripts ------------------------------------------------------------- */
