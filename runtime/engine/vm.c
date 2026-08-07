@@ -42,8 +42,26 @@ enum
 	OP_JMP, OP_JZ,
 	OP_SELF = 21, OP_GETPOS, OP_SETPOS, OP_GETROTY, OP_SETROTY,
 	OP_ADDROTY, OP_MOVE, OP_HELD, OP_PRESSED, OP_DIST, OP_FIND,
-	OP_DIALOG, OP_DLGOPEN, OP_DLGCLOSE, OP_SHOW, OP_SWITCH, OP_RAND
+	OP_DIALOG, OP_DLGOPEN, OP_DLGCLOSE, OP_SHOW, OP_SWITCH, OP_RAND,
+	/* Fonctions utilisateur (frames sur pile statique). */
+	OP_ENTER, OP_CALL, OP_RETV, OP_RET0, OP_GLOAD, OP_GSTORE
 };
+
+/* Pile d'appels des fonctions utilisateur : frames statiques (zero
+ * allocation), recursion bornee — un appel au-dela de la profondeur max
+ * renvoie 0 au lieu de deborder. Run() n'est pas reentrant (une instance
+ * a la fois), la pile peut donc etre partagee. */
+#define VM_CALL_DEPTH 8
+
+typedef struct
+{
+	uint16_t	ret_pc;
+	uint8_t		ret_slot;
+	int32_t*	regs;
+} VmCall;
+
+static int32_t	frame_pool[VM_CALL_DEPTH][VM_REGS];
+static VmCall	call_stack[VM_CALL_DEPTH];
 
 typedef struct
 {
@@ -81,6 +99,7 @@ static void Run(Scene* scene, VmInstance* in, uint16_t pc)
 	const uint32_t* code = (const uint32_t*)(blob + 16 + PSB_CONSTS(blob) * 4);
 	const char* strings = (const char*)(code + PSB_CODELEN(blob));
 	int32_t* R = in->regs;
+	int depth = 0;
 	int steps = VM_MAX_STEPS;
 
 	for (;;)
@@ -184,6 +203,42 @@ static void Run(Scene* scene, VmInstance* in, uint16_t pc)
 			rng_state = rng_state * 1103515245u + 12345u;
 			R[a] = R[b] > 0 ? (int32_t)((rng_state >> 16) % (uint32_t)R[b]) : 0;
 			break;
+		case OP_ENTER: break; /* marqueur, consomme a l'appel */
+		case OP_CALL:
+		{
+			if (depth >= VM_CALL_DEPTH)
+			{
+				/* Recursion trop profonde : l'appel renvoie 0. */
+				R[a] = 0;
+				break;
+			}
+			uint8_t nparams = (uint8_t)(code[imm] >> 16);
+			int32_t* frame = frame_pool[depth];
+			call_stack[depth].ret_pc = pc;
+			call_stack[depth].ret_slot = a;
+			call_stack[depth].regs = R;
+			depth++;
+			memset(frame, 0, sizeof(frame_pool[0]));
+			for (int k = 0; k < nparams && k < VM_REGS; k++)
+				frame[k] = R[a + k];
+			R = frame;
+			pc = imm + 1; /* saute le OP_ENTER */
+			break;
+		}
+		case OP_RETV:
+		case OP_RET0:
+		{
+			int32_t val = op == OP_RETV ? R[a] : 0;
+			if (depth == 0)
+				return; /* return au niveau d'un bloc : fin de tick */
+			depth--;
+			pc = call_stack[depth].ret_pc;
+			R = call_stack[depth].regs;
+			R[call_stack[depth].ret_slot] = val;
+			break;
+		}
+		case OP_GLOAD: R[a] = in->regs[b]; break;
+		case OP_GSTORE: in->regs[a] = R[b]; break;
 		default: return; /* opcode inconnu : on coupe, pas de plantage */
 		}
 	}

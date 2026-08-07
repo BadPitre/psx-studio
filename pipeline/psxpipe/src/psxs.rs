@@ -68,9 +68,23 @@ pub const OP_DLGCLOSE: u8 = 34;
 pub const OP_SHOW: u8 = 35; // e, s
 pub const OP_SWITCH: u8 = 36;
 pub const OP_RAND: u8 = 37; // r, s -> 0..s-1
+/* Fonctions utilisateur : appels a frames (pile statique de la VM). */
+pub const OP_ENTER: u8 = 38; // marqueur de tete de fonction, a = nb params
+pub const OP_CALL: u8 = 39; // abase, addr16 — args dans abase.., resultat dans abase
+pub const OP_RETV: u8 = 40; // r
+pub const OP_RET0: u8 = 41;
+pub const OP_GLOAD: u8 = 42; // r local <- champ global b
+pub const OP_GSTORE: u8 = 43; // champ global a <- r local b
 
 pub const REG_COUNT: usize = 16;
 const NO_PC: u16 = 0xFFFF;
+
+/// Noms réservés du moteur (une `function` ne peut pas les redéfinir).
+const BUILTINS: [&str; 20] = [
+    "pos_x", "pos_y", "pos_z", "set_x", "set_y", "set_z", "rot_y", "set_rot_y",
+    "rotate_y", "move", "held", "pressed", "distance", "find", "dialog",
+    "dialog_open", "close_dialog", "show", "switch_scene", "random",
+];
 
 /* Boutons : masques matériels PS1 (psxpad.h), stables à jamais. */
 const BUTTONS: [(&str, u16); 10] = [
@@ -233,6 +247,17 @@ enum Stmt {
     If(Expr, Vec<Stmt>, Vec<Stmt>),
     While(Expr, Vec<Stmt>),
     Call(String, Vec<Arg>, u32),
+    Return(Option<Expr>, u32),
+}
+
+/// Une `function nom(params)` : les locales (`var` en tête de corps) et
+/// les paramètres vivent dans la frame d'appel, pas dans les champs.
+struct FuncDef {
+    name: String,
+    params: Vec<String>,
+    locals: Vec<(String, Option<Expr>, u32)>,
+    body: Vec<Stmt>,
+    line: u32,
 }
 
 struct Parser {
@@ -311,6 +336,19 @@ impl Parser {
         let line = self.line();
         match self.next() {
             Some(Tok::Ident(name)) => match name.as_str() {
+                "return" => {
+                    if matches!(self.peek(), Some(Tok::NewLine) | None) {
+                        self.end_of_stmt()?;
+                        return Ok(Stmt::Return(None, line));
+                    }
+                    let e = self.parse_expr()?;
+                    self.end_of_stmt()?;
+                    Ok(Stmt::Return(Some(e), line))
+                }
+                "var" => Err(format!(
+                    "ligne {line}: « var » se déclare en tête de fichier (champs) \
+                     ou en tête de function (locales)"
+                )),
                 "if" => {
                     let cond = self.parse_expr()?;
                     self.expect_kw("then")?;
@@ -500,6 +538,13 @@ struct Gen {
     code: Vec<u32>,
     temp_base: u8,
     temp: u8,
+    /* Fonctions utilisateur : Some(map) = on compile un corps de
+     * function (params + locales -> slots de frame ; les champs `var`
+     * passent alors par GLOAD/GSTORE). */
+    locals: Option<HashMap<String, u8>>,
+    func_arity: HashMap<String, u8>,
+    func_addr: HashMap<String, u16>,
+    patches: Vec<(usize, String, u32)>,
 }
 
 fn insn(op: u8, a: u8, b: u8, c: u8) -> u32 {
@@ -576,11 +621,21 @@ impl Gen {
                 )
             }
             Expr::Var(name, line) => {
-                let r = *self.vars.get(name).ok_or(format!(
-                    "ligne {line}: variable inconnue '{name}' (déclare-la avec « var »)"
-                ))?;
-                if r != dst {
-                    self.code.push(insn(OP_MOV, dst, r, 0));
+                if let Some(&r) = self.locals.as_ref().and_then(|l| l.get(name)) {
+                    if r != dst {
+                        self.code.push(insn(OP_MOV, dst, r, 0));
+                    }
+                } else if let Some(&g) = self.vars.get(name) {
+                    if self.locals.is_some() {
+                        // Champ lu depuis une function : registre global.
+                        self.code.push(insn(OP_GLOAD, dst, g, 0));
+                    } else if g != dst {
+                        self.code.push(insn(OP_MOV, dst, g, 0));
+                    }
+                } else {
+                    return Err(format!(
+                        "ligne {line}: variable inconnue '{name}' (déclare-la avec « var »)"
+                    ));
                 }
             }
             Expr::Neg(inner) => {
@@ -777,9 +832,48 @@ impl Gen {
                 self.code.push(insn(OP_RAND, d, n, 0));
             }
             other => {
-                return Err(format!(
-                    "ligne {line}: fonction inconnue '{other}' (voir docs/PSX-SCRIPT.md)"
-                ))
+                let Some(&np) = self.func_arity.get(other) else {
+                    return Err(format!(
+                        "ligne {line}: fonction inconnue '{other}' (ni du moteur, \
+                         ni définie par « function » — voir docs/PSX-SCRIPT.md)"
+                    ));
+                };
+                if args.len() != np as usize {
+                    return Err(format!(
+                        "ligne {line}: {other}() attend {np} argument{} ({} donné{})",
+                        if np > 1 { "s" } else { "" },
+                        args.len(),
+                        if args.len() > 1 { "s" } else { "" },
+                    ));
+                }
+                /* Convention d'appel : arguments évalués dans des
+                 * temporaires CONSECUTIFS (abase..), le résultat revient
+                 * dans abase. L'adresse est patchée après l'émission des
+                 * fonctions (références avant définition permises). */
+                let abase = self.temp_base + self.temp;
+                for (k, a) in args.iter().enumerate() {
+                    let r = self.alloc_temp(line)?;
+                    debug_assert_eq!(r, abase + k as u8);
+                    match a {
+                        Arg::Expr(e) => self.emit_expr(e, r)?,
+                        Arg::Str(_) => {
+                            return Err(format!(
+                                "ligne {line}: {other}() attend des nombres/entités, \
+                                 pas une chaîne"
+                            ))
+                        }
+                    }
+                }
+                if args.is_empty() {
+                    self.alloc_temp(line)?; // slot du résultat
+                }
+                self.patches.push((self.code.len(), other.to_string(), line));
+                self.code.push(insn16(OP_CALL, abase, 0));
+                if let Some(d) = dst {
+                    if d != abase {
+                        self.code.push(insn(OP_MOV, d, abase, 0));
+                    }
+                }
             }
         }
         self.temp = saved;
@@ -790,11 +884,42 @@ impl Gen {
         for s in stmts {
             match s {
                 Stmt::Assign(name, e, line) => {
-                    let r = *self.vars.get(name).ok_or(format!(
-                        "ligne {line}: variable inconnue '{name}' (déclare-la avec « var » \
-                         en tête de fichier)"
-                    ))?;
-                    self.emit_expr(e, r)?;
+                    if let Some(&r) = self.locals.as_ref().and_then(|l| l.get(name)) {
+                        self.emit_expr(e, r)?;
+                    } else if let Some(&g) = self.vars.get(name) {
+                        if self.locals.is_some() {
+                            // Champ écrit depuis une function.
+                            let saved = self.temp;
+                            let t = self.alloc_temp(*line)?;
+                            self.emit_expr(e, t)?;
+                            self.code.push(insn(OP_GSTORE, g, t, 0));
+                            self.temp = saved;
+                        } else {
+                            self.emit_expr(e, g)?;
+                        }
+                    } else {
+                        return Err(format!(
+                            "ligne {line}: variable inconnue '{name}' (déclare-la avec \
+                             « var »)"
+                        ));
+                    }
+                }
+                Stmt::Return(value, line) => {
+                    if self.locals.is_none() {
+                        return Err(format!(
+                            "ligne {line}: « return » ne s'utilise que dans une function"
+                        ));
+                    }
+                    match value {
+                        Some(e) => {
+                            let saved = self.temp;
+                            let t = self.alloc_temp(*line)?;
+                            self.emit_expr(e, t)?;
+                            self.code.push(insn(OP_RETV, t, 0, 0));
+                            self.temp = saved;
+                        }
+                        None => self.code.push(insn(OP_RET0, 0, 0, 0)),
+                    }
                 }
                 Stmt::Call(name, args, line) => self.emit_call(name, args, None, *line)?,
                 Stmt::If(cond, then, els) => {
@@ -845,31 +970,113 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
         pos: 0,
     };
 
-    // Déclarations `var` + blocs.
+    // Déclarations `var` + blocs + fonctions.
     let mut vars: Vec<(String, Option<Expr>, u32)> = Vec::new();
     let mut start_block: Option<Vec<Stmt>> = None;
     let mut update_block: Option<Vec<Stmt>> = None;
+    let mut funcs: Vec<FuncDef> = Vec::new();
+
+    fn parse_var_decl(p: &mut Parser, line: u32) -> Result<(String, Option<Expr>, u32), String> {
+        let name = match p.next() {
+            Some(Tok::Ident(n)) => n,
+            _ => return Err(format!("ligne {line}: nom de variable attendu")),
+        };
+        let init = if matches!(p.peek(), Some(Tok::Sym("="))) {
+            p.pos += 1;
+            Some(p.parse_expr()?)
+        } else {
+            None
+        };
+        p.end_of_stmt()?;
+        Ok((name, init, line))
+    }
+
     loop {
         p.eat_newlines();
         let line = p.line();
         match p.next() {
             None => break,
             Some(Tok::Ident(k)) if k == "var" => {
+                let decl = parse_var_decl(&mut p, line)?;
+                if vars.iter().any(|(n, _, _)| *n == decl.0) {
+                    return Err(format!("ligne {line}: variable '{}' déjà déclarée", decl.0));
+                }
+                vars.push(decl);
+            }
+            Some(Tok::Ident(k)) if k == "function" => {
                 let name = match p.next() {
                     Some(Tok::Ident(n)) => n,
-                    _ => return Err(format!("ligne {line}: nom de variable attendu")),
+                    _ => return Err(format!("ligne {line}: nom de function attendu")),
                 };
-                let init = if matches!(p.peek(), Some(Tok::Sym("="))) {
-                    p.pos += 1;
-                    Some(p.parse_expr()?)
-                } else {
-                    None
-                };
-                p.end_of_stmt()?;
-                if vars.iter().any(|(n, _, _)| *n == name) {
-                    return Err(format!("ligne {line}: variable '{name}' déjà déclarée"));
+                if BUILTINS.contains(&name.as_str()) {
+                    return Err(format!(
+                        "ligne {line}: '{name}' est une fonction du moteur (choisis un autre nom)"
+                    ));
                 }
-                vars.push((name, init, line));
+                if funcs.iter().any(|f| f.name == name) {
+                    return Err(format!("ligne {line}: function '{name}' déjà définie"));
+                }
+                p.expect_sym("(")?;
+                let mut params = Vec::new();
+                if matches!(p.peek(), Some(Tok::Sym(")"))) {
+                    p.pos += 1;
+                } else {
+                    loop {
+                        match p.next() {
+                            Some(Tok::Ident(n)) => {
+                                if params.contains(&n) {
+                                    return Err(format!(
+                                        "ligne {line}: paramètre '{n}' en double"
+                                    ));
+                                }
+                                params.push(n);
+                            }
+                            _ => {
+                                return Err(format!("ligne {line}: nom de paramètre attendu"))
+                            }
+                        }
+                        match p.next() {
+                            Some(Tok::Sym(",")) => {}
+                            Some(Tok::Sym(")")) => break,
+                            _ => {
+                                return Err(format!(
+                                    "ligne {}: « , » ou « ) » attendu",
+                                    p.line()
+                                ))
+                            }
+                        }
+                    }
+                }
+                p.end_of_stmt()?;
+                // Locales : les `var` en tête de corps, avant les instructions.
+                let mut locals = Vec::new();
+                loop {
+                    p.eat_newlines();
+                    let lline = p.line();
+                    if matches!(p.peek(), Some(Tok::Ident(k)) if k == "var") {
+                        p.pos += 1;
+                        let decl = parse_var_decl(&mut p, lline)?;
+                        if params.contains(&decl.0)
+                            || locals.iter().any(|(n, _, _): &(String, _, _)| *n == decl.0)
+                        {
+                            return Err(format!(
+                                "ligne {lline}: '{}' déjà déclarée dans cette function",
+                                decl.0
+                            ));
+                        }
+                        locals.push(decl);
+                    } else {
+                        break;
+                    }
+                }
+                let body = p.parse_block(false)?.0;
+                funcs.push(FuncDef {
+                    name,
+                    params,
+                    locals,
+                    body,
+                    line,
+                });
             }
             Some(Tok::Ident(k)) if k == "on" => {
                 p.expect_kw("start")?;
@@ -889,7 +1096,8 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
             }
             Some(_) => {
                 return Err(format!(
-                    "ligne {line}: attendu « var », « on start » ou « every frame »"
+                    "ligne {line}: attendu « var », « function », « on start » \
+                     ou « every frame »"
                 ))
             }
         }
@@ -915,6 +1123,13 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
         code: Vec::new(),
         temp_base: vars.len() as u8,
         temp: 0,
+        locals: None,
+        func_arity: funcs
+            .iter()
+            .map(|f| (f.name.clone(), f.params.len() as u8))
+            .collect(),
+        func_addr: HashMap::new(),
+        patches: Vec::new(),
     };
 
     // Bloc demarre : initialisations `var x = ...` puis le bloc utilisateur.
@@ -942,6 +1157,54 @@ pub fn compile(src: &str) -> Result<Compiled, String> {
         }
         None => NO_PC,
     };
+
+    /* Corps des fonctions, après les blocs : chaque function démarre
+     * par OP_ENTER (nb de params, lu par la VM à l'appel), ses params +
+     * locales occupent les premiers slots de la frame, les temporaires
+     * suivent. Fin de corps sans return -> renvoie 0. */
+    for f in &funcs {
+        let nslots = f.params.len() + f.locals.len();
+        if nslots > 12 {
+            return Err(format!(
+                "ligne {}: function '{}' : trop de paramètres + locales ({nslots}, \
+                 max 12 — 4 registres restent pour les calculs)",
+                f.line, f.name
+            ));
+        }
+        g.func_addr.insert(f.name.clone(), g.code.len() as u16);
+        g.code.push(insn(OP_ENTER, f.params.len() as u8, 0, 0));
+        let mut locals: HashMap<String, u8> = HashMap::new();
+        for (i, pname) in f.params.iter().enumerate() {
+            locals.insert(pname.clone(), i as u8);
+        }
+        for (i, (n, _, _)) in f.locals.iter().enumerate() {
+            locals.insert(n.clone(), (f.params.len() + i) as u8);
+        }
+        g.locals = Some(locals);
+        let (saved_tb, saved_t) = (g.temp_base, g.temp);
+        g.temp_base = nslots as u8;
+        g.temp = 0;
+        // La frame arrive zéroée de la VM : n'émettre que les inits.
+        for (i, (_, init, _)) in f.locals.iter().enumerate() {
+            if let Some(e) = init {
+                g.emit_expr(e, (f.params.len() + i) as u8)?;
+            }
+        }
+        g.emit_stmts(&f.body)?;
+        g.code.push(insn(OP_RET0, 0, 0, 0));
+        g.locals = None;
+        g.temp_base = saved_tb;
+        g.temp = saved_t;
+    }
+
+    /* Patch des appels (les références avant définition sont permises). */
+    for (idx, name, line) in &g.patches {
+        let addr = *g.func_addr.get(name).ok_or(format!(
+            "ligne {line}: function '{name}' appelée mais jamais définie"
+        ))?;
+        let abase = (g.code[*idx] >> 16) as u8;
+        g.code[*idx] = insn16(OP_CALL, abase, addr);
+    }
 
     if g.code.len() > u16::MAX as usize {
         return Err("script trop long (65535 instructions max)".into());
@@ -1012,6 +1275,36 @@ mod tests {
         assert!(e.contains("end"), "{e}");
         let e = compile("every frame\n    held(1)\nend\n").unwrap_err();
         assert!(e.contains("bouton") || e.contains("renvoie"), "{e}");
+    }
+
+    #[test]
+    fn fonctions_utilisateur() {
+        let src = "var total = 0\n\nfunction add(a, b)\n    return a + b\nend\n\nfunction fact(n)\n    if n <= 1 then\n        return 1\n    end\n    return n * fact(n - 1)\nend\n\nfunction bump()\n    total = total + 1\nend\n\non start\n    total = add(2, 3)\nend\n\nevery frame\n    bump()\nend\n";
+        let c = compile(src).unwrap();
+        let o = ops(&c.bytecode);
+        assert!(o.contains(&OP_CALL) && o.contains(&OP_ENTER) && o.contains(&OP_RETV));
+        assert!(o.contains(&OP_GLOAD) && o.contains(&OP_GSTORE)); // total depuis bump()
+    }
+
+    #[test]
+    fn fonctions_locales_et_erreurs() {
+        // Locale avec init, parametre utilise.
+        compile("function twice(x)\n    var y = x * 2\n    return y\nend\nevery frame\n    show(self, twice(1))\nend\n").unwrap();
+        // Arite fausse.
+        let e = compile("function f(a)\n    return a\nend\nevery frame\n    show(self, f(1, 2))\nend\n").unwrap_err();
+        assert!(e.contains("attend 1 argument"), "{e}");
+        // Nom du moteur interdit.
+        let e = compile("function move(a)\n    return a\nend\nevery frame\nend\n").unwrap_err();
+        assert!(e.contains("moteur"), "{e}");
+        // return hors function.
+        let e = compile("every frame\n    return 1\nend\n").unwrap_err();
+        assert!(e.contains("function"), "{e}");
+        // var au milieu d'un bloc.
+        let e = compile("every frame\n    var x = 1\nend\n").unwrap_err();
+        assert!(e.contains("tête"), "{e}");
+        // Fonction inconnue reste une erreur claire.
+        let e = compile("every frame\n    show(self, mystere())\nend\n").unwrap_err();
+        assert!(e.contains("mystere"), "{e}");
     }
 
     #[test]

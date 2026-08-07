@@ -73,7 +73,55 @@ end
 Opérateurs : `+ - * / %`, comparaisons `< <= > >= == !=`, logique
 `and or not`, parenthèses. Vrai = tout sauf 0.
 
-## 3. Fonctions du moteur
+## 3. Fonctions et « classes »
+
+**Un fichier `.psxs` est une classe** au sens Unity : ses `var` de tête
+de fichier sont les **champs** (une copie par entité qui porte le
+script), `on start`/`every frame` le cycle de vie, et tu définis tes
+**méthodes** avec `function` :
+
+```
+# chest.psxs — un coffre ouvrable (une instance par entité).
+var opened = 0
+var player
+
+function dist_to_player()
+    return distance(self, player)
+end
+
+function open_chest()
+    if opened == 0 then
+        opened = 1
+        dialog("UN TRESOR !")
+    end
+end
+
+on start
+    player = find("player")
+end
+
+every frame
+    if opened == 0 and dist_to_player() < 100 and pressed(CROSS) then
+        open_chest()
+    end
+end
+```
+
+- `function nom(p1, p2) ... end` — au niveau du fichier, dans
+  n'importe quel ordre (les appels avant définition sont permis).
+- `return expression` renvoie une valeur, `return` seul (ou la fin du
+  corps) renvoie 0. `return` ne s'utilise que dans une function.
+- **Locales** : `var x [= expr]` en **tête de corps** de function —
+  paramètres + locales vivent dans la frame d'appel (12 max), les
+  champs du fichier restent accessibles en lecture/écriture.
+- La **récursion** marche (profondeur 8 max — au-delà, l'appel renvoie
+  0 au lieu de faire déborder la console). L'arité est vérifiée à la
+  compilation, un nom du moteur ne peut pas être redéfini.
+- Sous le capot : pile de frames **statique** dans la VM (zéro
+  allocation) — un appel coûte quelques instructions, la récursion de
+  `fact(5)` à chaque frame ne se voit pas au chronomètre.
+
+## 4. Fonctions du moteur
 
 | Fonction | Effet |
 |---|---|
@@ -95,7 +143,7 @@ Opérateurs : `+ - * / %`, comparaisons `< <= > >= == !=`, logique
 Les textes sont translittérés vers le charset des polices `.fnt`
 (majuscules, accents aplatis).
 
-## 4. Sous le capot (format)
+## 5. Sous le capot (format)
 
 - psxpipe compile chaque `scripts/<nom>.psxs` référencé par la scène en
   blob **PSB1** : en-tête 16 octets (magic, nb constantes, taille code,
@@ -110,9 +158,10 @@ Les textes sont translittérés vers le charset des polices `.fnt`
   jeu de registres par entité scriptée (24 instances max) et exécute
   `on start` puis `every frame`.
 
-## 5. Limites v1 (assumées)
+## 6. Limites v1 (assumées)
 
-- Pas de fonctions utilisateur ni de tableaux ; 12 variables/script.
+- Pas de tableaux ni de chaînes manipulables ; 12 champs/script,
+  12 paramètres + locales par function.
 - Pas encore d'API UI (`gauge`, `text`) ni audio — prochain jalon,
   avec le rechargement à chaud pendant que l'émulateur tourne.
 - `distance` est approchée ; les angles sont des entiers 4.12.
